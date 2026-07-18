@@ -63,6 +63,7 @@ def heartbeat(obs_file: Path, state: dict, heuristics_path: Path,
     heuristics = ensure_heuristics(heuristics_path)
     text = prompt.build_prompt(events, state.get("latest_diff"), heuristics)
     record = {
+        "id": uuid.uuid4().hex[:12],
         "ts": ts,
         "beat": beat,
         "heuristics_version": prompt.heuristics_version(heuristics),

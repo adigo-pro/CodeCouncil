@@ -1,0 +1,168 @@
+"""Hook tests: fail-open wrapper behavior, pure decision logic, install merge."""
+
+import json
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from hooks import ledger as ledger_mod
+from hooks.install import install
+from hooks.logic import TTL_SECONDS, decide
+
+PEER_HOOK = Path(__file__).resolve().parents[1] / "hooks" / "peer_hook.py"
+
+NOW = time.time()
+
+
+def _iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def suggestion(sid="s1", severity="high", ts=None, file="a.py", line=3):
+    return {
+        "id": sid,
+        "ts": _iso(NOW if ts is None else ts),
+        "beat": 1,
+        "verdict": "SUGGESTION",
+        "suggestion": {"file": file, "line": line, "severity": severity,
+                       "issue": "bug here", "rationale": "because"},
+    }
+
+
+def post_tool_use(cwd="/tmp"):
+    return {"hook_event_name": "PostToolUse", "cwd": cwd, "tool_name": "Edit"}
+
+
+def stop_event(cwd="/tmp", active=False):
+    return {"hook_event_name": "Stop", "cwd": cwd, "stop_hook_active": active}
+
+
+class TestFailOpen(unittest.TestCase):
+    """The hook must exit 0 with no output no matter what it is fed."""
+
+    def _run(self, stdin: str):
+        return subprocess.run([sys.executable, str(PEER_HOOK)], input=stdin,
+                              capture_output=True, text=True, timeout=30)
+
+    def test_garbage_stdin(self):
+        for bad in ("", "not json", "[]", '{"no": "cwd"}'):
+            res = self._run(bad)
+            self.assertEqual(res.returncode, 0, bad)
+            self.assertEqual(res.stdout, "", bad)
+
+    def test_missing_codecouncil_dir_is_silent(self):
+        with tempfile.TemporaryDirectory() as td:
+            res = self._run(json.dumps(post_tool_use(cwd=td)))
+            self.assertEqual((res.returncode, res.stdout), (0, ""))
+
+    def test_end_to_end_injection_via_subprocess(self):
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text(json.dumps(suggestion()) + "\n")
+            res = self._run(json.dumps(post_tool_use(cwd=td)))
+            self.assertEqual(res.returncode, 0)
+            out = json.loads(res.stdout)
+            self.assertIn("bug here", out["hookSpecificOutput"]["additionalContext"])
+            # second run: ledger persisted, nothing delivered again
+            res2 = self._run(json.dumps(post_tool_use(cwd=td)))
+            self.assertEqual(res2.stdout, "")
+
+
+class TestDecideContext(unittest.TestCase):
+    def test_medium_and_high_injected_low_ignored(self):
+        rows = [suggestion("a", "low"), suggestion("b", "medium"), suggestion("c", "high")]
+        ledger = {}
+        out = decide(post_tool_use(), rows, ledger, NOW)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("[MEDIUM]", ctx)
+        self.assertIn("[HIGH]", ctx)
+        self.assertNotIn("[LOW]", ctx)
+        self.assertTrue(ledger_mod.delivered(ledger, "b", "context"))
+
+    def test_delivered_once(self):
+        rows = [suggestion()]
+        ledger = {}
+        self.assertIsNotNone(decide(post_tool_use(), rows, ledger, NOW))
+        self.assertIsNone(decide(post_tool_use(), rows, ledger, NOW))
+
+    def test_ttl_expired_never_delivered(self):
+        rows = [suggestion(ts=NOW - TTL_SECONDS - 5)]
+        self.assertIsNone(decide(post_tool_use(), rows, {}, NOW))
+
+    def test_pass_and_idless_rows_ignored(self):
+        rows = [{"verdict": "PASS", "ts": _iso(NOW)},
+                {**suggestion(), "id": None}]
+        self.assertIsNone(decide(post_tool_use(), rows, {}, NOW))
+
+    def test_context_capped_at_three(self):
+        rows = [suggestion(sid=f"s{i}") for i in range(5)]
+        ledger = {}
+        out = decide(post_tool_use(), rows, ledger, NOW)
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"].count("[HIGH]"), 3)
+        self.assertEqual(sum(1 for i in range(5) if ledger_mod.delivered(ledger, f"s{i}", "context")), 3)
+
+
+class TestDecideStop(unittest.TestCase):
+    def test_high_blocks_once(self):
+        rows = [suggestion()]
+        ledger = {}
+        out = decide(stop_event(), rows, ledger, NOW)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("a.py:3", out["reason"])
+        self.assertIsNone(decide(stop_event(), rows, ledger, NOW))
+
+    def test_medium_never_blocks(self):
+        self.assertIsNone(decide(stop_event(), [suggestion(severity="medium")], {}, NOW))
+
+    def test_stop_hook_active_always_allows(self):
+        self.assertIsNone(decide(stop_event(active=True), [suggestion()], {}, NOW))
+
+    def test_one_block_per_stop(self):
+        rows = [suggestion("x"), suggestion("y")]
+        ledger = {}
+        decide(stop_event(), rows, ledger, NOW)
+        blocked = [s for s in ("x", "y") if ledger_mod.delivered(ledger, s, "block")]
+        self.assertEqual(len(blocked), 1)
+
+    def test_context_delivery_does_not_prevent_block(self):
+        rows = [suggestion()]
+        ledger = {}
+        decide(post_tool_use(), rows, ledger, NOW)
+        self.assertIsNotNone(decide(stop_event(), rows, ledger, NOW))
+
+
+class TestInstall(unittest.TestCase):
+    def test_fresh_install_then_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            self.assertEqual(install(repo), ["PostToolUse", "Stop"])
+            settings = json.loads((repo / ".claude" / "settings.json").read_text())
+            self.assertEqual(settings["hooks"]["PostToolUse"][0]["matcher"],
+                             "Edit|Write|MultiEdit|NotebookEdit")
+            self.assertEqual(install(repo), [])  # second run: no-op
+
+    def test_preserves_existing_settings(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".claude").mkdir()
+            (repo / ".claude" / "settings.json").write_text(json.dumps({
+                "permissions": {"allow": ["Bash(ls:*)"]},
+                "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "other.sh"}]}]},
+            }))
+            install(repo)
+            settings = json.loads((repo / ".claude" / "settings.json").read_text())
+            self.assertEqual(settings["permissions"]["allow"], ["Bash(ls:*)"])
+            cmds = [h["command"] for e in settings["hooks"]["Stop"] for h in e["hooks"]]
+            self.assertEqual(len(cmds), 2)
+            self.assertIn("other.sh", cmds)
+
+
+if __name__ == "__main__":
+    unittest.main()

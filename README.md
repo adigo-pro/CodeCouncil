@@ -9,7 +9,10 @@ measurably better at critiquing your work. Three loops:
    flags one high-value issue. Judgment runs as an OpenClaw agent in a NemoClaw
    sandbox (`nemoclaw codecouncil agent --agent critic`, Nemotron via routed
    inference — the Critic holds no API key).
-3. **Reflector** — rewrites the Critic's own heuristics based on which suggestions
+3. **Hook injection** (done) — Claude Code hooks that deliver Critic suggestions
+   into the coding agent's own context: medium/high injected after edits
+   (PostToolUse), high blocks completion once (Stop) until fixed or rebutted.
+4. **Reflector** — rewrites the Critic's own heuristics based on which suggestions
    landed. The recursive self-improvement loop.
 
 ## Run the Observer
@@ -38,6 +41,16 @@ Output: every verdict (PASS and suggestions) appends to
 the metrics substrate for the Reflector. Heuristics seed:
 `critic/heuristics.seed.md`, copied to `.codecouncil/heuristics.md` on first run.
 Set `CRITIC_CMD=<script>` to stub the sandbox in tests.
+
+## Install the hook (per watched repo)
+
+```sh
+python3 -m hooks.install /path/to/repo-being-coded-in   # idempotent settings.json merge
+```
+
+The hook is fail-open (any error → silent exit 0), delivers each suggestion at
+most once per channel (`.codecouncil/delivered.json`), never blocks twice, and
+ignores suggestions older than 10 minutes.
 
 ## Tests
 

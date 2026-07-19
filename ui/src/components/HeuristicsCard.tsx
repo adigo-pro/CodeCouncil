@@ -1,4 +1,5 @@
 import type { Council } from "../types";
+import { ago } from "../useCouncil";
 
 export function HeuristicsCard({ data }: { data: Council | null }) {
   const h = data?.heuristics;
@@ -52,8 +53,30 @@ export function HeuristicsCard({ data }: { data: Council | null }) {
         </div>
       )}
 
+      {h && h.rewrites.length > 0 && (
+        <div className="mt-4 border-t border-border pt-4">
+          <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+            Rewrite history
+          </p>
+          <ul className="mt-3 space-y-2.5">
+            {h.rewrites.slice(0, 4).map((r) => (
+              <li key={`${r.from}-${r.to}`} className="text-[13px] leading-snug">
+                <span className="font-mono text-xs text-muted-foreground">
+                  v{r.from}→v{r.to} · {ago(r.ts, data?.now)} ago ·{" "}
+                  {["accepted", "rebutted", "ignored"]
+                    .filter((g) => r.stats[g])
+                    .map((g) => `${r.stats[g]} ${g}`)
+                    .join(", ") || "no grades"}
+                </span>
+                <p className="mt-0.5 text-muted-foreground">{r.headline}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {h && (
-        <div className={`${h.evolution.length ? "mt-4" : "mt-6 border-t border-border"} pt-4 text-xs text-muted-foreground`}>
+        <div className={`${h.evolution.length || h.rewrites.length ? "mt-4" : "mt-6 border-t border-border"} pt-4 text-xs text-muted-foreground`}>
           <span className="font-mono">
             {h.historyCount
               ? `${h.historyCount} prior version${h.historyCount === 1 ? "" : "s"} archived`

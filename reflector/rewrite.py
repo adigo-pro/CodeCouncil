@@ -13,6 +13,32 @@ MAX_LINES = 40
 GRADED = {"accepted", "rebutted", "ignored"}
 
 
+def rules(text: str) -> list[str]:
+    """Top-level `- ` bullets with continuation lines joined."""
+    out: list[str] = []
+    for line in text.split("\n"):
+        if line.startswith("- "):
+            out.append(line[2:].strip())
+        elif line.startswith("  ") and line.strip() and out:
+            out[-1] += " " + line.strip()
+    return out
+
+
+def rewrite_record(old_text: str, new_text: str, version: int, outcomes: list[dict]) -> dict:
+    """Ledger entry describing what a rewrite changed and what data drove it."""
+    old_rules, new_rules = set(rules(old_text)), rules(new_text)
+    added = [r for r in new_rules if r not in old_rules]
+    removed = [r for r in rules(old_text) if r not in set(new_rules)]
+    return {
+        "from_version": version,
+        "to_version": version + 1,
+        "stats": {g: sum(1 for o in outcomes if o.get("outcome") == g) for g in GRADED},
+        "added": added,
+        "removed": removed,
+        "headline": added[0] if added else (f"dropped: {removed[0]}" if removed else "reworded"),
+    }
+
+
 def should_rewrite(outcomes: list[dict], n_graded_at_last_rewrite: int, force: bool) -> bool:
     graded = sum(1 for o in outcomes if o.get("outcome") in GRADED)
     return force or graded - n_graded_at_last_rewrite >= MIN_NEW_OUTCOMES

@@ -107,6 +107,8 @@ def maybe_rewrite(cc: Path, sandbox: str, state: dict, force: bool) -> None:
     state["n_graded_at_last_rewrite"] = sum(
         1 for o in outcomes if o.get("outcome") in rewrite.GRADED
     )
+    append_ndjson(cc / "reflections.ndjsonl",
+                  {"ts": now_iso(), **rewrite.rewrite_record(current, new_text, version, outcomes)})
     print(f"reflector: heuristics v{version} → v{version + 1} (archived {archive.name})")
 
 

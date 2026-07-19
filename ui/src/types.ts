@@ -81,5 +81,12 @@ export interface Council {
     rules: string[];
     historyCount: number;
     evolution: { version: number; added: string[]; removed: string[] }[];
+    rewrites: {
+      ts: string;
+      from: number;
+      to: number;
+      headline: string;
+      stats: Record<string, number>;
+    }[];
   };
 }

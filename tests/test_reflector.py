@@ -110,6 +110,20 @@ class TestRewriteGuardrails(unittest.TestCase):
         self.assertIsNotNone(rewrite.validate("version: 2\n" + "- r\n" * 50, 2))
         self.assertIsNone(rewrite.validate("version: 2\n- keep flagging intent mismatches", 2))
 
+    def test_rewrite_record_diffs_and_headline(self):
+        old = "version: 1\n- keep this rule\n- drop this rule\n"
+        new = "version: 2\n- keep this rule\n- brand new rule\n  with continuation\n"
+        rec = rewrite.rewrite_record(old, new, 1, [{"outcome": "accepted"}, {"outcome": "ignored"}])
+        self.assertEqual((rec["from_version"], rec["to_version"]), (1, 2))
+        self.assertEqual(rec["added"], ["brand new rule with continuation"])
+        self.assertEqual(rec["removed"], ["drop this rule"])
+        self.assertEqual(rec["headline"], "brand new rule with continuation")
+        self.assertEqual(rec["stats"]["accepted"], 1)
+
+    def test_rewrite_record_reword_only(self):
+        rec = rewrite.rewrite_record("version: 1\n- a\n", "version: 2\n- a\n", 1, [])
+        self.assertEqual(rec["headline"], "reworded")
+
     def test_apply_archives_and_swaps(self):
         with tempfile.TemporaryDirectory() as td:
             h = Path(td) / "heuristics.md"

@@ -185,6 +185,7 @@ export function aggregate(repo: string) {
   const cc = path.join(repo, ".codecouncil");
   const suggestions = readNdjson(path.join(cc, "suggestions.ndjsonl"));
   const outcomes = readNdjson(path.join(cc, "outcomes.ndjsonl"));
+  const reflections = readNdjson(path.join(cc, "reflections.ndjsonl"));
   const observations = readNdjson(path.join(cc, "observations.ndjsonl"));
   const delivered = readJson(path.join(cc, "delivered.json"));
   const heuristicsText = readText(path.join(cc, "heuristics.md"));
@@ -290,6 +291,15 @@ export function aggregate(repo: string) {
       rules: heuristicsRules(heuristicsText),
       historyCount,
       evolution: heuristicsEvolution(path.join(cc, "heuristics-history"), heuristicsText),
+      rewrites: reflections
+        .map((r) => ({
+          ts: r.ts ?? "",
+          from: r.from_version ?? 0,
+          to: r.to_version ?? 0,
+          headline: truncate(String(r.headline ?? ""), 140),
+          stats: r.stats ?? {},
+        }))
+        .reverse(),
     },
   };
 }

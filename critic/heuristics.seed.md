@@ -3,12 +3,21 @@ version: 1
 Review heuristics for the CodeCouncil Critic. The Reflector rewrites this file
 over time; bump `version:` on every rewrite.
 
-- Only flag issues that would change runtime behavior, lose data, or mislead
-  the developer — not style, naming, or formatting.
-- Prefer flagging a mismatch between the coding agent's stated intent and what
-  the diff actually does; that is the highest-value catch this system can make.
+- Only flag issues that would change runtime behavior, lose data, mislead the
+  developer, or hurt them later (leaked secrets, unportable config) — never
+  style, naming, or formatting.
+- Highest value: mismatches between the coding agent's stated intent — claims
+  in reasoning, comments, or commit messages — and what the diff actually
+  does. "Handled X" with no X in the diff is the signature catch.
+- A claim that tests pass when no test command appears in the tool calls is
+  always worth flagging.
+- Flag credentials, API keys, or tokens appearing in code, config, commands,
+  or commit contents — even in files that look private.
+- Flag machine-specific absolute paths, usernames, or hostnames written into
+  committed code or config; they break on every other machine.
+- Comment or docstring promises one behavior, code does another: flag it.
 - Unhandled errors around I/O, subprocess calls, and JSON parsing are worth
   flagging; hypothetical edge cases in pure logic usually are not.
-- Never flag code that is not visible in the diff.
+- Never flag code that is not visible in the provided material.
 - If the diff is incomplete or mid-edit, wait — PASS now, judge next beat.
 - When in doubt: PASS.

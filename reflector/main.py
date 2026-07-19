@@ -1,0 +1,152 @@
+"""CodeCouncil Reflector: slow heartbeat that grades past suggestions against
+what actually happened, then rewrites the Critic's heuristics from the grades.
+
+    python3 -m reflector /path/to/watched/repo [--interval 300] [--once] [--force-rewrite]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+import uuid
+from pathlib import Path
+
+from critic import openclaw
+from critic.main import ensure_heuristics
+from critic.prompt import heuristics_version
+from hooks import ledger as ledger_mod
+from observer.events import now_iso
+
+from . import judge, rewrite
+
+INBOX = "/sandbox/workspaces/reflector/inbox.txt"
+
+
+def read_ndjson(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def append_ndjson(path: Path, row: dict) -> None:
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _ask(prompt: str, sandbox: str) -> str:
+    return openclaw.ask(prompt, sandbox=sandbox, agent="reflector",
+                        session=f"reflector-{uuid.uuid4().hex[:12]}", inbox=INBOX)
+
+
+def grade_pending(cc: Path, sandbox: str) -> int:
+    suggestions = read_ndjson(cc / "suggestions.ndjsonl")
+    delivered = ledger_mod.load(cc / "delivered.json")
+    outcomes_path = cc / "outcomes.ndjsonl"
+    graded_ids = {o["suggestion_id"] for o in read_ndjson(outcomes_path)}
+    observations = read_ndjson(cc / "observations.ndjsonl")
+    now = time.time()
+
+    to_judge, undelivered = judge.pending(suggestions, delivered, graded_ids, now)
+
+    for row in undelivered:
+        append_ndjson(outcomes_path, {
+            "id": uuid.uuid4().hex[:12], "suggestion_id": row["id"], "ts": now_iso(),
+            "outcome": "undelivered", "issue": row["suggestion"]["issue"],
+            "heuristics_version": row.get("heuristics_version", 0),
+        })
+        print(f"reflector: {row['id']} → undelivered (no model call)")
+
+    for row in to_judge:
+        d = judge.first_delivery(delivered, row["id"])
+        prompt = judge.build_prompt(row, judge.evidence(row, d, observations))
+        try:
+            grade = judge.parse_grade(_ask(prompt, sandbox))
+        except openclaw.AgentError as e:
+            print(f"reflector: grading {row['id']} failed ({e}); will retry next beat")
+            continue
+        append_ndjson(outcomes_path, {
+            "id": uuid.uuid4().hex[:12], "suggestion_id": row["id"], "ts": now_iso(),
+            "outcome": grade["outcome"], "evidence": grade.get("evidence", ""),
+            "issue": row["suggestion"]["issue"],
+            "heuristics_version": row.get("heuristics_version", 0),
+            **({"malformed": grade["malformed"]} if "malformed" in grade else {}),
+        })
+        print(f"reflector: {row['id']} → {grade['outcome']}"
+              + (f" ({grade['evidence']})" if grade.get("evidence") else ""))
+
+    return len(to_judge) + len(undelivered)
+
+
+def maybe_rewrite(cc: Path, sandbox: str, state: dict, force: bool) -> None:
+    outcomes = read_ndjson(cc / "outcomes.ndjsonl")
+    if not rewrite.should_rewrite(outcomes, state.get("n_graded_at_last_rewrite", 0), force):
+        return
+    heuristics_path = cc / "heuristics.md"
+    current = ensure_heuristics(heuristics_path)  # seeds v1 if the critic hasn't yet
+    version = heuristics_version(current)
+    prompt = rewrite.build_prompt(current, version, outcomes)
+    try:
+        new_text = _ask(prompt, sandbox)
+    except openclaw.AgentError as e:
+        print(f"reflector: rewrite failed ({e}); keeping v{version}")
+        return
+    err = rewrite.validate(new_text, version + 1)
+    if err:
+        print(f"reflector: rewrite rejected ({err}); keeping v{version}")
+        return
+    archive = rewrite.apply(heuristics_path, new_text, current, version)
+    state["n_graded_at_last_rewrite"] = sum(
+        1 for o in outcomes if o.get("outcome") in rewrite.GRADED
+    )
+    print(f"reflector: heuristics v{version} → v{version + 1} (archived {archive.name})")
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="reflector", description=__doc__)
+    ap.add_argument("repo", type=Path)
+    ap.add_argument("--interval", type=float, default=300.0, help="seconds between passes (default 300)")
+    ap.add_argument("--once", action="store_true")
+    ap.add_argument("--force-rewrite", action="store_true",
+                    help="rewrite even below the outcome threshold (demo)")
+    ap.add_argument("--sandbox", default="codecouncil")
+    args = ap.parse_args(argv)
+
+    cc = args.repo.resolve() / ".codecouncil"
+    if not (cc / "suggestions.ndjsonl").exists():
+        print(f"error: {cc}/suggestions.ndjsonl not found — has the critic run?", file=sys.stderr)
+        return 2
+
+    state_path = cc / "reflector-state.json"
+    state = {}
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            state = {}
+
+    print(f"reflector: watching {cc} · every {args.interval:g}s")
+    try:
+        while True:
+            n = grade_pending(cc, args.sandbox)
+            if n == 0:
+                print(f"reflector: nothing to grade")
+            maybe_rewrite(cc, args.sandbox, state, args.force_rewrite)
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            if args.once:
+                break
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print("\nreflector: stopped")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

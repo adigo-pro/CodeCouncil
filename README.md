@@ -12,8 +12,10 @@ measurably better at critiquing your work. Three loops:
 3. **Hook injection** (done) — Claude Code hooks that deliver Critic suggestions
    into the coding agent's own context: medium/high injected after edits
    (PostToolUse), high blocks completion once (Stop) until fixed or rebutted.
-4. **Reflector** — rewrites the Critic's own heuristics based on which suggestions
-   landed. The recursive self-improvement loop.
+4. **Reflector** (done) — grades delivered suggestions against what actually
+   happened next (accepted / rebutted / ignored, judged by an OpenClaw agent from
+   post-delivery diffs + reasoning), then rewrites the Critic's heuristics from
+   the grades. The recursive self-improvement loop.
 
 ## Run the Observer
 
@@ -51,6 +53,18 @@ python3 -m hooks.install /path/to/repo-being-coded-in   # idempotent settings.js
 The hook is fail-open (any error → silent exit 0), delivers each suggestion at
 most once per channel (`.codecouncil/delivered.json`), never blocks twice, and
 ignores suggestions older than 10 minutes.
+
+## Run the Reflector
+
+```sh
+python3 -m reflector /path/to/repo-being-coded-in     # grade + maybe rewrite, every 5 min
+python3 -m reflector . --once --force-rewrite         # demo: rewrite below threshold
+python3 -m reflector.report .                         # acceptance per heuristics version
+```
+
+Rewrites are guarded: strict `version: N+1` + length validation (bad output →
+old file kept), prior versions archived to `.codecouncil/heuristics-history/`,
+atomic swap so the Critic never reads a half-written file.
 
 ## Tests
 

@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/adityagollamudi/code/CodeCouncil/hooks/peer_hook.py"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/adityagollamudi/code/CodeCouncil/hooks/peer_hook.py"
+          }
+        ]
+      }
+    ]
+  }
+}

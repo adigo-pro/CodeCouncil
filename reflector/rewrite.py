@@ -39,9 +39,10 @@ def rewrite_record(old_text: str, new_text: str, version: int, outcomes: list[di
     }
 
 
-def should_rewrite(outcomes: list[dict], n_graded_at_last_rewrite: int, force: bool) -> bool:
+def should_rewrite(outcomes: list[dict], n_graded_at_last_rewrite: int, force: bool,
+                   min_new: int = MIN_NEW_OUTCOMES) -> bool:
     graded = sum(1 for o in outcomes if o.get("outcome") in GRADED)
-    return force or graded - n_graded_at_last_rewrite >= MIN_NEW_OUTCOMES
+    return force or graded - n_graded_at_last_rewrite >= min_new
 
 
 def build_prompt(current: str, version: int, outcomes: list[dict]) -> str:

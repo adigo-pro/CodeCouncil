@@ -1,0 +1,51 @@
+{
+ "name": "latent-drift",
+ "expected": "flag",
+ "expect_files": [
+  "netutil.py"
+ ],
+ "events": [
+  {
+   "beat": 42,
+   "type": "commit",
+   "payload": {
+    "from": "e7fe08ba023c8a5961388552708497d922067e11",
+    "to": "869951aa43a73f1d3fbf046ebd2e2e1e926c9d33",
+    "subjects": [
+     "869951a Add optional attempts parameter to fetch_with_retry"
+    ],
+    "diff": "diff --git a/netutil.py b/netutil.py\nindex dd961e2..577156a 100644\n--- a/netutil.py\n+++ b/netutil.py\n@@ -1,9 +1,9 @@\n import time\n \n \n-def fetch_with_retry(fn):\n+def fetch_with_retry(fn, attempts=3):\n     \"\"\"Call fn with exponential backoff, re-raising the last error.\"\"\"\n-    for attempt in range(3):\n+    for attempt in range(attempts):\n         try:\n             return fn()\n         except Exception:\n",
+    "stat": "netutil.py | 4 ++--\n 1 file changed, 2 insertions(+), 2 deletions(-)"
+   },
+   "session": null,
+   "ts": "2026-07-19T03:59:02-05:00"
+  }
+ ],
+ "latest_diff": {
+  "beat": 42,
+  "type": "diff",
+  "payload": {
+   "diff": "",
+   "stat": "",
+   "untracked": [
+    ".claude/settings.json",
+    ".codecouncil/critic-state.json",
+    ".codecouncil/critic.live.log",
+    ".codecouncil/heuristics.md",
+    ".codecouncil/observations.ndjsonl",
+    ".codecouncil/observer.live.log",
+    ".codecouncil/prompts/192725a9bda3.txt",
+    ".codecouncil/prompts/9c60f8d8fa8c.txt",
+    ".codecouncil/reflector-state.json",
+    ".codecouncil/reflector.live.log",
+    ".codecouncil/review-requests.ndjsonl",
+    ".codecouncil/state.json",
+    ".codecouncil/suggestions.ndjsonl",
+    ".codecouncil/training-log.ndjsonl"
+   ],
+   "untracked_contents": {}
+  },
+  "session": null,
+  "ts": "2026-07-19T03:59:02-05:00"
+ }
+}

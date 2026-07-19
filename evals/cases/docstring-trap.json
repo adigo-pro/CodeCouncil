@@ -1,0 +1,58 @@
+{
+ "name": "docstring-trap",
+ "expected": "flag",
+ "expect_files": [
+  "strutil.py",
+  "cli.py"
+ ],
+ "events": [
+  {
+   "beat": 177,
+   "type": "commit",
+   "payload": {
+    "from": "7ae6ecc9fcb039a60f2f7599ee0e5d1d29124a7e",
+    "to": "eea98075c8797b601afe2d613aa5b0e1b1dee5df",
+    "subjects": [
+     "eea9807 Add cli.py to parse a version string from argv"
+    ],
+    "diff": "diff --git a/cli.py b/cli.py\nnew file mode 100644\nindex 0000000..5258a46\n--- /dev/null\n+++ b/cli.py\n@@ -0,0 +1,18 @@\n+\"\"\"Command-line entry point for parsing a version string.\"\"\"\n+\n+import sys\n+\n+from strutil import parse_version\n+\n+\n+def main():\n+    result = parse_version(sys.argv[1])\n+    if result is None:\n+        print(\"Invalid version string\", file=sys.stderr)\n+        return 1\n+    print(result)\n+    return 0\n+\n+\n+if __name__ == '__main__':\n+    sys.exit(main())\n",
+    "stat": "cli.py | 18 ++++++++++++++++++\n 1 file changed, 18 insertions(+)"
+   },
+   "session": null,
+   "ts": "2026-07-19T04:05:48-05:00"
+  }
+ ],
+ "latest_diff": {
+  "beat": 177,
+  "type": "diff",
+  "payload": {
+   "diff": "",
+   "stat": "",
+   "untracked": [
+    ".claude/settings.json",
+    ".codecouncil/critic-state.json",
+    ".codecouncil/critic.live.log",
+    ".codecouncil/heuristics.md",
+    ".codecouncil/observations.ndjsonl",
+    ".codecouncil/observer.live.log",
+    ".codecouncil/prompts/0c90bc4c62f2.txt",
+    ".codecouncil/prompts/192725a9bda3.txt",
+    ".codecouncil/prompts/2f1aa0cae45a.txt",
+    ".codecouncil/prompts/467159c116b3.txt",
+    ".codecouncil/prompts/9c60f8d8fa8c.txt",
+    ".codecouncil/prompts/b8163bd6240a.txt",
+    ".codecouncil/prompts/c2ab2b91ef95.txt",
+    ".codecouncil/prompts/cf59fe0b4c62.txt",
+    ".codecouncil/reflector-state.json",
+    ".codecouncil/reflector.live.log",
+    ".codecouncil/review-requests.ndjsonl",
+    ".codecouncil/state.json",
+    ".codecouncil/suggestions.ndjsonl",
+    ".codecouncil/training-log.ndjsonl"
+   ],
+   "untracked_contents": {}
+  },
+  "session": null,
+  "ts": "2026-07-19T04:05:48-05:00"
+ }
+}

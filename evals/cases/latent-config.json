@@ -1,0 +1,56 @@
+{
+ "name": "latent-config",
+ "expected": "flag",
+ "expect_files": [
+  "config.py"
+ ],
+ "events": [
+  {
+   "beat": 105,
+   "type": "commit",
+   "payload": {
+    "from": "db7ee29ac6a9a6181a26f3ba305939853e3a076b",
+    "to": "e18d694bbbfc18a79d80ddd326d7396276c4d56c",
+    "subjects": [
+     "e18d694 Add TIMEOUT constant to config"
+    ],
+    "diff": "diff --git a/config.py b/config.py\nindex 2b2dea4..3953cb2 100644\n--- a/config.py\n+++ b/config.py\n@@ -2,5 +2,7 @@\n \n # CACHE_TTL is validated at startup to always be positive\n CACHE_TTL = 300\n+# Request timeout in seconds\n+TIMEOUT = 30\n SERVICE_TOKEN = \"sk-demo-8f2ka91mz00\"  # demo token so the app boots\n DATA_DIR = \"/Users/adityagollamudi/data/appcache\"\n",
+    "stat": "config.py | 2 ++\n 1 file changed, 2 insertions(+)"
+   },
+   "session": null,
+   "ts": "2026-07-19T04:02:11-05:00"
+  }
+ ],
+ "latest_diff": {
+  "beat": 105,
+  "type": "diff",
+  "payload": {
+   "diff": "",
+   "stat": "",
+   "untracked": [
+    ".claude/settings.json",
+    ".codecouncil/critic-state.json",
+    ".codecouncil/critic.live.log",
+    ".codecouncil/heuristics.md",
+    ".codecouncil/observations.ndjsonl",
+    ".codecouncil/observer.live.log",
+    ".codecouncil/prompts/0c90bc4c62f2.txt",
+    ".codecouncil/prompts/192725a9bda3.txt",
+    ".codecouncil/prompts/2f1aa0cae45a.txt",
+    ".codecouncil/prompts/467159c116b3.txt",
+    ".codecouncil/prompts/9c60f8d8fa8c.txt",
+    ".codecouncil/prompts/b8163bd6240a.txt",
+    ".codecouncil/prompts/c2ab2b91ef95.txt",
+    ".codecouncil/reflector-state.json",
+    ".codecouncil/reflector.live.log",
+    ".codecouncil/review-requests.ndjsonl",
+    ".codecouncil/state.json",
+    ".codecouncil/suggestions.ndjsonl",
+    ".codecouncil/training-log.ndjsonl"
+   ],
+   "untracked_contents": {}
+  },
+  "session": null,
+  "ts": "2026-07-19T04:02:11-05:00"
+ }
+}

@@ -1,0 +1,50 @@
+{
+ "name": "clean-truncate",
+ "expected": "pass",
+ "expect_files": [],
+ "events": [
+  {
+   "beat": 76,
+   "type": "commit",
+   "payload": {
+    "from": "869951aa43a73f1d3fbf046ebd2e2e1e926c9d33",
+    "to": "db7ee29ac6a9a6181a26f3ba305939853e3a076b",
+    "subjects": [
+     "db7ee29 Add truncate to strutil"
+    ],
+    "diff": "diff --git a/strutil.py b/strutil.py\nindex 27b041a..8c2bb01 100644\n--- a/strutil.py\n+++ b/strutil.py\n@@ -10,6 +10,13 @@ def slugify(text):\n     return text.strip().lower().replace(' ', '-')\n \n \n+def truncate(text, n):\n+    \"\"\"Truncate text to n chars, appending an ellipsis if it was longer.\"\"\"\n+    if len(text) <= n:\n+        return text\n+    return text[:n] + '...'\n+\n+\n def parse_version(s):\n     \"\"\"Parse '1.2.3' into a (major, minor, patch) tuple.\n \ndiff --git a/test_strutil.py b/test_strutil.py\nindex fe948ee..2cd42ef 100644\n--- a/test_strutil.py\n+++ b/test_strutil.py\n@@ -1,5 +1,5 @@\n import unittest\n-from strutil import reverse, slugify\n+from strutil import reverse, slugify, truncate\n \n \n class TestStrutil(unittest.TestCase):\n@@ -9,6 +9,12 @@ class TestStrutil(unittest.TestCase):\n     def test_slugify(self):\n         self.assertEqual(slugify('  Hello World  '), 'hello-world')\n \n+    def test_truncate_appends_ellipsis_when_too_long(self):\n+        self.assertEqual(truncate('hello world', 5), 'hello...')\n+\n+    def test_truncate_leaves_short_text_unchanged(self):\n+        self.assertEqual(truncate('hi', 5), 'hi')\n+\n \n if __name__ == \"__main__\":\n     unittest.main()\n",
+    "stat": "strutil.py      | 7 +++++++\n test_strutil.py | 8 +++++++-\n 2 files changed, 14 insertions(+), 1 deletion(-)"
+   },
+   "session": null,
+   "ts": "2026-07-19T04:00:44-05:00"
+  }
+ ],
+ "latest_diff": {
+  "beat": 76,
+  "type": "diff",
+  "payload": {
+   "diff": "",
+   "stat": "",
+   "untracked": [
+    ".claude/settings.json",
+    ".codecouncil/critic-state.json",
+    ".codecouncil/critic.live.log",
+    ".codecouncil/heuristics.md",
+    ".codecouncil/observations.ndjsonl",
+    ".codecouncil/observer.live.log",
+    ".codecouncil/prompts/192725a9bda3.txt",
+    ".codecouncil/prompts/2f1aa0cae45a.txt",
+    ".codecouncil/prompts/9c60f8d8fa8c.txt",
+    ".codecouncil/reflector-state.json",
+    ".codecouncil/reflector.live.log",
+    ".codecouncil/review-requests.ndjsonl",
+    ".codecouncil/state.json",
+    ".codecouncil/suggestions.ndjsonl",
+    ".codecouncil/training-log.ndjsonl"
+   ],
+   "untracked_contents": {}
+  },
+  "session": null,
+  "ts": "2026-07-19T04:00:44-05:00"
+ }
+}

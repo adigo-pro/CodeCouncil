@@ -1,0 +1,46 @@
+{
+ "name": "clean-slugify",
+ "expected": "pass",
+ "expect_files": [],
+ "events": [
+  {
+   "beat": 11,
+   "type": "commit",
+   "payload": {
+    "from": "a3527a03807c03af9ccd140ae4006eba647b26f6",
+    "to": "e7fe08ba023c8a5961388552708497d922067e11",
+    "subjects": [
+     "e7fe08b Add slugify to strutil"
+    ],
+    "diff": "diff --git a/strutil.py b/strutil.py\nindex 2d88c3f..27b041a 100644\n--- a/strutil.py\n+++ b/strutil.py\n@@ -5,6 +5,11 @@ def reverse(s):\n     return s[::-1]\n \n \n+def slugify(text):\n+    \"\"\"Lowercase, strip whitespace, and replace spaces with hyphens.\"\"\"\n+    return text.strip().lower().replace(' ', '-')\n+\n+\n def parse_version(s):\n     \"\"\"Parse '1.2.3' into a (major, minor, patch) tuple.\n \ndiff --git a/test_strutil.py b/test_strutil.py\nindex 2e9c7e3..fe948ee 100644\n--- a/test_strutil.py\n+++ b/test_strutil.py\n@@ -1,11 +1,14 @@\n import unittest\n-from strutil import reverse\n+from strutil import reverse, slugify\n \n \n class TestStrutil(unittest.TestCase):\n     def test_reverse(self):\n         self.assertEqual(reverse('ab'), 'ba')\n \n+    def test_slugify(self):\n+        self.assertEqual(slugify('  Hello World  '), 'hello-world')\n+\n \n if __name__ == \"__main__\":\n     unittest.main()\n",
+    "stat": "strutil.py      | 5 +++++\n test_strutil.py | 5 ++++-\n 2 files changed, 9 insertions(+), 1 deletion(-)"
+   },
+   "session": null,
+   "ts": "2026-07-19T03:57:28-05:00"
+  }
+ ],
+ "latest_diff": {
+  "beat": 11,
+  "type": "diff",
+  "payload": {
+   "diff": "",
+   "stat": "",
+   "untracked": [
+    ".claude/settings.json",
+    ".codecouncil/critic-state.json",
+    ".codecouncil/critic.live.log",
+    ".codecouncil/heuristics.md",
+    ".codecouncil/observations.ndjsonl",
+    ".codecouncil/observer.live.log",
+    ".codecouncil/prompts/9c60f8d8fa8c.txt",
+    ".codecouncil/reflector-state.json",
+    ".codecouncil/reflector.live.log",
+    ".codecouncil/state.json",
+    ".codecouncil/suggestions.ndjsonl"
+   ],
+   "untracked_contents": {}
+  },
+  "session": null,
+  "ts": "2026-07-19T03:57:28-05:00"
+ }
+}

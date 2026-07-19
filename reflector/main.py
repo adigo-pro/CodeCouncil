@@ -86,9 +86,11 @@ def grade_pending(cc: Path, sandbox: str) -> int:
     return len(to_judge) + len(undelivered)
 
 
-def maybe_rewrite(cc: Path, sandbox: str, state: dict, force: bool) -> None:
+def maybe_rewrite(cc: Path, sandbox: str, state: dict, force: bool,
+                  rewrite_after: int = rewrite.MIN_NEW_OUTCOMES) -> None:
     outcomes = read_ndjson(cc / "outcomes.ndjsonl")
-    if not rewrite.should_rewrite(outcomes, state.get("n_graded_at_last_rewrite", 0), force):
+    if not rewrite.should_rewrite(outcomes, state.get("n_graded_at_last_rewrite", 0), force,
+                                  min_new=rewrite_after):
         return
     heuristics_path = cc / "heuristics.md"
     current = ensure_heuristics(heuristics_path)  # seeds v1 if the critic hasn't yet
@@ -119,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--force-rewrite", action="store_true",
                     help="rewrite even below the outcome threshold (demo)")
+    ap.add_argument("--rewrite-after", type=int, default=rewrite.MIN_NEW_OUTCOMES,
+                    help="graded outcomes needed to trigger a rewrite (default 3)")
     ap.add_argument("--sandbox", default="codecouncil")
     args = ap.parse_args(argv)
 
@@ -145,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
             n = grade_pending(cc, args.sandbox)
             if n == 0:
                 print(f"reflector: nothing to grade")
-            maybe_rewrite(cc, args.sandbox, state, args.force_rewrite)
+            maybe_rewrite(cc, args.sandbox, state, args.force_rewrite,
+                          rewrite_after=args.rewrite_after)
             state_path.write_text(json.dumps(state), encoding="utf-8")
             if args.once:
                 break

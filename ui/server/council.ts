@@ -250,6 +250,9 @@ export function aggregate(repo: string) {
   const lastObs = observations.length ? observations[observations.length - 1].ts : null;
   const lastVerdict = suggestions.length ? suggestions[suggestions.length - 1].ts : null;
   const stateM = mtime(path.join(cc, "state.json"));
+  // Both daemons advertise their configured interval; liveness = 3 missed beats.
+  const observerIntervalS = readJson(path.join(cc, "state.json")).interval || 30;
+  const criticIntervalS = readJson(path.join(cc, "critic-state.json")).interval || 45;
 
   return {
     now: new Date().toISOString(),
@@ -257,12 +260,12 @@ export function aggregate(repo: string) {
     live: {
       lastObservationTs: lastObs,
       lastVerdictTs: lastVerdict,
-      // Observer heartbeats every 30s; consider it live within 3 beats.
-      observerLive: stateM !== null && Date.now() - stateM < 95_000,
-      // Critic beats default to 45s; same 3-beat grace.
+      observerIntervalS,
+      observerLive:
+        stateM !== null && Date.now() - stateM < Math.max(15_000, observerIntervalS * 3_000),
       criticLive: (() => {
         const m = mtime(path.join(cc, "critic-state.json"));
-        return m !== null && Date.now() - m < 150_000;
+        return m !== null && Date.now() - m < Math.max(15_000, criticIntervalS * 3_000);
       })(),
     },
     stats: {

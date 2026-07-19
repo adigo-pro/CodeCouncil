@@ -219,6 +219,28 @@ class TestHeartbeatWithStub(unittest.TestCase):
                          "pending")
 
 
+class TestSchedulerCooldown(unittest.TestCase):
+    def test_spacing_holds_then_drain_bypasses(self):
+        calls = []
+        s = TurnScheduler(judge_fn=lambda b, c: calls.append(list(b)),
+                          judge_every_beat=True, min_spacing=9999)
+        self.assertEqual(s.submit([{"type": "diff"}], {}), "dispatched")
+        s.thread.join()
+        self.assertEqual(s.submit([{"type": "diff"}], {}), "cooling")  # within spacing
+        self.assertEqual(len(s.pending), 1)  # held, not dropped
+        s.drain({})
+        self.assertEqual([len(c) for c in calls], [1, 1])  # drain flushed the held batch
+
+    def test_zero_spacing_dispatches_back_to_back(self):
+        calls = []
+        s = TurnScheduler(judge_fn=lambda b, c: calls.append(1), judge_every_beat=True)
+        s.submit([{"type": "diff"}], {})
+        s.thread.join()
+        self.assertEqual(s.submit([{"type": "diff"}], {}), "dispatched")
+        s.thread.join()
+        self.assertEqual(len(calls), 2)
+
+
 class TestSchedulerAsync(unittest.TestCase):
     def test_busy_queues_then_merges(self):
         import threading as th

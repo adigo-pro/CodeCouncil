@@ -34,7 +34,7 @@ def heartbeat(repo: Path, project_dir: Path, state: State, log: EventLog) -> lis
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="observer", description=__doc__)
     ap.add_argument("repo", type=Path, help="path to the repo being coded in")
-    ap.add_argument("--interval", type=float, default=30.0, help="heartbeat seconds (default 30)")
+    ap.add_argument("--interval", type=float, default=3.0, help="heartbeat seconds (default 3)")
     ap.add_argument("--once", action="store_true", help="run a single heartbeat and exit")
     ap.add_argument(
         "--from-start",
@@ -67,14 +67,20 @@ def main(argv: list[str] | None = None) -> int:
     print(f"observer: watching {project_dir.name}")
     print(f"observer: repo {repo} · every {args.interval:g}s · log {log.path}")
 
+    state.interval = args.interval
     try:
         while True:
+            t0 = time.monotonic()
             events = heartbeat(repo, project_dir, state, log)
             state.save(state_path)
-            render_beat(state.beat, now_iso(), events)
+            if events:
+                render_beat(state.beat, now_iso(), events)
             if args.once:
                 break
-            time.sleep(args.interval)
+            elapsed = time.monotonic() - t0
+            # fast beats are near-free; if a huge repo makes a beat slow, back
+            # off so we never spend more than ~half our time working
+            time.sleep(max(args.interval - elapsed, elapsed, 0.5))
     except KeyboardInterrupt:
         print("\nobserver: stopped")
     return 0

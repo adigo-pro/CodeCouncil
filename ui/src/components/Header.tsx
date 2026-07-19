@@ -14,7 +14,10 @@ function Mark() {
 
 export function Header({ data, connected }: { data: Council | null; connected: boolean }) {
   const live = connected && !!data?.live.observerLive;
-  const beatFrac = useBeatProgress(data?.live.lastObservationTs ?? null);
+  const beatFrac = useBeatProgress(
+    data?.live.lastObservationTs ?? null,
+    data?.live.observerIntervalS ?? 30,
+  );
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-md">
       {/* countdown to the observer's next beat */}

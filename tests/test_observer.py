@@ -88,14 +88,25 @@ class TestCollectFromFixtureDir(unittest.TestCase):
         self.assertEqual(again, [])
 
 
+class TestDirMatchesCwd(unittest.TestCase):
+    def test_mixed_cwd_sessions_do_not_veto(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "a.jsonl").write_text(json.dumps({"type": "user", "cwd": "/somewhere/else"}) + "\n")
+            (d / "b.jsonl").write_text(json.dumps({"type": "user", "cwd": str(d)}) + "\n")
+            self.assertTrue(transcript._dir_matches_cwd(d, d))
+            self.assertFalse(transcript._dir_matches_cwd(d, Path("/no/match")))
+
+
 class TestStateAndLog(unittest.TestCase):
     def test_state_roundtrip(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "state.json"
-            s = State(offsets={"a": 5}, last_diff_hash="h", beat=3)
+            s = State(offsets={"a": 5}, last_diff_hash="h", beat=3, interval=3.0)
             s.save(p)
             loaded = State.load(p)
-            self.assertEqual((loaded.offsets, loaded.last_diff_hash, loaded.beat), ({"a": 5}, "h", 3))
+            self.assertEqual((loaded.offsets, loaded.last_diff_hash, loaded.beat, loaded.interval),
+                             ({"a": 5}, "h", 3, 3.0))
 
     def test_event_log_is_valid_ndjson(self):
         with tempfile.TemporaryDirectory() as td:

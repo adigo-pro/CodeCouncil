@@ -12,6 +12,7 @@ class State:
     offsets: dict[str, int] = field(default_factory=dict)
     last_diff_hash: str | None = None
     beat: int = 0
+    interval: float = 0.0  # advertised so the dashboard can pace its countdown
 
     @classmethod
     def load(cls, path: Path) -> "State":
@@ -22,6 +23,7 @@ class State:
                     offsets=raw.get("offsets", {}),
                     last_diff_hash=raw.get("last_diff_hash"),
                     beat=raw.get("beat", 0),
+                    interval=raw.get("interval", 0.0),
                 )
             except (json.JSONDecodeError, OSError):
                 pass  # corrupt state: start fresh rather than crash the daemon
@@ -35,6 +37,7 @@ class State:
                     "offsets": self.offsets,
                     "last_diff_hash": self.last_diff_hash,
                     "beat": self.beat,
+                    "interval": self.interval,
                 }
             ),
             encoding="utf-8",

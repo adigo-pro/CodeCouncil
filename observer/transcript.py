@@ -25,7 +25,8 @@ def munge_path(repo: Path) -> str:
 
 
 def _dir_matches_cwd(project_dir: Path, repo: Path) -> bool:
-    """Check a project dir's transcripts actually point at `repo` via their cwd field."""
+    """Check whether ANY transcript in the dir points at `repo` via its cwd field
+    (dirs can hold sessions with mixed cwds — one mismatch must not veto the rest)."""
     for jsonl in project_dir.glob("*.jsonl"):
         try:
             with jsonl.open(encoding="utf-8") as f:
@@ -36,7 +37,9 @@ def _dir_matches_cwd(project_dir: Path, repo: Path) -> bool:
                         continue
                     cwd = obj.get("cwd")
                     if cwd:
-                        return Path(cwd) == repo
+                        if Path(cwd) == repo:
+                            return True
+                        break  # this session belongs elsewhere; try the next file
         except OSError:
             continue
     return False

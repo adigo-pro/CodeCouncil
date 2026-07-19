@@ -55,6 +55,7 @@ export interface Council {
   live: {
     lastObservationTs: string | null;
     lastVerdictTs: string | null;
+    observerIntervalS: number;
     observerLive: boolean;
     criticLive: boolean;
   };

@@ -120,9 +120,12 @@ class TurnScheduler:
     """At most one agent turn in flight; events accumulate (never drop) while
     busy or gated, and dispatch as one merged batch when possible."""
 
-    def __init__(self, judge_fn=judge_batch, judge_every_beat: bool = False):
+    def __init__(self, judge_fn=judge_batch, judge_every_beat: bool = False,
+                 min_spacing: float = 0.0):
         self.judge_fn = judge_fn
         self.judge_every_beat = judge_every_beat
+        self.min_spacing = min_spacing  # floor between turn *starts*: fast beats, flat cost
+        self.last_dispatch = float("-inf")  # a fresh scheduler must never start cooling
         self.pending: list[dict] = []
         self.thread: threading.Thread | None = None
 
@@ -133,7 +136,7 @@ class TurnScheduler:
         return self.judge_every_beat or any(e.get("type") == "diff" for e in self.pending)
 
     def submit(self, events: list[dict], ctx: dict) -> str:
-        """Returns what happened: idle | gated | busy | dispatched."""
+        """Returns what happened: idle | gated | busy | cooling | dispatched."""
         self.pending.extend(events)
         if not self.pending:
             return "idle"
@@ -141,6 +144,9 @@ class TurnScheduler:
             return "gated"
         if self.busy():
             return "busy"
+        if time.monotonic() - self.last_dispatch < self.min_spacing:
+            return "cooling"
+        self.last_dispatch = time.monotonic()
         batch, self.pending = self.pending, []
         self.thread = threading.Thread(target=self.judge_fn, args=(batch, ctx), daemon=True)
         self.thread.start()
@@ -151,6 +157,7 @@ class TurnScheduler:
         if self.thread:
             self.thread.join()
         if self.pending and self._gate_open():
+            self.last_dispatch = float("-inf")  # --once must not wait out the cooldown
             self.submit([], ctx)
             if self.thread:
                 self.thread.join()
@@ -180,13 +187,17 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
         render_status(beat, ts, f"{len(scheduler.pending)} event(s) held — no code change yet")
     elif status == "busy":
         render_status(beat, ts, f"turn in flight — {len(scheduler.pending)} event(s) queued")
+    elif status == "cooling":
+        render_status(beat, ts, f"cooling down — {len(scheduler.pending)} event(s) queued")
     return status
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="critic", description=__doc__)
     ap.add_argument("repo", type=Path, help="path to the repo being watched by the observer")
-    ap.add_argument("--interval", type=float, default=30.0, help="heartbeat seconds (default 30)")
+    ap.add_argument("--interval", type=float, default=10.0, help="heartbeat seconds (default 10)")
+    ap.add_argument("--turn-spacing", type=float, default=45.0,
+                    help="minimum seconds between model turn starts (default 45)")
     ap.add_argument("--once", action="store_true", help="run a single heartbeat and exit")
     ap.add_argument("--sandbox", default="codecouncil", help="NemoClaw sandbox name")
     ap.add_argument("--agent", default="critic", help="OpenClaw agent id in the sandbox")
@@ -212,12 +223,14 @@ def main(argv: list[str] | None = None) -> int:
         "agent": args.agent,
         "project": project_context(args.repo.resolve()),
     }
-    scheduler = TurnScheduler(judge_every_beat=args.judge_every_beat)
+    scheduler = TurnScheduler(judge_every_beat=args.judge_every_beat,
+                              min_spacing=args.turn_spacing)
+    state["interval"] = args.interval
     try:
         while True:
             heartbeat(obs_file, state, scheduler, ctx)
             state_path.write_text(json.dumps(
-                {k: state[k] for k in ("offset", "beat", "latest_diff") if k in state}
+                {k: state[k] for k in ("offset", "beat", "latest_diff", "interval") if k in state}
             ), encoding="utf-8")
             if args.once:
                 scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),

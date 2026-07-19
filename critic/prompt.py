@@ -17,11 +17,15 @@ def heuristics_version(heuristics: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str) -> str:
+def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
+                 project: str = "") -> str:
     reasoning = [e for e in events if e["type"] == "reasoning"][-MAX_REASONING_EVENTS:]
     tools = [e for e in events if e["type"] == "tool_call"]
 
-    parts = [f"HEURISTICS (v{heuristics_version(heuristics)}):", heuristics.strip(), ""]
+    parts = []
+    if project:
+        parts += [project.strip(), ""]
+    parts += [f"HEURISTICS (v{heuristics_version(heuristics)}):", heuristics.strip(), ""]
 
     parts.append("CODING AGENT'S RECENT REASONING:")
     if reasoning:
@@ -52,6 +56,13 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str) 
     else:
         parts.append("(no uncommitted changes)")
     parts.append("")
+
+    contents = (latest_diff or {}).get("payload", {}).get("untracked_contents", {})
+    if contents:
+        parts.append("NEW FILES (not yet committed):")
+        for path, text in sorted(contents.items()):
+            parts += [f"--- {path} ---", text.rstrip()]
+        parts.append("")
 
     parts.append(
         "Is there one concrete, high-value issue worth interrupting the developer for? "

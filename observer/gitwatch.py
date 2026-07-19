@@ -7,6 +7,9 @@ import subprocess
 from pathlib import Path
 
 DIFF_MAX_CHARS = 50_000
+NEW_FILE_MAX_CHARS = 4_000
+NEW_FILES_TOTAL_CHARS = 20_000
+EXCLUDED_PREFIXES = (".codecouncil/", ".claude/", ".git/")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -22,6 +25,27 @@ def _git(repo: Path, *args: str) -> str:
         return ""
 
 
+def _read_untracked(repo: Path, paths: list[str]) -> dict[str, str]:
+    """Contents of new (untracked) text files, capped, so the critic can see them."""
+    out: dict[str, str] = {}
+    total = 0
+    for p in paths:
+        if p.startswith(EXCLUDED_PREFIXES) or total >= NEW_FILES_TOTAL_CHARS:
+            continue
+        try:
+            data = (repo / p).read_bytes()[: NEW_FILE_MAX_CHARS * 2]
+        except OSError:
+            continue
+        if b"\0" in data:
+            continue  # binary
+        text = data.decode("utf-8", errors="replace")
+        if len(text) > NEW_FILE_MAX_CHARS:
+            text = text[:NEW_FILE_MAX_CHARS] + "\n… [truncated]"
+        out[p] = text
+        total += len(text)
+    return out
+
+
 def capture(repo: Path) -> dict:
     """Snapshot uncommitted work. Falls back gracefully in a repo with no commits."""
     diff = _git(repo, "diff", "HEAD") or _git(repo, "diff")
@@ -31,11 +55,19 @@ def capture(repo: Path) -> dict:
     ]
     if len(diff) > DIFF_MAX_CHARS:
         diff = diff[:DIFF_MAX_CHARS] + f"\n… [diff truncated, {len(diff)} chars total]"
-    return {"diff": diff, "stat": stat.strip(), "untracked": untracked}
+    return {
+        "diff": diff,
+        "stat": stat.strip(),
+        "untracked": untracked,
+        "untracked_contents": _read_untracked(repo, untracked),
+    }
 
 
 def fingerprint(snapshot: dict) -> str:
     h = hashlib.sha256()
     h.update(snapshot["diff"].encode("utf-8", errors="replace"))
     h.update("\0".join(snapshot["untracked"]).encode("utf-8", errors="replace"))
+    for path, text in sorted(snapshot.get("untracked_contents", {}).items()):
+        h.update(path.encode("utf-8", errors="replace"))
+        h.update(text.encode("utf-8", errors="replace"))
     return h.hexdigest()

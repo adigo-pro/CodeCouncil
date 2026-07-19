@@ -32,6 +32,27 @@ def load_state(path: Path) -> dict:
     return {"offset": 0, "beat": 0}
 
 
+def project_context(repo: Path) -> str:
+    """A short identity header so the critic knows what repo it is judging."""
+    lines = [f"PROJECT: {repo.name} ({repo})"]
+    try:
+        entries = sorted(
+            p.name + ("/" if p.is_dir() else "")
+            for p in repo.iterdir() if not p.name.startswith(".")
+        )[:30]
+        lines.append("TOP-LEVEL: " + " ".join(entries))
+    except OSError:
+        pass
+    readme = repo / "README.md"
+    if readme.exists():
+        excerpt = " ".join(
+            l.strip() for l in readme.read_text(encoding="utf-8", errors="replace").splitlines()[:20]
+            if l.strip()
+        )
+        lines.append("README: " + excerpt[:600])
+    return "\n".join(lines)
+
+
 def ensure_heuristics(path: Path) -> str:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -40,7 +61,8 @@ def ensure_heuristics(path: Path) -> str:
 
 
 def heartbeat(obs_file: Path, state: dict, heuristics_path: Path,
-              suggestions_file: Path, sandbox: str, agent: str) -> None:
+              suggestions_file: Path, sandbox: str, agent: str,
+              project: str = "") -> None:
     state["beat"] += 1
     beat, ts = state["beat"], now_iso()
 
@@ -61,7 +83,7 @@ def heartbeat(obs_file: Path, state: dict, heuristics_path: Path,
         return
 
     heuristics = ensure_heuristics(heuristics_path)
-    text = prompt.build_prompt(events, state.get("latest_diff"), heuristics)
+    text = prompt.build_prompt(events, state.get("latest_diff"), heuristics, project=project)
     record = {
         "id": uuid.uuid4().hex[:12],
         "ts": ts,
@@ -102,10 +124,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"critic: reading {obs_file}")
     print(f"critic: judging via `nemoclaw {args.sandbox} agent --agent {args.agent}` every {args.interval:g}s")
 
+    project = project_context(args.repo.resolve())
     try:
         while True:
             heartbeat(obs_file, state, cc / "heuristics.md", cc / "suggestions.ndjsonl",
-                      args.sandbox, args.agent)
+                      args.sandbox, args.agent, project=project)
             state_path.write_text(json.dumps(
                 {k: state[k] for k in ("offset", "beat", "latest_diff") if k in state}
             ), encoding="utf-8")

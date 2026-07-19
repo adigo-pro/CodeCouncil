@@ -62,6 +62,19 @@ class TestPrompt(unittest.TestCase):
         text = prompt.build_prompt(self._events(), None, "version: 1")
         self.assertIn("(no uncommitted changes)", text)
 
+    def test_new_file_contents_rendered(self):
+        diff = {"type": "diff", "payload": {"diff": "", "untracked": ["new.py"],
+                                            "untracked_contents": {"new.py": "def g(): pass"}}}
+        text = prompt.build_prompt(self._events(), diff, "version: 1")
+        self.assertIn("NEW FILES (not yet committed):", text)
+        self.assertIn("def g(): pass", text)
+
+    def test_project_header_first(self):
+        text = prompt.build_prompt(self._events(), None, "version: 1",
+                                   project="PROJECT: demo (/x)\nREADME: a demo")
+        self.assertTrue(text.startswith("PROJECT: demo"))
+        self.assertIn("README: a demo", text)
+
     def test_version_default_zero(self):
         self.assertEqual(prompt.heuristics_version("no header"), 0)
 

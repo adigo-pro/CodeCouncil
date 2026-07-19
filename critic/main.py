@@ -313,8 +313,12 @@ def main(argv: list[str] | None = None) -> int:
     cc = args.repo.resolve() / ".codecouncil"
     obs_file = cc / "observations.ndjsonl"
     if not obs_file.exists():
-        print(f"error: {obs_file} not found — is the observer running?", file=sys.stderr)
-        return 2
+        if args.once:
+            print(f"error: {obs_file} not found — is the observer running?", file=sys.stderr)
+            return 2
+        print(f"critic: waiting for the observer's first beat ({obs_file})…")
+        while not obs_file.exists():
+            time.sleep(2)
 
     state_path = cc / "critic-state.json"
     state = load_state(state_path)

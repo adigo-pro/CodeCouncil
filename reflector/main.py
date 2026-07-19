@@ -124,8 +124,12 @@ def main(argv: list[str] | None = None) -> int:
 
     cc = args.repo.resolve() / ".codecouncil"
     if not (cc / "suggestions.ndjsonl").exists():
-        print(f"error: {cc}/suggestions.ndjsonl not found — has the critic run?", file=sys.stderr)
-        return 2
+        if args.once:
+            print(f"error: {cc}/suggestions.ndjsonl not found — has the critic run?", file=sys.stderr)
+            return 2
+        print(f"reflector: waiting for the critic's first verdict…")
+        while not (cc / "suggestions.ndjsonl").exists():
+            time.sleep(5)
 
     state_path = cc / "reflector-state.json"
     state = {}

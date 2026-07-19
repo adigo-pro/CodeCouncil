@@ -13,8 +13,10 @@ Reply with EXACTLY one raw JSON object, nothing else:
    "evidence": "<one sentence citing the specific diff or statement>"}
 
 - accepted: the flagged code changed in the suggested direction.
-- rebutted: the agent explicitly considered the suggestion and disagreed.
-- ignored: neither — no relevant change, no engagement.
+- rebutted: the agent explicitly engaged with the suggestion and stated
+  disagreement with reasons. A statement alone counts — rebutting is done in
+  words, not code.
+- ignored: neither — no relevant change AND no engagement with the finding.
 Ground your answer only in the provided evidence. When evidence is thin or
 ambiguous, the answer is "ignored".
 

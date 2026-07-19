@@ -57,11 +57,14 @@ class TestEvidence(unittest.TestCase):
         obs = [
             {"ts": _iso(d - 60), "type": "diff", "payload": {"diff": "OLD"}},
             {"ts": _iso(d + 60), "type": "reasoning", "payload": {"text": "fixing the bug"}},
+            {"ts": _iso(d + 70), "type": "tool_call",
+             "payload": {"tool": "Bash", "input": {"command": "git commit -m 'deliberate: keep as is'"}}},
             {"ts": _iso(d + 90), "type": "diff", "payload": {"diff": "+if b == 0: return None"}},
         ]
         text = judge.evidence(sugg(), d, obs)
         self.assertIn("fixing the bug", text)
         self.assertIn("if b == 0", text)
+        self.assertIn("deliberate: keep as is", text)
         self.assertNotIn("OLD", text)
 
 

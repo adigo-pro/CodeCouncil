@@ -10,6 +10,7 @@ ELIGIBLE_AFTER_S = 120      # let the coding agent react before grading
 EVIDENCE_WINDOW_S = 900     # how far past delivery to look for evidence
 UNDELIVERED_AFTER_S = 900   # past this with no delivery, grade "undelivered" for free
 MAX_EVIDENCE_REASONING = 6
+MAX_EVIDENCE_TOOL_CALLS = 8
 MAX_EVIDENCE_DIFF_CHARS = 8_000
 
 OUTCOMES = {"accepted", "rebutted", "ignored"}
@@ -58,6 +59,17 @@ def evidence(row: dict, delivery_ts: float, observations: list[dict]) -> str:
     reasoning = [o for o in window if o.get("type") == "reasoning"][:MAX_EVIDENCE_REASONING]
     parts += [f"- {o['payload']['text']}" for o in reasoning] or ["(none captured)"]
     parts.append("")
+    # tool calls carry durable intent (commit messages, commands) even when
+    # transcript prose is missing — include them as first-class evidence
+    parts.append("CODING AGENT ACTIONS AFTER DELIVERY:")
+    tools = [o for o in window if o.get("type") == "tool_call"][:MAX_EVIDENCE_TOOL_CALLS]
+    for o in tools:
+        inp = o["payload"].get("input", {})
+        detail = inp.get("file_path") or inp.get("command") or ""
+        parts.append(f"- {o['payload'].get('tool', '?')} {detail}".rstrip())
+    if not tools:
+        parts.append("(none captured)")
+    parts.append("")
     parts.append("LATEST DIFF AFTER DELIVERY:")
     diffs = [o for o in window if o.get("type") == "diff"]
     if diffs:
@@ -77,8 +89,10 @@ def build_prompt(row: dict, evidence_text: str) -> str:
         f"[{s['severity'].upper()}] {loc} — {s['issue']}\n"
         f"Rationale: {s.get('rationale', '')}\n\n"
         f"{evidence_text}\n\n"
-        "Did the flagged code change in the suggested direction (accepted), did "
-        "the agent explicitly disagree (rebutted), or neither (ignored)? "
+        "Did the flagged code change in the suggested direction (accepted)? Did the "
+        "agent explicitly engage with the suggestion and state disagreement with "
+        "reasons — a statement alone counts, no code change required (rebutted)? "
+        "Or did the agent neither change the code nor engage with it (ignored)? "
         "Reply with exactly one raw JSON object in this exact shape: "
         '{"outcome": "accepted" | "rebutted" | "ignored", "evidence": "<one sentence>"}'
     )

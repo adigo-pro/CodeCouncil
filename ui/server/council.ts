@@ -224,6 +224,7 @@ export function aggregate(repo: string) {
     heuristicsVersion: s.heuristics_version ?? 0,
     nEvents: s.n_events ?? 0,
     severity: s.suggestion?.severity ?? null,
+    reason: s.reason ? truncate(s.reason, 160) : null,
     error: s.error ? truncate(s.error, 120) : null,
   }));
 

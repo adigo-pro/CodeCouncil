@@ -37,6 +37,7 @@ export interface Verdict {
   heuristicsVersion: number;
   nEvents: number;
   severity: string | null;
+  reason: string | null;
   error: string | null;
 }
 

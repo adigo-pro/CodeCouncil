@@ -23,7 +23,7 @@ function VerdictStrip({ verdicts }: { verdicts: Verdict[] }) {
       {recent.map((v) => (
         <span
           key={v.id}
-          title={`beat ${v.beat} · ${v.verdict}${v.error ? ` — ${v.error}` : ""}`}
+          title={`beat ${v.beat} · ${v.verdict}${v.reason ? `: ${v.reason}` : ""}${v.error ? ` — ${v.error}` : ""}`}
           className={
             v.verdict === "PASS"
               ? "h-2 w-2 rounded-full border border-foreground/25"

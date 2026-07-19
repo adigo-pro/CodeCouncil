@@ -15,7 +15,8 @@ def render_verdict(beat: int, ts: str, verdict: dict) -> None:
     clock = ts.split("T")[1][:8] if "T" in ts else ts
     if verdict["verdict"] == "PASS":
         note = " (malformed reply)" if "malformed" in verdict else ""
-        print(_c("2", f"✓ beat {beat} · {clock} · PASS{note}"))
+        reason = f" — {verdict['reason']}" if verdict.get("reason") else ""
+        print(_c("2", f"✓ beat {beat} · {clock} · PASS{reason}{note}"))
         return
     s = verdict["suggestion"]
     sev_color = {"high": "31", "medium": "33", "low": "36"}.get(s["severity"], "33")

@@ -88,7 +88,8 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
 
     parts.append(
         "Is there one concrete, high-value issue worth interrupting the developer for? "
-        "Respond per your output protocol: exactly PASS, or one raw JSON object."
+        "Respond per your output protocol: PASS (optionally 'PASS: <reason under 15 "
+        "words>' — e.g. 'PASS: mid-edit, judging next beat'), or one raw JSON object."
     )
     return "\n".join(parts)
 
@@ -99,8 +100,11 @@ def parse_reply(raw: str) -> dict[str, Any]:
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
 
-    if re.fullmatch(r"pass\.?", text, re.IGNORECASE):
-        return {"verdict": PASS}
+    m = re.fullmatch(r"pass\.?(?:\s*[:—–-]\s*(?P<reason>\S.{0,200}))?", text,
+                     re.IGNORECASE | re.DOTALL)
+    if m:
+        reason = (m.group("reason") or "").strip().rstrip(".")
+        return {"verdict": PASS, **({"reason": reason} if reason else {})}
 
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:

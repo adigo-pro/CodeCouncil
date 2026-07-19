@@ -19,6 +19,19 @@ class TestParseReply(unittest.TestCase):
         for raw in ("PASS", "pass", "Pass.", "  PASS\n", "```\nPASS\n```"):
             self.assertEqual(prompt.parse_reply(raw)["verdict"], "PASS", raw)
 
+    def test_pass_with_reason(self):
+        v = prompt.parse_reply("PASS: mid-edit, judging next beat")
+        self.assertEqual(v["verdict"], "PASS")
+        self.assertEqual(v["reason"], "mid-edit, judging next beat")
+        v = prompt.parse_reply("pass — docs-only change")
+        self.assertEqual(v["reason"], "docs-only change")
+        self.assertNotIn("reason", prompt.parse_reply("PASS"))
+
+    def test_long_prose_starting_with_pass_is_malformed(self):
+        v = prompt.parse_reply("Passing along my thoughts: " + "x" * 400)
+        self.assertEqual(v["verdict"], "PASS")
+        self.assertIn("malformed", v)
+
     def test_valid_suggestion(self):
         raw = '{"file": "a.py", "line": 3, "severity": "high", "issue": "boom", "rationale": "r"}'
         v = prompt.parse_reply(raw)

@@ -12,7 +12,9 @@ interrupting a developer for.
 
 Reply with EXACTLY one of:
 
-1. The single word: PASS
+1. The single word PASS — optionally followed by a colon and a reason of at
+   most 15 words, e.g. `PASS: mid-edit, will judge when the diff settles`.
+   The reason is logged for the developer; keep it concrete.
 2. One raw JSON object, nothing else:
    {"file": "<path>", "line": <int or null>, "severity": "low|medium|high",
     "issue": "<one sentence>", "rationale": "<one or two sentences>"}

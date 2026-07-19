@@ -72,6 +72,18 @@ Rewrites are guarded: strict `version: N+1` + length validation (bad output →
 old file kept), prior versions archived to `.codecouncil/heuristics-history/`,
 atomic swap so the Critic never reads a half-written file.
 
+## Run the dashboard
+
+```sh
+cd ui && bun install && bun dev        # http://localhost:4700
+COUNCIL_REPO=/path/to/repo bun dev     # watch a different repo's .codecouncil/
+```
+
+xai-inspired live UI: reads the real `.codecouncil/` files every 2s — observer
+activity feed, every Critic verdict + suggestion with its Reflector grade, and
+the acceptance-per-heuristics-version curve (same math as `reflector.report`,
+n-counts shown). Nothing is mocked; empty states explain what unlocks them.
+
 ## Tests
 
 ```sh

@@ -43,6 +43,23 @@ export function Header({ data, connected }: { data: Council | null; connected: b
               </span>
             </>
           )}
+          {data && (
+            <span
+              className={`hidden items-center gap-2 rounded-full px-3 py-1.5 font-mono text-xs sm:inline-flex ${
+                connected && data.live.criticLive
+                  ? "bg-live/10 text-live"
+                  : "border border-border text-muted-foreground"
+              }`}
+              title="Critic heartbeat"
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  connected && data.live.criticLive ? "live-dot bg-live" : "bg-muted-foreground/50"
+                }`}
+              />
+              critic
+            </span>
+          )}
           <span
             className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${
               live

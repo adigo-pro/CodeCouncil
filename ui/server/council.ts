@@ -148,6 +148,39 @@ function heuristicsRules(text: string): string[] {
   return rules;
 }
 
+/**
+ * What the Reflector actually changed, version over version: parse every
+ * archived heuristics file plus the current one, diff consecutive rule sets.
+ * Exact-string diff — a rephrased rule shows as remove+add, which is honest.
+ */
+function heuristicsEvolution(historyDir: string, currentText: string) {
+  const versions: { version: number; rules: string[] }[] = [];
+  try {
+    for (const f of fs.readdirSync(historyDir)) {
+      if (!f.endsWith(".md")) continue;
+      const text = readText(path.join(historyDir, f));
+      versions.push({ version: heuristicsVersion(text), rules: heuristicsRules(text) });
+    }
+  } catch {
+    /* no history yet */
+  }
+  if (currentText) {
+    versions.push({ version: heuristicsVersion(currentText), rules: heuristicsRules(currentText) });
+  }
+  versions.sort((a, b) => a.version - b.version);
+  const evolution = [];
+  for (let i = 1; i < versions.length; i++) {
+    const prev = new Set(versions[i - 1].rules);
+    const next = new Set(versions[i].rules);
+    evolution.push({
+      version: versions[i].version,
+      added: versions[i].rules.filter((r) => !prev.has(r)),
+      removed: versions[i - 1].rules.filter((r) => !next.has(r)),
+    });
+  }
+  return evolution;
+}
+
 export function aggregate(repo: string) {
   const cc = path.join(repo, ".codecouncil");
   const suggestions = readNdjson(path.join(cc, "suggestions.ndjsonl"));
@@ -171,6 +204,7 @@ export function aggregate(repo: string) {
         file: s.suggestion?.file ?? "",
         line: s.suggestion?.line ?? null,
         issue: s.suggestion?.issue ?? "",
+        rationale: s.suggestion?.rationale ?? "",
         severity: s.suggestion?.severity ?? "medium",
         deliveredVia: Object.keys(delivered[s.id] ?? {}),
         outcome: o?.outcome ?? null,
@@ -225,6 +259,11 @@ export function aggregate(repo: string) {
       lastVerdictTs: lastVerdict,
       // Observer heartbeats every 30s; consider it live within 3 beats.
       observerLive: stateM !== null && Date.now() - stateM < 95_000,
+      // Critic beats default to 45s; same 3-beat grace.
+      criticLive: (() => {
+        const m = mtime(path.join(cc, "critic-state.json"));
+        return m !== null && Date.now() - m < 150_000;
+      })(),
     },
     stats: {
       beats: observations.length ? observations[observations.length - 1].beat : 0,
@@ -245,6 +284,7 @@ export function aggregate(repo: string) {
       version: heuristicsVersion(heuristicsText),
       rules: heuristicsRules(heuristicsText),
       historyCount,
+      evolution: heuristicsEvolution(path.join(cc, "heuristics-history"), heuristicsText),
     },
   };
 }

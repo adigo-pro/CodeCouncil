@@ -30,8 +30,30 @@ export function HeuristicsCard({ data }: { data: Council | null }) {
         )}
       </ul>
 
+      {h && h.evolution.length > 0 && (
+        <div className="mt-6 border-t border-border pt-4">
+          <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+            What changed in v{h.evolution[h.evolution.length - 1].version}
+          </p>
+          <ul className="mt-3 space-y-2 text-[13px] leading-relaxed">
+            {h.evolution[h.evolution.length - 1].added.map((r, i) => (
+              <li key={`a${i}`} className="flex gap-2.5">
+                <span className="mt-px shrink-0 font-mono text-ok">+</span>
+                <span>{r}</span>
+              </li>
+            ))}
+            {h.evolution[h.evolution.length - 1].removed.map((r, i) => (
+              <li key={`r${i}`} className="flex gap-2.5 text-muted-foreground">
+                <span className="mt-px shrink-0 font-mono text-bad/70">−</span>
+                <span className="line-through decoration-border">{r}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {h && (
-        <div className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground">
+        <div className={`${h.evolution.length ? "mt-4" : "mt-6 border-t border-border"} pt-4 text-xs text-muted-foreground`}>
           <span className="font-mono">
             {h.historyCount
               ? `${h.historyCount} prior version${h.historyCount === 1 ? "" : "s"} archived`

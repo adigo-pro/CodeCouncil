@@ -70,6 +70,9 @@ function ReviewCard({ r, now }: { r: Review; now?: string }) {
         </span>
       </div>
       <p className="mt-3 text-[15px] leading-relaxed">{r.issue}</p>
+      {r.rationale && (
+        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{r.rationale}</p>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
         <span className="font-mono">beat {r.beat}</span>
         <span>·</span>

@@ -20,6 +20,7 @@ export interface Review {
   file: string;
   line: number | null;
   issue: string;
+  rationale: string;
   severity: "low" | "medium" | "high";
   deliveredVia: string[];
   outcome: "accepted" | "rebutted" | "ignored" | "undelivered" | null;
@@ -55,6 +56,7 @@ export interface Council {
     lastObservationTs: string | null;
     lastVerdictTs: string | null;
     observerLive: boolean;
+    criticLive: boolean;
   };
   stats: {
     beats: number;
@@ -71,5 +73,10 @@ export interface Council {
   reviews: Review[];
   verdicts: Verdict[];
   activity: ActivityEvent[];
-  heuristics: { version: number; rules: string[]; historyCount: number };
+  heuristics: {
+    version: number;
+    rules: string[];
+    historyCount: number;
+    evolution: { version: number; added: string[]; removed: string[] }[];
+  };
 }

@@ -43,7 +43,7 @@ def append_ndjson(path: Path, row: dict) -> None:
 
 def _ask(prompt: str, sandbox: str) -> str:
     return openclaw.ask(prompt, sandbox=sandbox, agent="reflector",
-                        session=f"reflector-{uuid.uuid4().hex[:12]}", inbox=INBOX)
+                        session=f"reflector-{uuid.uuid4().hex[:12]}")
 
 
 def grade_pending(cc: Path, sandbox: str) -> int:

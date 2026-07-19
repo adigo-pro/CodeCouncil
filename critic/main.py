@@ -130,12 +130,13 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
 TASK_REVIEW_COOLDOWN_S = 600
 
 
-def should_task_review(state: dict, n_new_requests: int, now: float) -> bool:
+def should_task_review(state: dict, n_new_requests: int, now: float,
+                       cooldown: float = TASK_REVIEW_COOLDOWN_S) -> bool:
     """Debounce: Stop fires every turn; a task review needs new code material
     and a quiet period since the last one."""
     if n_new_requests == 0 or not state.get("material_since_review"):
         return False
-    return now - state.get("last_task_review", 0.0) >= TASK_REVIEW_COOLDOWN_S
+    return now - state.get("last_task_review", 0.0) >= cooldown
 
 
 def recent_events(obs_file: Path, since_epoch: float) -> list[dict]:
@@ -272,7 +273,8 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
     if review_file.exists():
         req_lines, state["review_offset"] = tail_new_lines(
             review_file, state.get("review_offset", 0))
-        if should_task_review(state, len(req_lines), time.time()):
+        if should_task_review(state, len(req_lines), time.time(),
+                              cooldown=ctx.get("task_review_cooldown", TASK_REVIEW_COOLDOWN_S)):
             since = state.get("last_task_review", time.time() - 3600)
             if scheduler.run_special(
                 lambda: task_review(obs_file, ctx, since_epoch=since)
@@ -304,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="also judge batches with no code change (reasoning-only)")
     ap.add_argument("--no-verify", action="store_true",
                     help="skip sandbox verification of findings")
+    ap.add_argument("--task-review-cooldown", type=float, default=TASK_REVIEW_COOLDOWN_S,
+                    help="minimum seconds between task reviews (default 600)")
     args = ap.parse_args(argv)
 
     cc = args.repo.resolve() / ".codecouncil"
@@ -325,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         "agent": args.agent,
         "project": project_context(args.repo.resolve()),
         "verify": not args.no_verify,
+        "task_review_cooldown": args.task_review_cooldown,
     }
     scheduler = TurnScheduler(judge_every_beat=args.judge_every_beat,
                               min_spacing=args.turn_spacing)

@@ -12,10 +12,16 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
-INBOX = "/sandbox/workspaces/critic/inbox.txt"
+INBOX = "/sandbox/workspaces/critic/inbox.txt"  # kept for callers that pin a path
 TURN_TIMEOUT = 180
+
+
+def _unique_inbox() -> str:
+    # per-call path: concurrent daemons (several watched repos) must not race
+    return f"/sandbox/workspaces/critic/inbox-{uuid.uuid4().hex[:8]}.txt"
 
 
 class AgentError(Exception):
@@ -32,7 +38,7 @@ def _run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
 
 
 def ask(prompt: str, sandbox: str = "codecouncil", agent: str = "critic",
-        session: str | None = None, inbox: str = INBOX,
+        session: str | None = None, inbox: str | None = None,
         thinking: str | None = None) -> str:
     """Run one agent turn and return its raw reply text."""
     with tempfile.NamedTemporaryFile(
@@ -48,13 +54,16 @@ def ask(prompt: str, sandbox: str = "codecouncil", agent: str = "critic",
                 raise AgentError(f"stub failed: {res.stderr.strip()}")
             return res.stdout.strip()
 
+        if inbox is None:
+            inbox = _unique_inbox()
         up = _run(["nemoclaw", sandbox, "upload", prompt_file, inbox], timeout=60)
         if up.returncode != 0:
             raise AgentError(f"upload failed: {up.stderr.strip() or up.stdout.strip()}")
 
         sess = f"--session-id {session} " if session else ""
         think = f"--thinking {thinking} " if thinking else ""
-        turn = f'openclaw agent --agent {agent} {sess}{think}-m "$(cat {inbox})" 2>/dev/null'
+        turn = (f'openclaw agent --agent {agent} {sess}{think}-m "$(cat {inbox})" 2>/dev/null; '
+                f"rm -f {inbox}")
         res = _run(
             ["nemoclaw", sandbox, "exec", "--timeout", str(TURN_TIMEOUT), "--",
              "bash", "-lc", turn],

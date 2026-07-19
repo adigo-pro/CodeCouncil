@@ -48,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="ignore saved offsets and replay transcripts from the beginning",
     )
+    ap.add_argument("--wait", action="store_true",
+                    help="wait for the first Claude Code session instead of exiting")
     args = ap.parse_args(argv)
 
     repo = args.repo.resolve()
@@ -56,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     project_dir = transcript.find_project_dir(repo)
+    if project_dir is None and args.wait:
+        print(f"observer: waiting for the first Claude Code session in {repo}…")
+        while project_dir is None:
+            time.sleep(2)
+            project_dir = transcript.find_project_dir(repo)
     if project_dir is None:
         print(
             f"error: no Claude Code transcripts found for {repo}\n"

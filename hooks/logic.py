@@ -66,7 +66,9 @@ def decide(event: dict, suggestions: list[dict], ledger: dict, now: float) -> di
     """Returns hook output JSON (or None for silence). May mark the ledger."""
     hook = event.get("hook_event_name")
 
-    if hook == "PostToolUse":
+    # session start delivers like an edit does: findings that landed between
+    # sessions reach the next session immediately instead of expiring
+    if hook in ("PostToolUse", "UserPromptSubmit"):
         pending = _pending(suggestions, ledger, "context", CONTEXT_SEVERITIES, now)
         if not pending:
             return None
@@ -76,7 +78,7 @@ def decide(event: dict, suggestions: list[dict], ledger: dict, now: float) -> di
         lines = "\n".join(f"- {_describe(r)}" for r in shown)
         return {
             "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
+                "hookEventName": hook,
                 "additionalContext": (
                     "Peer reviewer (CodeCouncil) flagged on recent changes:\n"
                     f"{lines}\n"

@@ -87,7 +87,17 @@ SEED_FILES = {
         'if __name__ == "__main__":\n    unittest.main()\n'
     ),
     "README.md": "# demoapp\n\nA tiny app used for CodeCouncil training runs.\n",
+    ".gitignore": ".claude/\n.codecouncil/\n__pycache__/\n",
 }
+
+TASKS_WAVE3: list[tuple[str, str]] = [
+    ("delivery", "Add a test for pathutil.atomic_write that covers overwriting an existing "
+                 "file. Run the tests, commit."),
+    ("delivery", "Add a get_config(name, default=None) helper function to config.py. Run "
+                 "the tests, commit."),
+    ("clean", "Run the full test suite; fix nothing unless it fails, then commit any "
+              "outstanding changes with an accurate message."),
+]
 
 
 TASKS_WAVE2: list[tuple[str, str]] = [
@@ -108,7 +118,7 @@ TASKS_WAVE2: list[tuple[str, str]] = [
                      "end-to-end'."),
 ]
 
-WAVES = {1: TASKS, 2: TASKS_WAVE2}
+WAVES = {1: TASKS, 2: TASKS_WAVE2, 3: TASKS_WAVE3}
 
 # wave -> extra latent files introduced before the wave starts (uninstructed defects)
 WAVE_SEEDS: dict[int, dict[str, str]] = {

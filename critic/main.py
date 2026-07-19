@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import threading
@@ -87,6 +88,25 @@ def ensure_heuristics(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def normalize_file(repo: Path | None, file: str) -> str:
+    """Map sandbox-staging or absolute paths back to repo-relative ones.
+    A finding about 'underreview/d4ab-config.py' is really about 'config.py'."""
+    if not file:
+        return file
+    if repo:
+        try:
+            return str(Path(file).resolve().relative_to(Path(repo).resolve()))
+        except ValueError:
+            pass
+    name = re.sub(r"^[0-9a-f]{6,32}-", "", Path(file).name)
+    if repo:
+        matches = [p for p in Path(repo).rglob(name)
+                   if ".git" not in p.parts and ".codecouncil" not in p.parts]
+        if len(matches) == 1:
+            return str(matches[0].relative_to(repo))
+    return file
+
+
 def judge_batch(events: list[dict], ctx: dict) -> None:
     """One model judgment over a batch. Runs on the scheduler's worker thread;
     sole writer of the suggestions file."""
@@ -112,6 +132,9 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     if record["verdict"] == "ERROR":
         render_error(beat, ts, record.get("error", "?"))
     else:
+        if record["verdict"] == "SUGGESTION":
+            record["suggestion"]["file"] = normalize_file(
+                ctx.get("repo"), record["suggestion"].get("file", ""))
         if record["verdict"] == "SUGGESTION" and ctx.get("verify", True):
             try:
                 record["verification"] = verify.verify_finding(

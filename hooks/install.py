@@ -26,7 +26,8 @@ def merged_settings(settings: dict) -> tuple[dict, list[str]]:
     cmd = hook_command()
     hooks = settings.setdefault("hooks", {})
     added = []
-    for event, matcher in (("PostToolUse", EDIT_MATCHER), ("Stop", None)):
+    for event, matcher in (("PostToolUse", EDIT_MATCHER), ("Stop", None),
+                           ("UserPromptSubmit", None)):
         entries = hooks.setdefault(event, [])
         already = any(
             h.get("command") == cmd

@@ -122,6 +122,17 @@ class TestDecideContext(unittest.TestCase):
         self.assertEqual(sum(1 for i in range(5) if ledger_mod.delivered(ledger, f"s{i}", "context")), 3)
 
 
+class TestDecideSessionStart(unittest.TestCase):
+    def test_user_prompt_submit_delivers_and_shares_ledger_channel(self):
+        rows = [suggestion()]
+        ledger = {}
+        out = decide({"hook_event_name": "UserPromptSubmit", "cwd": "/x"}, rows, ledger, NOW)
+        self.assertIn("bug here", out["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+        # same context channel: a later PostToolUse must not re-deliver
+        self.assertIsNone(decide(post_tool_use(), rows, ledger, NOW))
+
+
 class TestDecideStop(unittest.TestCase):
     def test_high_blocks_once(self):
         rows = [suggestion()]
@@ -155,7 +166,7 @@ class TestInstall(unittest.TestCase):
     def test_fresh_install_then_idempotent(self):
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
-            self.assertEqual(install(repo), ["PostToolUse", "Stop"])
+            self.assertEqual(install(repo), ["PostToolUse", "Stop", "UserPromptSubmit"])
             settings = json.loads((repo / ".claude" / "settings.json").read_text())
             self.assertEqual(settings["hooks"]["PostToolUse"][0]["matcher"],
                              "Edit|Write|MultiEdit|NotebookEdit")

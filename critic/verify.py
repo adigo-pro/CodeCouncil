@@ -65,4 +65,12 @@ def verify_finding(repo: Path, suggestion: dict, sandbox: str, agent: str) -> di
                              agent=agent, session=f"verify-{uuid.uuid4().hex[:12]}")
     except openclaw.AgentError as e:
         return {"status": "error", "note": str(e)[:200]}
+    finally:
+        # never leave staging copies behind — the critic once flagged its own
+        # stale underreview/ file as a finding in the watched repo
+        try:
+            subprocess.run(["nemoclaw", sandbox, "exec", "--", "rm", "-f", sandbox_path],
+                           capture_output=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     return parse(reply)

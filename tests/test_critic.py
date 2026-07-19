@@ -247,6 +247,21 @@ class TestHeartbeatWithStub(unittest.TestCase):
                          "pending")
 
 
+class TestNormalizeFile(unittest.TestCase):
+    def test_staging_and_absolute_paths_map_back(self):
+        from critic.main import normalize_file
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / "config.py").write_text("x = 1")
+            self.assertEqual(normalize_file(repo, "underreview/d4ab55df-config.py"), "config.py")
+            self.assertEqual(
+                normalize_file(repo, "/sandbox/workspaces/critic/underreview/ab12cd34-config.py"),
+                "config.py")
+            self.assertEqual(normalize_file(repo, str(repo / "config.py")), "config.py")
+            self.assertEqual(normalize_file(repo, "config.py"), "config.py")
+            self.assertEqual(normalize_file(repo, "nowhere.py"), "nowhere.py")  # unresolvable: keep
+
+
 class TestAskWithRetry(unittest.TestCase):
     def test_malformed_then_clean_recovers(self):
         from critic.main import ask_with_retry

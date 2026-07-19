@@ -247,6 +247,34 @@ class TestHeartbeatWithStub(unittest.TestCase):
                          "pending")
 
 
+class TestAskWithRetry(unittest.TestCase):
+    def test_malformed_then_clean_recovers(self):
+        from critic.main import ask_with_retry
+        with tempfile.TemporaryDirectory() as td:
+            marker = Path(td) / "called-once"
+            stub = Path(td) / "stub.sh"
+            stub.write_text(
+                f"#!/bin/sh\nif [ -f {marker} ]; then echo 'PASS'; else touch {marker}; "
+                "echo 'garbled nonsense reply'; fi\n")
+            stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+            os.environ["CRITIC_CMD"] = str(stub)
+            try:
+                v = ask_with_retry("prompt", {"sandbox": "sb", "agent": "ag"})
+            finally:
+                os.environ.pop("CRITIC_CMD", None)
+            self.assertEqual(v["verdict"], "PASS")
+            self.assertNotIn("malformed", v)
+
+    def test_double_failure_keeps_last(self):
+        from critic.main import ask_with_retry
+        os.environ["CRITIC_CMD"] = "/nonexistent-cmd"
+        try:
+            v = ask_with_retry("prompt", {"sandbox": "sb", "agent": "ag"})
+        finally:
+            os.environ.pop("CRITIC_CMD", None)
+        self.assertEqual(v["verdict"], "ERROR")
+
+
 class TestTaskReview(unittest.TestCase):
     def test_tests_run_detection(self):
         ev = lambda cmd: {"type": "tool_call", "payload": {"tool": "Bash", "input": {"command": cmd}}}

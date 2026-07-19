@@ -157,7 +157,9 @@ def main(argv: list[str] | None = None) -> int:
                 p.terminate()
 
     print("\n=== improvement report ===")
-    subprocess.run([sys.executable, "-m", "reflector.report", str(repo)], cwd=REPO_ROOT)
+    sys.stdout.flush()
+    from reflector.report import main as report_main
+    report_main([str(repo)])
     print(f"\ntraining repo kept at: {repo}")
     print(f"point the dashboard at it with: COUNCIL_REPO={repo} npm run dev")
     return 0

@@ -108,10 +108,10 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     prompts_dir = suggestions_file.parent / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
     (prompts_dir / f"{record['id']}.txt").write_text(text, encoding="utf-8")
-    try:
-        session = f"critic-{uuid.uuid4().hex[:12]}"  # unique per call: each judgment starts clean
-        reply = openclaw.ask(text, sandbox=ctx["sandbox"], agent=ctx["agent"], session=session)
-        record.update(prompt.parse_reply(reply))
+    record.update(ask_with_retry(text, ctx))
+    if record["verdict"] == "ERROR":
+        render_error(beat, ts, record.get("error", "?"))
+    else:
         if record["verdict"] == "SUGGESTION" and ctx.get("verify", True):
             try:
                 record["verification"] = verify.verify_finding(
@@ -119,15 +119,30 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
             except Exception as e:  # verification must never lose a finding
                 record["verification"] = {"status": "error", "note": str(e)[:200]}
         render_verdict(beat, ts, record)
-    except openclaw.AgentError as e:
-        record.update({"verdict": "ERROR", "error": str(e)})
-        render_error(beat, ts, str(e))
 
     with suggestions_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 TASK_REVIEW_COOLDOWN_S = 600
+
+
+def ask_with_retry(text: str, ctx: dict) -> dict:
+    """One agent turn, retried once on transport failure or malformed reply —
+    transient gateway errors were observed eating real catches."""
+    last: dict = {}
+    for attempt in range(2):
+        try:
+            reply = openclaw.ask(text, sandbox=ctx["sandbox"], agent=ctx["agent"],
+                                 session=f"critic-{uuid.uuid4().hex[:12]}")
+        except openclaw.AgentError as e:
+            last = {"verdict": "ERROR", "error": str(e)}
+            continue
+        parsed = prompt.parse_reply(reply)
+        if "malformed" not in parsed:
+            return parsed
+        last = parsed
+    return last
 
 
 def should_task_review(state: dict, n_new_requests: int, now: float,
@@ -176,14 +191,11 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
     prompts_dir = suggestions_file.parent / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
     (prompts_dir / f"{record['id']}.txt").write_text(text, encoding="utf-8")
-    try:
-        reply = openclaw.ask(text, sandbox=ctx["sandbox"], agent=ctx["agent"],
-                             session=f"critic-{uuid.uuid4().hex[:12]}")
-        record.update(prompt.parse_reply(reply))
+    record.update(ask_with_retry(text, ctx))
+    if record["verdict"] == "ERROR":
+        render_error(ctx["beat"], ctx["ts"], record.get("error", "?"))
+    else:
         render_verdict(ctx["beat"], ctx["ts"], record)
-    except openclaw.AgentError as e:
-        record.update({"verdict": "ERROR", "error": str(e)})
-        render_error(ctx["beat"], ctx["ts"], str(e))
     with suggestions_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 

@@ -32,7 +32,8 @@ def _run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
 
 
 def ask(prompt: str, sandbox: str = "codecouncil", agent: str = "critic",
-        session: str | None = None, inbox: str = INBOX) -> str:
+        session: str | None = None, inbox: str = INBOX,
+        thinking: str | None = None) -> str:
     """Run one agent turn and return its raw reply text."""
     with tempfile.NamedTemporaryFile(
         "w", suffix=".txt", delete=False, encoding="utf-8"
@@ -52,7 +53,8 @@ def ask(prompt: str, sandbox: str = "codecouncil", agent: str = "critic",
             raise AgentError(f"upload failed: {up.stderr.strip() or up.stdout.strip()}")
 
         sess = f"--session-id {session} " if session else ""
-        turn = f'openclaw agent --agent {agent} {sess}-m "$(cat {inbox})" 2>/dev/null'
+        think = f"--thinking {thinking} " if thinking else ""
+        turn = f'openclaw agent --agent {agent} {sess}{think}-m "$(cat {inbox})" 2>/dev/null'
         res = _run(
             ["nemoclaw", sandbox, "exec", "--timeout", str(TURN_TIMEOUT), "--",
              "bash", "-lc", turn],

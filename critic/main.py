@@ -18,7 +18,7 @@ from pathlib import Path
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
 
-from . import openclaw, prompt
+from . import openclaw, prompt, verify
 from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
@@ -112,6 +112,12 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         session = f"critic-{uuid.uuid4().hex[:12]}"  # unique per call: each judgment starts clean
         reply = openclaw.ask(text, sandbox=ctx["sandbox"], agent=ctx["agent"], session=session)
         record.update(prompt.parse_reply(reply))
+        if record["verdict"] == "SUGGESTION" and ctx.get("verify", True):
+            try:
+                record["verification"] = verify.verify_finding(
+                    ctx["repo"], record["suggestion"], ctx["sandbox"], ctx["agent"])
+            except Exception as e:  # verification must never lose a finding
+                record["verification"] = {"status": "error", "note": str(e)[:200]}
         render_verdict(beat, ts, record)
     except openclaw.AgentError as e:
         record.update({"verdict": "ERROR", "error": str(e)})
@@ -296,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--agent", default="critic", help="OpenClaw agent id in the sandbox")
     ap.add_argument("--judge-every-beat", action="store_true",
                     help="also judge batches with no code change (reasoning-only)")
+    ap.add_argument("--no-verify", action="store_true",
+                    help="skip sandbox verification of findings")
     args = ap.parse_args(argv)
 
     cc = args.repo.resolve() / ".codecouncil"
@@ -310,11 +318,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"critic: judging via `nemoclaw {args.sandbox} agent --agent {args.agent}` every {args.interval:g}s")
 
     ctx = {
+        "repo": args.repo.resolve(),
         "heuristics_path": cc / "heuristics.md",
         "suggestions_file": cc / "suggestions.ndjsonl",
         "sandbox": args.sandbox,
         "agent": args.agent,
         "project": project_context(args.repo.resolve()),
+        "verify": not args.no_verify,
     }
     scheduler = TurnScheduler(judge_every_beat=args.judge_every_beat,
                               min_spacing=args.turn_spacing)

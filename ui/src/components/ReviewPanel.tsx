@@ -122,6 +122,18 @@ function ReviewCard({ r, now }: { r: Review; now?: string }) {
             {r.fileTouched ? "✓ file touched after delivery" : "file untouched after delivery"}
           </span>
         )}
+        {r.verification && r.verification.status === "verified" && (
+          <span className="rounded-full bg-ok/10 px-2 py-0.5 font-mono text-ok"
+                title={r.verification.note}>
+            ✓ verified in sandbox
+          </span>
+        )}
+        {r.verification && r.verification.status === "refuted" && (
+          <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-muted-foreground/70"
+                title={r.verification.note}>
+            refuted — not delivered
+          </span>
+        )}
       </div>
       {r.evidence && (
         <p className="mt-3 border-t border-border pt-3 text-[13px] italic text-muted-foreground">

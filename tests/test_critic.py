@@ -140,7 +140,8 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.heuristics = self.cc / "heuristics.md"
         self.stub = self.cc / "stub.sh"
         self.ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
-                    "sandbox": "sb", "agent": "ag", "project": ""}
+                    "sandbox": "sb", "agent": "ag", "project": "",
+                    "repo": self.cc, "verify": False}
 
     def tearDown(self):
         os.environ.pop("CRITIC_CMD", None)

@@ -43,6 +43,8 @@ def _pending(suggestions: list[dict], ledger: dict, channel: str,
             and s.get("severity") in severities
             and _age_ok(row, now)
             and not ledger_mod.delivered(ledger, row["id"], channel)
+            # findings the critic itself refuted in the sandbox never ship
+            and (row.get("verification") or {}).get("status") != "refuted"
         ):
             out.append(row)
     return out
@@ -54,6 +56,9 @@ def _describe(row: dict) -> str:
     text = f"[{s['severity'].upper()}] {loc} — {s['issue']}"
     if s.get("rationale"):
         text += f" (why: {s['rationale']})"
+    v = row.get("verification") or {}
+    if v.get("status") == "verified":
+        text += f" [verified in sandbox: {v.get('note', '')}]"
     return text
 
 

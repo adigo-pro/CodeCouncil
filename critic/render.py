@@ -21,10 +21,15 @@ def render_verdict(beat: int, ts: str, verdict: dict) -> None:
     s = verdict["suggestion"]
     sev_color = {"high": "31", "medium": "33", "low": "36"}.get(s["severity"], "33")
     loc = f"{s['file']}:{s['line']}" if s.get("line") else s["file"]
-    print(_c("1;" + sev_color, f"■ beat {beat} · {clock} · {s['severity'].upper()} · {loc}"))
+    kind = " · task review" if verdict.get("review_kind") == "task" else ""
+    print(_c("1;" + sev_color, f"■ beat {beat} · {clock} · {s['severity'].upper()} · {loc}{kind}"))
     print(f"  {s['issue']}")
     if s.get("rationale"):
         print(_c("2", f"  why: {s['rationale']}"))
+    v = verdict.get("verification")
+    if v:
+        mark = {"verified": "32", "refuted": "31"}.get(v["status"], "2")
+        print(_c(mark, f"  sandbox {v['status']}: {v['note']}"))
 
 
 def render_quiet(beat: int, ts: str) -> None:

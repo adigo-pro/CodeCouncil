@@ -25,6 +25,7 @@ export interface Review {
   deliveredVia: string[];
   promptChars: number;
   reviewKind: "beat" | "task";
+  verification: { status: string; note: string } | null;
   outcome: "accepted" | "rebutted" | "ignored" | "undelivered" | null;
   evidence: string;
   fileTouched: boolean | null;

@@ -80,6 +80,25 @@ def evidence(row: dict, delivery_ts: float, observations: list[dict]) -> str:
     return "\n".join(parts)
 
 
+def file_touched(row: dict, delivery_ts: float, observations: list[dict]) -> bool:
+    """Model-free signal: did the flagged file show up in any post-delivery change?"""
+    path = row["suggestion"]["file"]
+    for o in observations:
+        if o.get("type") != "diff":
+            continue
+        t = _epoch(o.get("ts", ""))
+        if t is None or not (delivery_ts <= t <= delivery_ts + EVIDENCE_WINDOW_S):
+            continue
+        payload = o.get("payload", {})
+        if path in payload.get("diff", ""):
+            return True
+        if any(path in u for u in payload.get("untracked", [])):
+            return True
+        if any(path in k for k in payload.get("untracked_contents", {})):
+            return True
+    return False
+
+
 def build_prompt(row: dict, evidence_text: str) -> str:
     s = row["suggestion"]
     loc = f"{s['file']}:{s['line']}" if s.get("line") else s["file"]

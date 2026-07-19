@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from reflector import judge, rewrite
-from reflector.report import build_rows
+from reflector.report import build_rows, consistent
 
 NOW = time.time()
 

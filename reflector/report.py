@@ -15,11 +15,25 @@ from .main import read_ndjson
 GRADED = ("accepted", "rebutted", "ignored")
 
 
+def consistent(outcome: dict) -> bool | None:
+    """Model grade vs the deterministic file_touched signal. None = not applicable."""
+    touched = outcome.get("file_touched")
+    if touched is None or outcome.get("outcome") not in GRADED:
+        return None
+    if outcome["outcome"] == "accepted":
+        return touched
+    if outcome["outcome"] == "ignored":
+        return not touched
+    return True  # rebutted happens in words; either way is consistent
+
+
 def build_rows(suggestions: list[dict], outcomes: list[dict]) -> list[dict]:
     per: dict[int, dict] = defaultdict(lambda: {
         "suggested": 0, "delivered": 0,
         "accepted": 0, "rebutted": 0, "ignored": 0, "undelivered": 0,
+        "xcheck_ok": 0, "xcheck_n": 0,
     })
+    inconsistent = []
     for s in suggestions:
         if s.get("verdict") == "SUGGESTION":
             per[s.get("heuristics_version", 0)]["suggested"] += 1
@@ -29,6 +43,12 @@ def build_rows(suggestions: list[dict], outcomes: list[dict]) -> list[dict]:
         if outcome in GRADED:
             v[outcome] += 1
             v["delivered"] += 1
+            ok = consistent(o)
+            if ok is not None:
+                v["xcheck_n"] += 1
+                v["xcheck_ok"] += int(ok)
+                if not ok:
+                    inconsistent.append(o)
         elif outcome == "undelivered":
             v["undelivered"] += 1
     rows = []
@@ -38,19 +58,28 @@ def build_rows(suggestions: list[dict], outcomes: list[dict]) -> list[dict]:
         rows.append({
             "version": version, **v,
             "acceptance": (v["accepted"] / graded) if graded else None,
+            "xcheck": (v["xcheck_ok"] / v["xcheck_n"]) if v["xcheck_n"] else None,
+            "inconsistent": inconsistent,
         })
     return rows
 
 
 def render(rows: list[dict]) -> str:
-    header = f"{'version':>7}  {'suggested':>9}  {'delivered':>9}  {'accepted':>8}  {'rebutted':>8}  {'ignored':>7}  {'undeliv':>7}  {'acceptance':>10}"
+    header = f"{'version':>7}  {'suggested':>9}  {'delivered':>9}  {'accepted':>8}  {'rebutted':>8}  {'ignored':>7}  {'undeliv':>7}  {'acceptance':>10}  {'xcheck':>6}"
     lines = [header, "-" * len(header)]
     for r in rows:
         acc = f"{r['acceptance']:.0%}" if r["acceptance"] is not None else "—"
+        xc = f"{r['xcheck']:.0%}" if r["xcheck"] is not None else "—"
         lines.append(
             f"{'v' + str(r['version']):>7}  {r['suggested']:>9}  {r['delivered']:>9}  "
             f"{r['accepted']:>8}  {r['rebutted']:>8}  {r['ignored']:>7}  "
-            f"{r['undelivered']:>7}  {acc:>10}"
+            f"{r['undelivered']:>7}  {acc:>10}  {xc:>6}"
+        )
+    flagged = rows[-1]["inconsistent"] if rows else []
+    for o in flagged:
+        lines.append(
+            f"⚠ grade/{o['outcome']} disagrees with code signal "
+            f"(file_touched={o.get('file_touched')}): {o.get('issue', '?')[:70]}"
         )
     return "\n".join(lines)
 

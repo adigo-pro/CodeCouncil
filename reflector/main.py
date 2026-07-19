@@ -77,6 +77,7 @@ def grade_pending(cc: Path, sandbox: str) -> int:
             "outcome": grade["outcome"], "evidence": grade.get("evidence", ""),
             "issue": row["suggestion"]["issue"],
             "heuristics_version": row.get("heuristics_version", 0),
+            "file_touched": judge.file_touched(row, d, observations),
             **({"malformed": grade["malformed"]} if "malformed" in grade else {}),
         })
         print(f"reflector: {row['id']} → {grade['outcome']}"

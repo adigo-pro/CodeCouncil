@@ -18,7 +18,7 @@ def heuristics_version(heuristics: str) -> int:
 
 
 def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
-                 project: str = "") -> str:
+                 project: str = "", verdict_history: list[dict] | None = None) -> str:
     reasoning = [e for e in events if e["type"] == "reasoning"][-MAX_REASONING_EVENTS:]
     tools = [e for e in events if e["type"] == "tool_call"]
 
@@ -62,6 +62,17 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
         parts.append("NEW FILES (not yet committed):")
         for path, text in sorted(contents.items()):
             parts += [f"--- {path} ---", text.rstrip()]
+        parts.append("")
+
+    if verdict_history:
+        parts.append("YOUR RECENT VERDICTS ON THIS SESSION:")
+        for v in verdict_history:
+            loc = f"{v['file']}:{v['line']}" if v.get("line") else v["file"]
+            parts.append(f"- [{v['outcome']}] {loc} — {v['issue']}")
+        parts.append(
+            "Do not re-flag issues already listed above unless new evidence "
+            "contradicts the outcome; a rebutted finding is settled."
+        )
         parts.append("")
 
     parts.append(

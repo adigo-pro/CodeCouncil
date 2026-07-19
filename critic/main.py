@@ -53,6 +53,32 @@ def project_context(repo: Path) -> str:
     return "\n".join(lines)
 
 
+def verdict_history(suggestions_file: Path, outcomes_file: Path, limit: int = 5) -> list[dict]:
+    """The critic's own recent suggestions joined with how each was received."""
+    def rows(path: Path) -> list[dict]:
+        if not path.exists():
+            return []
+        out = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return out
+
+    grades = {o.get("suggestion_id"): o.get("outcome") for o in rows(outcomes_file)}
+    history = []
+    for r in rows(suggestions_file):
+        if r.get("verdict") != "SUGGESTION":
+            continue
+        s = r["suggestion"]
+        history.append({
+            "outcome": grades.get(r.get("id"), "pending"),
+            "file": s["file"], "line": s.get("line"), "issue": s["issue"],
+        })
+    return history[-limit:]
+
+
 def ensure_heuristics(path: Path) -> str:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +109,9 @@ def heartbeat(obs_file: Path, state: dict, heuristics_path: Path,
         return
 
     heuristics = ensure_heuristics(heuristics_path)
-    text = prompt.build_prompt(events, state.get("latest_diff"), heuristics, project=project)
+    history = verdict_history(suggestions_file, suggestions_file.parent / "outcomes.ndjsonl")
+    text = prompt.build_prompt(events, state.get("latest_diff"), heuristics,
+                               project=project, verdict_history=history)
     record = {
         "id": uuid.uuid4().hex[:12],
         "ts": ts,

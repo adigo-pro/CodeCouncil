@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from critic import prompt
-from critic.main import heartbeat, load_state
+from critic.main import heartbeat, load_state, verdict_history
 
 
 class TestParseReply(unittest.TestCase):
@@ -78,6 +78,18 @@ class TestPrompt(unittest.TestCase):
     def test_version_default_zero(self):
         self.assertEqual(prompt.heuristics_version("no header"), 0)
 
+    def test_verdict_history_rendered_with_instruction(self):
+        history = [{"outcome": "rebutted", "file": "s.json", "line": None, "issue": "wrong dir"},
+                   {"outcome": "pending", "file": "a.py", "line": 2, "issue": "leak"}]
+        text = prompt.build_prompt(self._events(), None, "version: 1", verdict_history=history)
+        self.assertIn("[rebutted] s.json — wrong dir", text)
+        self.assertIn("[pending] a.py:2 — leak", text)
+        self.assertIn("a rebutted finding is settled", text)
+
+    def test_no_history_no_section(self):
+        text = prompt.build_prompt(self._events(), None, "version: 1")
+        self.assertNotIn("RECENT VERDICTS", text)
+
 
 class TestHeartbeatWithStub(unittest.TestCase):
     def setUp(self):
@@ -138,6 +150,17 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["verdict"], "SUGGESTION")
         self.assertEqual(state["latest_diff"]["payload"]["diff"], "+bad")
+
+    def test_verdict_history_joins_outcomes(self):
+        self.suggestions.write_text(json.dumps({
+            "id": "s1", "verdict": "SUGGESTION",
+            "suggestion": {"file": "a.py", "line": 1, "severity": "high", "issue": "i1"}}) + "\n")
+        outcomes = self.cc / "outcomes.ndjsonl"
+        outcomes.write_text(json.dumps({"suggestion_id": "s1", "outcome": "rebutted"}) + "\n")
+        h = verdict_history(self.suggestions, outcomes)
+        self.assertEqual(h, [{"outcome": "rebutted", "file": "a.py", "line": 1, "issue": "i1"}])
+        self.assertEqual(verdict_history(self.suggestions, self.cc / "missing.ndjsonl")[0]["outcome"],
+                         "pending")
 
 
 if __name__ == "__main__":

@@ -31,13 +31,16 @@ def _sugg(verification=None):
 
 class TestParse(unittest.TestCase):
     def test_statuses(self):
-        self.assertEqual(verify.parse("VERIFIED: ZeroDivisionError raised"),
+        self.assertEqual(verify.parse("CONFIRMED: ZeroDivisionError raised"),
                          {"status": "verified", "note": "ZeroDivisionError raised"})
-        self.assertEqual(verify.parse("REFUTED: guard exists on line 2")["status"], "refuted")
+        self.assertEqual(verify.parse("FALSE-ALARM: guard exists on line 2")["status"], "refuted")
         self.assertEqual(verify.parse("INCONCLUSIVE: needs DB")["status"], "inconclusive")
+        # legacy labels still parse
+        self.assertEqual(verify.parse("VERIFIED: repro raised")["status"], "verified")
+        self.assertEqual(verify.parse("REFUTED: behaves fine")["status"], "refuted")
 
     def test_takes_last_matching_line(self):
-        raw = "Running repro...\nsome tool output\nVERIFIED: got the exception"
+        raw = "Running repro...\nsome tool output\nCONFIRMED: got the exception"
         self.assertEqual(verify.parse(raw)["note"], "got the exception")
 
     def test_garbage_is_inconclusive(self):

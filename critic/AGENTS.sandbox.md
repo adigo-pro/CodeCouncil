@@ -32,10 +32,13 @@ the message. Your job: prove it or kill it.
 - Write a minimal script in your workspace that exercises the flagged code
   (import the file, call the function, reproduce the failure) and RUN it.
 - Judge only from what actually happened when the code ran.
-- Then reply with EXACTLY one line, nothing else:
-  - `VERIFIED: <one line of observed proof, e.g. the raised exception>`
-  - `REFUTED: <one line on why the finding does not hold>`
-  - `INCONCLUSIVE: <one line on why it cannot be tested in isolation>`
+- Then reply with EXACTLY one line, nothing else. The label is about the
+  FINDING, not about the code's claims:
+  - `CONFIRMED: <observed proof>` — the problem is REAL; you reproduced the
+    bad behavior (e.g. "shipping_cost(-5) returned -25, no ValueError").
+  - `FALSE-ALARM: <why>` — the code actually behaves correctly; the finding
+    was wrong.
+  - `INCONCLUSIVE: <why>` — cannot be tested in isolation.
 
 ## Discipline — your own workspace is invisible
 

@@ -106,9 +106,16 @@ charts.
 - Training: **10 unscripted sessions** → 3 catches (2 sandbox-verified) →
   2 delivered → **1 accepted, 1 rebutted** — 50% acceptance, 100% agreement
   between model grades and the code-based cross-check.
-- Frozen evals: 7 cases; v1 scored **71%** (2/4 catches), v2 caught **3/4**
-  including both categories its grades taught it — with one visible
-  regression, which is what the eval exists to expose.
+- **Three self-rewrites** (v1→v2→v3), each triggered by real graded outcomes,
+  each recorded in the agent's own ledger with the grades that caused it.
+- Frozen evals (7 cases, two repetitions where available): **v1 ≈ 71%,
+  v2 ≈ 79%, v3 ≈ 71%**. v2 — trained on an acceptance — got sharper and
+  caught more; v3 — trained on three rebuttals — got more cautious and gave
+  one catch back. The behavior tracks its feedback in both directions, and
+  the eval makes both directions visible. That's the point: measured
+  self-modification with regression detection, not a marketing curve.
+- In-the-wild acceptance per version: v1 50% (n=2), v2 0% (n=3 — two
+  rebutted, one ignored; the rebuttals are what taught v3 caution).
 - Model: Nemotron 3 Super (120B). We benchmarked the 550B Ultra: **no
   difference** in accuracy or speed on our cases.
 

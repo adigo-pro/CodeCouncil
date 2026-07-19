@@ -31,6 +31,11 @@ def render_quiet(beat: int, ts: str) -> None:
     print(_c("2", f"· beat {beat} · {clock} · nothing new, no call made"))
 
 
+def render_status(beat: int, ts: str, msg: str) -> None:
+    clock = ts.split("T")[1][:8] if "T" in ts else ts
+    print(_c("2", f"· beat {beat} · {clock} · {msg}"))
+
+
 def render_error(beat: int, ts: str, msg: str) -> None:
     clock = ts.split("T")[1][:8] if "T" in ts else ts
     print(_c("31", f"! beat {beat} · {clock} · agent error: {msg}"))

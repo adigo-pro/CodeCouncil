@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from critic import prompt
-from critic.main import heartbeat, load_state, verdict_history
+from critic.main import TurnScheduler, heartbeat, load_state, verdict_history
 
 
 class TestParseReply(unittest.TestCase):
@@ -116,6 +116,8 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.suggestions = self.cc / "suggestions.ndjsonl"
         self.heuristics = self.cc / "heuristics.md"
         self.stub = self.cc / "stub.sh"
+        self.ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
+                    "sandbox": "sb", "agent": "ag", "project": ""}
 
     def tearDown(self):
         os.environ.pop("CRITIC_CMD", None)
@@ -131,27 +133,63 @@ class TestHeartbeatWithStub(unittest.TestCase):
             for e in events:
                 f.write(json.dumps(e) + "\n")
 
+    def _beat(self, state, scheduler):
+        status = heartbeat(self.obs, state, scheduler, self.ctx)
+        if scheduler.thread:
+            scheduler.thread.join()
+        return status
+
     def test_no_new_events_makes_no_call(self):
         self.obs.write_text("")
         os.environ["CRITIC_CMD"] = "/nonexistent"  # would explode if called
         state = load_state(self.cc / "nope.json")
-        heartbeat(self.obs, state, self.heuristics, self.suggestions, "sb", "ag")
+        status = self._beat(state, TurnScheduler())
+        self.assertEqual(status, "idle")
         self.assertFalse(self.suggestions.exists())
         self.assertEqual(state["beat"], 1)
 
-    def test_events_produce_logged_verdict(self):
+    def test_reasoning_only_is_gated_no_call(self):
+        os.environ["CRITIC_CMD"] = "/nonexistent"  # would explode if called
+        self._write_obs([
+            {"ts": "t", "beat": 1, "type": "reasoning", "session": "s",
+             "payload": {"kind": "text", "text": "thinking out loud"}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler()
+        self.assertEqual(self._beat(state, scheduler), "gated")
+        self.assertFalse(self.suggestions.exists())
+        self.assertEqual(len(scheduler.pending), 1)  # held, not dropped
+
+    def test_gated_events_merge_into_next_diff_batch(self):
+        self._set_stub("PASS")
+        self._write_obs([
+            {"ts": "t", "beat": 1, "type": "reasoning", "session": "s",
+             "payload": {"kind": "text", "text": "planning"}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler()
+        self._beat(state, scheduler)  # gated
+        self._write_obs([
+            {"ts": "t", "beat": 2, "type": "diff", "session": None,
+             "payload": {"diff": "+code", "stat": "", "untracked": []}},
+        ])
+        self.assertEqual(self._beat(state, scheduler), "dispatched")
+        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["n_events"], 2)  # merged: held reasoning + new diff
+
+    def test_judge_every_beat_bypasses_gate(self):
         self._set_stub("PASS")
         self._write_obs([
             {"ts": "t", "beat": 1, "type": "reasoning", "session": "s",
              "payload": {"kind": "text", "text": "hello"}},
         ])
         state = load_state(self.cc / "nope.json")
-        heartbeat(self.obs, state, self.heuristics, self.suggestions, "sb", "ag")
+        status = self._beat(state, TurnScheduler(judge_every_beat=True))
+        self.assertEqual(status, "dispatched")
         rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
-        self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["verdict"], "PASS")
         self.assertEqual(rows[0]["heuristics_version"], 1)  # seeded from heuristics.seed.md
-        self.assertTrue(self.heuristics.exists())
 
     def test_suggestion_logged_and_offset_advances(self):
         self._set_stub('{"file": "x.py", "line": 2, "severity": "low", "issue": "i", "rationale": "r"}')
@@ -160,9 +198,10 @@ class TestHeartbeatWithStub(unittest.TestCase):
              "payload": {"diff": "+bad", "stat": "", "untracked": []}},
         ])
         state = load_state(self.cc / "nope.json")
-        heartbeat(self.obs, state, self.heuristics, self.suggestions, "sb", "ag")
+        scheduler = TurnScheduler()
+        self._beat(state, scheduler)
         # second beat: nothing new -> no second row
-        heartbeat(self.obs, state, self.heuristics, self.suggestions, "sb", "ag")
+        self._beat(state, scheduler)
         rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["verdict"], "SUGGESTION")
@@ -178,6 +217,26 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertEqual(h, [{"outcome": "rebutted", "file": "a.py", "line": 1, "issue": "i1"}])
         self.assertEqual(verdict_history(self.suggestions, self.cc / "missing.ndjsonl")[0]["outcome"],
                          "pending")
+
+
+class TestSchedulerAsync(unittest.TestCase):
+    def test_busy_queues_then_merges(self):
+        import threading as th
+        release, calls = th.Event(), []
+
+        def slow_judge(batch, ctx):
+            release.wait(timeout=5)
+            calls.append(list(batch))
+
+        s = TurnScheduler(judge_fn=slow_judge, judge_every_beat=True)
+        self.assertEqual(s.submit([{"type": "diff"}], {}), "dispatched")
+        self.assertEqual(s.submit([{"type": "reasoning"}], {}), "busy")  # returns immediately
+        self.assertEqual(s.submit([{"type": "tool_call"}], {}), "busy")
+        release.set()
+        s.thread.join()
+        self.assertEqual(s.submit([], {}), "dispatched")  # flush the queued pair
+        s.thread.join()
+        self.assertEqual([len(c) for c in calls], [1, 2])
 
 
 if __name__ == "__main__":

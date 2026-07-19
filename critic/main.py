@@ -10,6 +10,7 @@ import argparse
 import json
 import shutil
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -18,7 +19,7 @@ from observer.events import now_iso
 from observer.transcript import tail_new_lines
 
 from . import openclaw, prompt
-from .render import render_error, render_quiet, render_verdict
+from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
 
@@ -86,9 +87,76 @@ def ensure_heuristics(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def heartbeat(obs_file: Path, state: dict, heuristics_path: Path,
-              suggestions_file: Path, sandbox: str, agent: str,
-              project: str = "") -> None:
+def judge_batch(events: list[dict], ctx: dict) -> None:
+    """One model judgment over a batch. Runs on the scheduler's worker thread;
+    sole writer of the suggestions file."""
+    beat, ts = ctx["beat"], ctx["ts"]
+    suggestions_file = ctx["suggestions_file"]
+    heuristics = ensure_heuristics(ctx["heuristics_path"])
+    history = verdict_history(suggestions_file, suggestions_file.parent / "outcomes.ndjsonl")
+    text = prompt.build_prompt(events, ctx.get("latest_diff"), heuristics,
+                               project=ctx.get("project", ""), verdict_history=history)
+    record = {
+        "id": uuid.uuid4().hex[:12],
+        "ts": ts,
+        "beat": beat,
+        "heuristics_version": prompt.heuristics_version(heuristics),
+        "n_events": len(events),
+    }
+    try:
+        session = f"critic-{uuid.uuid4().hex[:12]}"  # unique per call: each judgment starts clean
+        reply = openclaw.ask(text, sandbox=ctx["sandbox"], agent=ctx["agent"], session=session)
+        record.update(prompt.parse_reply(reply))
+        render_verdict(beat, ts, record)
+    except openclaw.AgentError as e:
+        record.update({"verdict": "ERROR", "error": str(e)})
+        render_error(beat, ts, str(e))
+
+    with suggestions_file.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+class TurnScheduler:
+    """At most one agent turn in flight; events accumulate (never drop) while
+    busy or gated, and dispatch as one merged batch when possible."""
+
+    def __init__(self, judge_fn=judge_batch, judge_every_beat: bool = False):
+        self.judge_fn = judge_fn
+        self.judge_every_beat = judge_every_beat
+        self.pending: list[dict] = []
+        self.thread: threading.Thread | None = None
+
+    def busy(self) -> bool:
+        return self.thread is not None and self.thread.is_alive()
+
+    def _gate_open(self) -> bool:
+        return self.judge_every_beat or any(e.get("type") == "diff" for e in self.pending)
+
+    def submit(self, events: list[dict], ctx: dict) -> str:
+        """Returns what happened: idle | gated | busy | dispatched."""
+        self.pending.extend(events)
+        if not self.pending:
+            return "idle"
+        if not self._gate_open():
+            return "gated"
+        if self.busy():
+            return "busy"
+        batch, self.pending = self.pending, []
+        self.thread = threading.Thread(target=self.judge_fn, args=(batch, ctx), daemon=True)
+        self.thread.start()
+        return "dispatched"
+
+    def drain(self, ctx: dict) -> None:
+        """Finish in-flight work and flush a dispatchable remainder (for --once)."""
+        if self.thread:
+            self.thread.join()
+        if self.pending and self._gate_open():
+            self.submit([], ctx)
+            if self.thread:
+                self.thread.join()
+
+
+def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) -> str:
     state["beat"] += 1
     beat, ts = state["beat"], now_iso()
 
@@ -104,32 +172,15 @@ def heartbeat(obs_file: Path, state: dict, heuristics_path: Path,
     if diffs:
         state["latest_diff"] = diffs[-1]
 
-    if not events:
+    ctx = {**ctx, "beat": beat, "ts": ts, "latest_diff": state.get("latest_diff")}
+    status = scheduler.submit(events, ctx)
+    if status == "idle":
         render_quiet(beat, ts)
-        return
-
-    heuristics = ensure_heuristics(heuristics_path)
-    history = verdict_history(suggestions_file, suggestions_file.parent / "outcomes.ndjsonl")
-    text = prompt.build_prompt(events, state.get("latest_diff"), heuristics,
-                               project=project, verdict_history=history)
-    record = {
-        "id": uuid.uuid4().hex[:12],
-        "ts": ts,
-        "beat": beat,
-        "heuristics_version": prompt.heuristics_version(heuristics),
-        "n_events": len(events),
-    }
-    try:
-        session = f"critic-{uuid.uuid4().hex[:12]}"  # unique per call: each judgment starts clean
-        reply = openclaw.ask(text, sandbox=sandbox, agent=agent, session=session)
-        record.update(prompt.parse_reply(reply))
-        render_verdict(beat, ts, record)
-    except openclaw.AgentError as e:
-        record.update({"verdict": "ERROR", "error": str(e)})
-        render_error(beat, ts, str(e))
-
-    with suggestions_file.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    elif status == "gated":
+        render_status(beat, ts, f"{len(scheduler.pending)} event(s) held — no code change yet")
+    elif status == "busy":
+        render_status(beat, ts, f"turn in flight — {len(scheduler.pending)} event(s) queued")
+    return status
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,6 +190,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--once", action="store_true", help="run a single heartbeat and exit")
     ap.add_argument("--sandbox", default="codecouncil", help="NemoClaw sandbox name")
     ap.add_argument("--agent", default="critic", help="OpenClaw agent id in the sandbox")
+    ap.add_argument("--judge-every-beat", action="store_true",
+                    help="also judge batches with no code change (reasoning-only)")
     args = ap.parse_args(argv)
 
     cc = args.repo.resolve() / ".codecouncil"
@@ -152,15 +205,23 @@ def main(argv: list[str] | None = None) -> int:
     print(f"critic: reading {obs_file}")
     print(f"critic: judging via `nemoclaw {args.sandbox} agent --agent {args.agent}` every {args.interval:g}s")
 
-    project = project_context(args.repo.resolve())
+    ctx = {
+        "heuristics_path": cc / "heuristics.md",
+        "suggestions_file": cc / "suggestions.ndjsonl",
+        "sandbox": args.sandbox,
+        "agent": args.agent,
+        "project": project_context(args.repo.resolve()),
+    }
+    scheduler = TurnScheduler(judge_every_beat=args.judge_every_beat)
     try:
         while True:
-            heartbeat(obs_file, state, cc / "heuristics.md", cc / "suggestions.ndjsonl",
-                      args.sandbox, args.agent, project=project)
+            heartbeat(obs_file, state, scheduler, ctx)
             state_path.write_text(json.dumps(
                 {k: state[k] for k in ("offset", "beat", "latest_diff") if k in state}
             ), encoding="utf-8")
             if args.once:
+                scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),
+                                 "latest_diff": state.get("latest_diff")})
                 break
             time.sleep(args.interval)
     except KeyboardInterrupt:

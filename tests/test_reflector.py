@@ -133,6 +133,35 @@ class TestReport(unittest.TestCase):
         self.assertEqual((v1["suggested"], v1["accepted"], v1["acceptance"]), (2, 1, 0.5))
         self.assertEqual((v2["suggested"], v2["acceptance"]), (1, 1.0))
 
+    def test_xcheck_consistency_rules(self):
+        self.assertTrue(consistent({"outcome": "accepted", "file_touched": True}))
+        self.assertFalse(consistent({"outcome": "accepted", "file_touched": False}))
+        self.assertTrue(consistent({"outcome": "ignored", "file_touched": False}))
+        self.assertFalse(consistent({"outcome": "ignored", "file_touched": True}))
+        self.assertTrue(consistent({"outcome": "rebutted", "file_touched": False}))
+        self.assertIsNone(consistent({"outcome": "accepted"}))  # legacy rows: no signal
+        self.assertIsNone(consistent({"outcome": "undelivered", "file_touched": True}))
+
+    def test_file_touched_signal(self):
+        d = NOW - 300
+        obs = [
+            {"ts": _iso(d - 60), "type": "diff", "payload": {"diff": "+++ b/a.py"}},  # pre-delivery
+            {"ts": _iso(d + 60), "type": "diff", "payload": {"diff": "+++ b/other.py"}},
+        ]
+        self.assertFalse(judge.file_touched(sugg(), d, obs))
+        obs.append({"ts": _iso(d + 90), "type": "diff",
+                    "payload": {"diff": "", "untracked_contents": {"a.py": "x = 1"}}})
+        self.assertTrue(judge.file_touched(sugg(), d, obs))
+
+    def test_xcheck_column_math(self):
+        rows = build_rows(
+            [sugg("a"), sugg("b")],
+            [{"suggestion_id": "a", "outcome": "accepted", "heuristics_version": 1, "file_touched": True},
+             {"suggestion_id": "b", "outcome": "ignored", "heuristics_version": 1, "file_touched": True}],
+        )
+        self.assertEqual(rows[0]["xcheck"], 0.5)
+        self.assertEqual(len(rows[0]["inconsistent"]), 1)
+
     def test_undelivered_not_in_acceptance(self):
         rows = build_rows([sugg("a")], [{"suggestion_id": "a", "outcome": "undelivered",
                                          "heuristics_version": 1}])

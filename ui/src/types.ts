@@ -49,6 +49,7 @@ export interface ActivityEvent {
   kind: string; // reasoning | tool | diff
   summary: string;
   detail: string;
+  full?: string; // reasoning only, when summary was truncated
 }
 
 export interface Council {

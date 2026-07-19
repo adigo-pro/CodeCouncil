@@ -116,7 +116,10 @@ function truncate(s: string, n: number): string {
 function summarizeEvent(e: Record<string, any>): { kind: string; summary: string; detail: string } {
   const p = e.payload ?? {};
   if (e.type === "reasoning") {
-    return { kind: "reasoning", summary: truncate(p.text ?? "", 500), detail: "" };
+    const text = String(p.text ?? "");
+    const summary = truncate(text, 500);
+    // full text rides along only when the summary actually cut something
+    return { kind: "reasoning", summary, detail: "", full: summary.endsWith("…") ? text : "" };
   }
   if (e.type === "tool_call") {
     const inp = p.input ?? {};

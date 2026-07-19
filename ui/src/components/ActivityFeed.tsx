@@ -22,11 +22,21 @@ function Typewriter({ text }: { text: string }) {
 }
 
 function Row({ e, fresh }: { e: ActivityEvent; fresh: boolean }) {
+  const [expanded, setExpanded] = useState(false);
   if (e.kind === "reasoning") {
+    const expandable = !!e.full;
+    const text = expanded && e.full ? e.full : e.summary;
     return (
-      <p className={`text-neutral-400 ${fresh ? "row-in" : ""}`}>
+      <p
+        className={`text-neutral-400 ${fresh ? "row-in" : ""} ${expandable ? "cursor-pointer hover:text-neutral-300" : ""}`}
+        title={expandable ? (expanded ? "collapse" : "show full thought") : undefined}
+        onClick={() => expandable && setExpanded(!expanded)}
+      >
         <span className="mr-2 text-purple-300/90">◆</span>
-        <span className="italic">{fresh ? <Typewriter text={e.summary} /> : e.summary}</span>
+        <span className="italic">{fresh && !expanded ? <Typewriter text={text} /> : text}</span>
+        {expandable && (
+          <span className="ml-1.5 text-neutral-600">{expanded ? "▴" : "▾"}</span>
+        )}
       </p>
     );
   }

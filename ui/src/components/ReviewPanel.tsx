@@ -80,6 +80,12 @@ function ReviewCard({ r, now }: { r: Review; now?: string }) {
         <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${SEVERITY[r.severity] ?? SEVERITY.low}`}>
           {r.severity}
         </span>
+        {r.reviewKind === "task" && (
+          <span className="rounded-full border border-border bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+                title="Reviewed when the coding agent declared the task done">
+            task review
+          </span>
+        )}
         <span className="font-mono text-xs text-muted-foreground">
           {r.file}
           {r.line ? `:${r.line}` : ""}

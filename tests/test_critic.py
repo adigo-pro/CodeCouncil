@@ -246,6 +246,39 @@ class TestHeartbeatWithStub(unittest.TestCase):
                          "pending")
 
 
+class TestTaskReview(unittest.TestCase):
+    def test_tests_run_detection(self):
+        ev = lambda cmd: {"type": "tool_call", "payload": {"tool": "Bash", "input": {"command": cmd}}}
+        self.assertEqual(prompt.tests_run([ev("python3 -m unittest discover")]), "python3 -m unittest")
+        self.assertEqual(prompt.tests_run([ev("npm test -- --watch=false")]), "npm test")
+        self.assertIsNone(prompt.tests_run([ev("git commit -m 'tests pass'")]))
+        self.assertIsNone(prompt.tests_run([{"type": "reasoning", "payload": {"text": "ran pytest"}}]))
+
+    def test_build_task_review_content(self):
+        events = [
+            {"type": "reasoning", "payload": {"kind": "text", "text": "All tests pass, edge cases handled."}},
+            {"type": "commit", "payload": {"subjects": ["abc done"], "diff": "+code", "stat": ""}},
+        ]
+        text = prompt.build_task_review(events, None, "version: 2")
+        self.assertIn("TASK REVIEW", text)
+        self.assertIn("All tests pass, edge cases handled.", text)
+        self.assertIn("NO test command was executed", text)
+        self.assertIn("abc done", text)
+        self.assertIn("UNSUPPORTED", text)
+
+    def test_should_task_review_debounce(self):
+        from critic.main import should_task_review
+        now = 1_000_000.0
+        state = {"material_since_review": True}
+        self.assertTrue(should_task_review(state, 1, now))
+        self.assertFalse(should_task_review(state, 0, now))  # no request
+        self.assertFalse(should_task_review({"material_since_review": False}, 3, now))  # no material
+        state["last_task_review"] = now - 10
+        self.assertFalse(should_task_review(state, 1, now))  # cooldown
+        state["last_task_review"] = now - 700
+        self.assertTrue(should_task_review(state, 1, now))
+
+
 class TestSchedulerCooldown(unittest.TestCase):
     def test_spacing_holds_then_drain_bypasses(self):
         calls = []

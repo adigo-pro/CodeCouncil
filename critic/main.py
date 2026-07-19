@@ -121,6 +121,66 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+TASK_REVIEW_COOLDOWN_S = 600
+
+
+def should_task_review(state: dict, n_new_requests: int, now: float) -> bool:
+    """Debounce: Stop fires every turn; a task review needs new code material
+    and a quiet period since the last one."""
+    if n_new_requests == 0 or not state.get("material_since_review"):
+        return False
+    return now - state.get("last_task_review", 0.0) >= TASK_REVIEW_COOLDOWN_S
+
+
+def recent_events(obs_file: Path, since_epoch: float) -> list[dict]:
+    from datetime import datetime
+    out = []
+    try:
+        lines = obs_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines[-2000:]:
+        try:
+            e = json.loads(line)
+            if datetime.fromisoformat(e["ts"]).timestamp() >= since_epoch:
+                out.append(e)
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+    return out
+
+
+def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
+    """One 'is it actually done?' turn. Runs on the scheduler's worker thread."""
+    events = recent_events(obs_file, since_epoch)
+    heuristics = ensure_heuristics(ctx["heuristics_path"])
+    text = prompt.build_task_review(events, ctx.get("latest_diff"), heuristics,
+                                    project=ctx.get("project", ""))
+    suggestions_file = ctx["suggestions_file"]
+    record = {
+        "id": uuid.uuid4().hex[:12],
+        "ts": ctx["ts"],
+        "beat": ctx["beat"],
+        "review_kind": "task",
+        "heuristics_version": prompt.heuristics_version(heuristics),
+        "n_events": len(events),
+        "tests_run": bool(prompt.tests_run(events)),
+        "prompt_chars": len(text),
+    }
+    prompts_dir = suggestions_file.parent / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    (prompts_dir / f"{record['id']}.txt").write_text(text, encoding="utf-8")
+    try:
+        reply = openclaw.ask(text, sandbox=ctx["sandbox"], agent=ctx["agent"],
+                             session=f"critic-{uuid.uuid4().hex[:12]}")
+        record.update(prompt.parse_reply(reply))
+        render_verdict(ctx["beat"], ctx["ts"], record)
+    except openclaw.AgentError as e:
+        record.update({"verdict": "ERROR", "error": str(e)})
+        render_error(ctx["beat"], ctx["ts"], str(e))
+    with suggestions_file.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 class TurnScheduler:
     """At most one agent turn in flight; events accumulate (never drop) while
     busy or gated, and dispatch as one merged batch when possible."""
@@ -159,6 +219,15 @@ class TurnScheduler:
         self.thread.start()
         return "dispatched"
 
+    def run_special(self, fn) -> bool:
+        """Run a one-off turn (e.g. a task review) on the worker if it's idle."""
+        if self.busy():
+            return False
+        self.last_dispatch = time.monotonic()
+        self.thread = threading.Thread(target=fn, daemon=True)
+        self.thread.start()
+        return True
+
     def drain(self, ctx: dict) -> None:
         """Finish in-flight work and flush a dispatchable remainder (for --once)."""
         if self.thread:
@@ -186,8 +255,25 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
     if diffs:
         state["latest_diff"] = diffs[-1]
 
+    if any(e.get("type") in ("diff", "commit") for e in events):
+        state["material_since_review"] = True
+
     ctx = {**ctx, "beat": beat, "ts": ts, "latest_diff": state.get("latest_diff")}
     status = scheduler.submit(events, ctx)
+
+    # the coding agent declared itself done: consider a task-level claim review
+    review_file = ctx["suggestions_file"].parent / "review-requests.ndjsonl"
+    if review_file.exists():
+        req_lines, state["review_offset"] = tail_new_lines(
+            review_file, state.get("review_offset", 0))
+        if should_task_review(state, len(req_lines), time.time()):
+            since = state.get("last_task_review", time.time() - 3600)
+            if scheduler.run_special(
+                lambda: task_review(obs_file, ctx, since_epoch=since)
+            ):
+                state["last_task_review"] = time.time()
+                state["material_since_review"] = False
+                render_status(beat, ts, "task review dispatched — agent claimed done")
     if status == "idle":
         render_quiet(beat, ts)
     elif status == "gated":
@@ -237,7 +323,9 @@ def main(argv: list[str] | None = None) -> int:
         while True:
             heartbeat(obs_file, state, scheduler, ctx)
             state_path.write_text(json.dumps(
-                {k: state[k] for k in ("offset", "beat", "latest_diff", "interval") if k in state}
+                {k: state[k] for k in
+                 ("offset", "beat", "latest_diff", "interval", "review_offset",
+                  "last_task_review", "material_since_review") if k in state}
             ), encoding="utf-8")
             if args.once:
                 scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),

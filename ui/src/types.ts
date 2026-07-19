@@ -24,6 +24,7 @@ export interface Review {
   severity: "low" | "medium" | "high";
   deliveredVia: string[];
   promptChars: number;
+  reviewKind: "beat" | "task";
   outcome: "accepted" | "rebutted" | "ignored" | "undelivered" | null;
   evidence: string;
   fileTouched: boolean | null;

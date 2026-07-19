@@ -36,6 +36,15 @@ def run(stdin_text: str) -> str | None:
     event = json.loads(stdin_text)
     cc = Path(event["cwd"]) / ".codecouncil"
     suggestions_file = cc / "suggestions.ndjsonl"
+    if event.get("hook_event_name") == "Stop" and cc.is_dir():
+        # the coding agent thinks it's done — ask the critic for a task-level
+        # claim review (the critic daemon debounces; writing is best-effort)
+        try:
+            with (cc / "review-requests.ndjsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"ts": time.time(),
+                                    "session": event.get("session_id", "")}) + "\n")
+        except OSError:
+            pass
     if not suggestions_file.exists():
         return None
     ledger_path = cc / "delivered.json"

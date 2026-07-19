@@ -61,6 +61,19 @@ class TestFailOpen(unittest.TestCase):
             res = self._run(json.dumps(post_tool_use(cwd=td)))
             self.assertEqual((res.returncode, res.stdout), (0, ""))
 
+    def test_stop_writes_review_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text("")
+            ev = {"hook_event_name": "Stop", "cwd": td, "stop_hook_active": False,
+                  "session_id": "sess-42"}
+            res = self._run(json.dumps(ev))
+            self.assertEqual((res.returncode, res.stdout), (0, ""))  # no block: nothing pending
+            reqs = (cc / "review-requests.ndjsonl").read_text().splitlines()
+            self.assertEqual(len(reqs), 1)
+            self.assertEqual(json.loads(reqs[0])["session"], "sess-42")
+
     def test_end_to_end_injection_via_subprocess(self):
         with tempfile.TemporaryDirectory() as td:
             cc = Path(td) / ".codecouncil"

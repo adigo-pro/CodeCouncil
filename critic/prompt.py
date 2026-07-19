@@ -159,9 +159,12 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
     parts.append(
         "Identify the agent's completion claims. Is any important claim UNSUPPORTED "
         "by the diffs above — something stated as done, handled, or tested that the "
-        "code does not show? Judge claims against code, not against style. Respond "
-        "per your output protocol: PASS (optionally with reason), or one raw JSON "
-        "object flagging the most important unsupported claim."
+        "code does not show? Judge claims against code, not against style. You are "
+        "seeing a WINDOW of the session: a claim about work possibly done before "
+        "this window (not visible above) is out of scope — never flag absence of "
+        "earlier work, only contradictions with what IS shown. Respond per your "
+        "output protocol: PASS (optionally with reason), or one raw JSON object "
+        "flagging the most important unsupported claim."
     )
     return "\n".join(parts)
 

@@ -7,7 +7,10 @@ import re
 from typing import Any
 
 MAX_REASONING_EVENTS = 8
+MAX_TOOL_EVENTS = 15
 MAX_DIFF_CHARS = 12_000
+PROMPT_BUDGET_CHARS = 16_000
+MIN_DIFF_CHARS = 1_000
 
 PASS = "PASS"
 
@@ -19,8 +22,11 @@ def heuristics_version(heuristics: str) -> int:
 
 def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
                  project: str = "", verdict_history: list[dict] | None = None) -> str:
-    reasoning = [e for e in events if e["type"] == "reasoning"][-MAX_REASONING_EVENTS:]
-    tools = [e for e in events if e["type"] == "tool_call"]
+    all_reasoning = [e for e in events if e["type"] == "reasoning"]
+    all_tools = [e for e in events if e["type"] == "tool_call"]
+    reasoning = all_reasoning[-MAX_REASONING_EVENTS:]
+    tools = all_tools[-MAX_TOOL_EVENTS:]
+    omitted = (len(all_reasoning) - len(reasoning)) + (len(all_tools) - len(tools))
 
     parts = []
     if project:
@@ -42,13 +48,18 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
             parts.append(f"- {e['payload']['tool']} {detail}".rstrip())
     else:
         parts.append("(none)")
+    if omitted:
+        parts.append(f"(+{omitted} earlier events this batch omitted)")
     parts.append("")
 
+    # diff gets whatever budget the other sections left, floor MIN_DIFF_CHARS
+    diff_budget = min(MAX_DIFF_CHARS,
+                      max(MIN_DIFF_CHARS, PROMPT_BUDGET_CHARS - sum(len(p) + 1 for p in parts)))
     parts.append("CURRENT GIT DIFF:")
     if latest_diff and (latest_diff["payload"].get("diff") or latest_diff["payload"].get("untracked")):
         diff = latest_diff["payload"].get("diff", "")
-        if len(diff) > MAX_DIFF_CHARS:
-            diff = diff[:MAX_DIFF_CHARS] + "\n… [truncated]"
+        if len(diff) > diff_budget:
+            diff = diff[:diff_budget] + "\n… [truncated]"
         parts.append(diff or "(no tracked changes)")
         untracked = latest_diff["payload"].get("untracked", [])
         if untracked:

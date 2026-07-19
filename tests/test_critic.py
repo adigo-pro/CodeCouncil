@@ -90,6 +90,23 @@ class TestPrompt(unittest.TestCase):
         text = prompt.build_prompt(self._events(), None, "version: 1")
         self.assertNotIn("RECENT VERDICTS", text)
 
+    def test_windowing_caps_and_omission_note(self):
+        events = ([{"type": "reasoning", "payload": {"kind": "text", "text": f"r{i}"}} for i in range(30)]
+                  + [{"type": "tool_call", "payload": {"tool": "Edit", "input": {"file_path": f"f{i}.py"}}}
+                     for i in range(70)])
+        text = prompt.build_prompt(events, None, "version: 1")
+        self.assertEqual(text.count("- Edit f"), 15)
+        self.assertIn("(+77 earlier events this batch omitted)", text)  # 22 reasoning + 55 tools
+
+    def test_prompt_budget_trims_diff_last(self):
+        events = [{"type": "reasoning", "payload": {"kind": "text", "text": "x" * 1500}}
+                  for _ in range(8)]
+        diff = {"type": "diff", "payload": {"diff": "d" * 30_000, "untracked": []}}
+        text = prompt.build_prompt(events, diff, "version: 1")
+        self.assertLess(len(text), prompt.PROMPT_BUDGET_CHARS + prompt.MIN_DIFF_CHARS + 2_000)
+        self.assertIn("… [truncated]", text)
+        self.assertIn("x" * 100, text)  # reasoning survived; diff took the cut
+
 
 class TestHeartbeatWithStub(unittest.TestCase):
     def setUp(self):

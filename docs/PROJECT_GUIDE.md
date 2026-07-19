@@ -93,6 +93,89 @@ charts.
   every quality gain came from better inputs, not a bigger model.
 - **Zero-dependency Python** for the three loops; React dashboard.
 
+## Numbers to memorize
+
+- **~19 seconds** from an edit to a logged verdict (was ~3 minutes before the
+  latency work). The lying-commit catch took **88s** including sandbox
+  verification.
+- Beats: observer every **3s**, critic every **10s** — but model calls only
+  fire when code actually changed, with a **45s** floor between calls, so
+  cost stays flat no matter how fast the beats are.
+- Verdict record: **~25+ verdicts** on our own repo, **1 false positive**
+  (rebutted on the record), the rest correct PASSes or catches.
+- Training: **10 unscripted sessions** → 3 catches (2 sandbox-verified) →
+  2 delivered → **1 accepted, 1 rebutted** — 50% acceptance, 100% agreement
+  between model grades and the code-based cross-check.
+- Frozen evals: 7 cases; v1 scored **71%** (2/4 catches), v2 caught **3/4**
+  including both categories its grades taught it — with one visible
+  regression, which is what the eval exists to expose.
+- Model: Nemotron 3 Super (120B). We benchmarked the 550B Ultra: **no
+  difference** in accuracy or speed on our cases.
+
+## FAQ — common judge questions
+
+**Q: How is this "recursive self-improvement" and not just a code reviewer?**
+The reviewer's judgment lives in one rules file it does not share with us: the
+Reflector grades real outcomes and rewrites that file, version by version. The
+peer-review product is the substrate; the thing being improved is the agent's
+own instructions, by the agent, from measured results.
+
+**Q: What's the heartbeat here?** Three, actually: the Observer ticks every
+3s, the Critic every 10s, the Reflector every few minutes. The whole system is
+autonomous once started — no human prompts it.
+
+**Q: Why not just a linter / CI / tests?** Those check code against rules or
+code against tests. CodeCouncil checks code against **what the author claimed**
+— "I handled X", a docstring's promise, a commit message's "tested and ready."
+That mismatch class is invisible to every linter and most test suites, and
+it's the signature failure of AI coding agents.
+
+**Q: How do suggestions actually reach the coding agent?** Through Claude
+Code's official hooks: injected as context right after file edits, and for
+high-severity findings, a one-time block when the agent tries to declare the
+task finished. The agent must fix it or say why it disagrees — both outcomes
+are captured and graded.
+
+**Q: What stops two AIs from arguing forever?** Hard caps: each finding is
+delivered at most once per channel, blocks completion at most once, and a
+reasoned "I disagree" counts as resolved (and is valuable training data).
+Findings expire after 10 minutes so stale critiques never resurface.
+
+**Q: What if the critic is wrong?** Three defenses, all demonstrated: it must
+verify findings by running code in its sandbox first (refuted findings are
+never delivered); the coding agent can rebut (recorded honestly, not hidden);
+and rebuttals feed the next heuristics rewrite so the same mistake fades.
+
+**Q: Why so quiet? / Does it interrupt constantly?** The opposite — PASS is
+the designed default, and every PASS states its reason (visible on the
+dashboard). A peer that speaks rarely gets listened to; that discipline is
+written into its rules file and survives every rewrite.
+
+**Q: What's the cost profile?** Model calls only happen when code changed —
+an idle hour costs zero calls. Active coding costs roughly one short call per
+45+ seconds, plus one verification call per (rare) finding.
+
+**Q: Is my code safe?** Everything runs locally: transcripts and diffs are
+read from your machine, and the only thing leaving is the review prompt to
+routed inference. The critic itself runs in a network-restricted sandbox and
+never holds an API key. Its code-execution (verification) happens inside that
+sandbox, never on your machine.
+
+**Q: Does it work with Cursor / other editors?** The architecture needs two
+things: an intent stream and a feedback channel. Claude Code exposes both
+(transcripts + hooks), so we built there first. Cursor is closed on both
+counts today; anything that logs agent reasoning can be adapted.
+
+**Q: Couldn't the coding agent game the reviewer?** The mechanical checks
+can't be argued with: "tests pass" is checked against whether a test command
+actually executed; "accepted" grades are cross-checked against whether the
+flagged file really changed. The dashboard exposes the exact prompt behind
+every verdict, so nothing is staged.
+
+**Q: What would you build next?** Multi-reviewer council (the name is waiting
+for it), richer eval sets that grow automatically from graded outcomes, and
+adapters beyond Claude Code.
+
 ## Honest answers to hard questions
 
 - *"Isn't the model just guessing?"* — Findings ship with sandbox-executed
@@ -110,6 +193,22 @@ charts.
 - *"What's the weakest part?"* — Small sample sizes on the curves (hours old,
   not weeks), and one-model-judging-another for grades — mitigated by the
   deterministic cross-checks, but honestly noted.
+
+## Suggested demo order
+
+1. **Split screen**: Claude Code coding on one side, dashboard on the other —
+   point out the live thinking stream and the beat pulse.
+2. **The lying commit** (the money shot): commit code whose message claims
+   something the code doesn't do → catch lands in ~90s with the sandbox
+   verification chip → click "show what the critic saw."
+3. **The steering**: show the transcript where a coding agent, asked only to
+   add a docstring, fixed a flagged bug because the finding was injected —
+   then got blocked at "done" and rebutted cleanly.
+4. **The self-improvement**: heuristics card — the version badge, the +/−
+   rules diff, the dated rewrite ledger — then the two charts: acceptance per
+   version and the frozen-eval scores.
+5. **Close with honesty**: show the rebutted finding recorded as rebutted.
+   Judges trust systems that admit their misses.
 
 ## Running it
 

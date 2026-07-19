@@ -75,6 +75,18 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
             parts += [f"--- {path} ---", text.rstrip()]
         parts.append("")
 
+    commits = [e for e in events if e["type"] == "commit"]
+    if commits:
+        parts.append("JUST COMMITTED:")
+        commit_budget = max(2_000, (PROMPT_BUDGET_CHARS - sum(len(p) + 1 for p in parts)) // 2)
+        for c in commits:
+            parts += [f"- {s}" for s in c["payload"].get("subjects", [])]
+            cdiff = c["payload"].get("diff", "")
+            if len(cdiff) > commit_budget:
+                cdiff = cdiff[:commit_budget] + "\n… [truncated]"
+            parts.append(cdiff)
+        parts.append("")
+
     if verdict_history:
         parts.append("YOUR RECENT VERDICTS ON THIS SESSION:")
         for v in verdict_history:

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from . import gitwatch, transcript
-from .events import DIFF, Event, EventLog, now_iso
+from .events import COMMIT, DIFF, Event, EventLog, now_iso
 from .render import render_beat
 from .state import State
 
@@ -20,6 +20,13 @@ from .state import State
 def heartbeat(repo: Path, project_dir: Path, state: State, log: EventLog) -> list[Event]:
     state.beat += 1
     events = transcript.collect(project_dir, state.offsets, state.beat)
+
+    new_head = gitwatch.head(repo)
+    if new_head != state.last_head:
+        if state.last_head is not None and new_head is not None:
+            events.append(Event(beat=state.beat, type=COMMIT,
+                                payload=gitwatch.capture_commits(repo, state.last_head, new_head)))
+        state.last_head = new_head  # first sighting just records the baseline
 
     snapshot = gitwatch.capture(repo)
     fp = gitwatch.fingerprint(snapshot)

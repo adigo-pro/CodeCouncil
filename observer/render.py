@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from .events import DIFF, REASONING, TOOL_CALL, Event
+from .events import COMMIT, DIFF, REASONING, TOOL_CALL, Event
 
 _TTY = sys.stdout.isatty()
 
@@ -32,6 +32,9 @@ def render_beat(beat: int, ts: str, events: list[Event]) -> None:
             inp = e.payload["input"]
             detail = inp.get("file_path") or inp.get("command") or ""
             print(f"  {_c('33', '🔧 ' + sid)} {e.payload['tool']} {_short(str(detail))}")
+        elif e.type == COMMIT:
+            subjects = e.payload.get("subjects", [])
+            print(f"  {_c('32', '⎘  committed')} {_short('; '.join(subjects))}")
         elif e.type == DIFF:
             stat = e.payload.get("stat") or "(untracked changes only)"
             untracked = e.payload.get("untracked", [])

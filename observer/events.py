@@ -11,6 +11,7 @@ from typing import Any
 REASONING = "reasoning"
 TOOL_CALL = "tool_call"
 DIFF = "diff"
+COMMIT = "commit"
 
 
 def now_iso() -> str:

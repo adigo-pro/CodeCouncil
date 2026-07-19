@@ -70,6 +70,15 @@ def evidence(row: dict, delivery_ts: float, observations: list[dict]) -> str:
     if not tools:
         parts.append("(none captured)")
     parts.append("")
+    parts.append("COMMITS AFTER DELIVERY:")
+    commits = [o for o in window if o.get("type") == "commit"]
+    if commits:
+        for c in commits:
+            parts += [f"- {s}" for s in c["payload"].get("subjects", [])]
+            parts.append(c["payload"].get("diff", "")[: MAX_EVIDENCE_DIFF_CHARS // 2])
+    else:
+        parts.append("(none)")
+    parts.append("")
     parts.append("LATEST DIFF AFTER DELIVERY:")
     diffs = [o for o in window if o.get("type") == "diff"]
     if diffs:
@@ -84,7 +93,7 @@ def file_touched(row: dict, delivery_ts: float, observations: list[dict]) -> boo
     """Model-free signal: did the flagged file show up in any post-delivery change?"""
     path = row["suggestion"]["file"]
     for o in observations:
-        if o.get("type") != "diff":
+        if o.get("type") not in ("diff", "commit"):
             continue
         t = _epoch(o.get("ts", ""))
         if t is None or not (delivery_ts <= t <= delivery_ts + EVIDENCE_WINDOW_S):

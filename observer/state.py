@@ -13,6 +13,7 @@ class State:
     last_diff_hash: str | None = None
     beat: int = 0
     interval: float = 0.0  # advertised so the dashboard can pace its countdown
+    last_head: str | None = None
 
     @classmethod
     def load(cls, path: Path) -> "State":
@@ -24,6 +25,7 @@ class State:
                     last_diff_hash=raw.get("last_diff_hash"),
                     beat=raw.get("beat", 0),
                     interval=raw.get("interval", 0.0),
+                    last_head=raw.get("last_head"),
                 )
             except (json.JSONDecodeError, OSError):
                 pass  # corrupt state: start fresh rather than crash the daemon
@@ -38,6 +40,7 @@ class State:
                     "last_diff_hash": self.last_diff_hash,
                     "beat": self.beat,
                     "interval": self.interval,
+                    "last_head": self.last_head,
                 }
             ),
             encoding="utf-8",

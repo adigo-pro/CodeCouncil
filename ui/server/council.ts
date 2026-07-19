@@ -126,6 +126,10 @@ function summarizeEvent(e: Record<string, any>): { kind: string; summary: string
     const detail = inp.file_path ?? inp.command ?? inp.pattern ?? inp.query ?? "";
     return { kind: "tool", summary: p.tool ?? "?", detail: truncate(String(detail), 160) };
   }
+  if (e.type === "commit") {
+    const subjects = (p.subjects ?? []) as string[];
+    return { kind: "commit", summary: truncate(subjects.join("; "), 200), detail: "" };
+  }
   if (e.type === "diff") {
     const stat = (p.stat ?? "").trim().split("\n").filter(Boolean);
     const last = stat.length ? stat[stat.length - 1].trim() : "";

@@ -42,6 +42,23 @@ class TestUntrackedContents(unittest.TestCase):
         self.assertLess(len(text), 4_100)
         self.assertIn("truncated", text)
 
+    def test_commit_capture(self):
+        (self.repo / "a.py").write_text("x = 1\n")
+        subprocess.run(["git", "-C", str(self.repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "first"], check=True)
+        old = gitwatch.head(self.repo)
+        (self.repo / "a.py").write_text("x = 2\n")
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qam", "bump x"], check=True)
+        new = gitwatch.head(self.repo)
+        self.assertNotEqual(old, new)
+        c = gitwatch.capture_commits(self.repo, old, new)
+        self.assertEqual(len(c["subjects"]), 1)
+        self.assertIn("bump x", c["subjects"][0])
+        self.assertIn("+x = 2", c["diff"])
+
+    def test_head_none_before_first_commit(self):
+        self.assertIsNone(gitwatch.head(self.repo))
+
     def test_editing_untracked_file_changes_fingerprint(self):
         (self.repo / "new.py").write_text("a = 1\n")
         fp1 = gitwatch.fingerprint(gitwatch.capture(self.repo))

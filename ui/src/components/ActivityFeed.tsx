@@ -49,6 +49,14 @@ function Row({ e, fresh }: { e: ActivityEvent; fresh: boolean }) {
       </p>
     );
   }
+  if (e.kind === "commit") {
+    return (
+      <p className={`text-neutral-300 ${fresh ? "row-in" : ""}`}>
+        <span className="mr-2 text-amber-300/90">⎘</span>
+        <span className="text-amber-200/80">committed: {e.summary}</span>
+      </p>
+    );
+  }
   if (e.kind === "diff") {
     return (
       <p className={`text-neutral-300 ${fresh ? "row-in" : ""}`}>

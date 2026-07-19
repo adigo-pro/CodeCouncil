@@ -138,7 +138,9 @@ class TurnScheduler:
         return self.thread is not None and self.thread.is_alive()
 
     def _gate_open(self) -> bool:
-        return self.judge_every_beat or any(e.get("type") == "diff" for e in self.pending)
+        return self.judge_every_beat or any(
+            e.get("type") in ("diff", "commit") for e in self.pending
+        )
 
     def submit(self, events: list[dict], ctx: dict) -> str:
         """Returns what happened: idle | gated | busy | cooling | dispatched."""

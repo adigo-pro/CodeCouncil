@@ -103,6 +103,16 @@ class TestPrompt(unittest.TestCase):
         text = prompt.build_prompt(self._events(), None, "version: 1")
         self.assertNotIn("RECENT VERDICTS", text)
 
+    def test_commit_events_rendered_and_open_gate(self):
+        events = self._events() + [{"type": "commit", "payload": {
+            "subjects": ["abc123 fix the frobnicator"], "diff": "+frob()", "stat": ""}}]
+        text = prompt.build_prompt(events, None, "version: 1")
+        self.assertIn("JUST COMMITTED:", text)
+        self.assertIn("fix the frobnicator", text)
+        self.assertIn("+frob()", text)
+        s = TurnScheduler(judge_fn=lambda b, c: None)
+        self.assertEqual(s.submit([{"type": "commit"}], {}), "dispatched")
+
     def test_windowing_caps_and_omission_note(self):
         events = ([{"type": "reasoning", "payload": {"kind": "text", "text": f"r{i}"}} for i in range(30)]
                   + [{"type": "tool_call", "payload": {"tool": "Edit", "input": {"file_path": f"f{i}.py"}}}

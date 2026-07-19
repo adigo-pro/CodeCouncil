@@ -63,6 +63,24 @@ def capture(repo: Path) -> dict:
     }
 
 
+COMMIT_DIFF_MAX_CHARS = 20_000
+
+
+def head(repo: Path) -> str | None:
+    out = _git(repo, "rev-parse", "HEAD").strip()
+    return out or None
+
+
+def capture_commits(repo: Path, old: str, new: str) -> dict:
+    """What landed between two HEADs — so committed work stays reviewable."""
+    subjects = [s for s in _git(repo, "log", "--format=%h %s", f"{old}..{new}").splitlines() if s]
+    diff = _git(repo, "diff", old, new)
+    if len(diff) > COMMIT_DIFF_MAX_CHARS:
+        diff = diff[:COMMIT_DIFF_MAX_CHARS] + f"\n… [commit diff truncated, {len(diff)} chars total]"
+    stat = _git(repo, "diff", old, new, "--stat").strip()
+    return {"from": old, "to": new, "subjects": subjects, "diff": diff, "stat": stat}
+
+
 def fingerprint(snapshot: dict) -> str:
     h = hashlib.sha256()
     h.update(snapshot["diff"].encode("utf-8", errors="replace"))

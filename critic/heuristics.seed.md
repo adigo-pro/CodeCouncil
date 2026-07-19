@@ -18,6 +18,10 @@ over time; bump `version:` on every rewrite.
 - Comment or docstring promises one behavior, code does another: flag it.
 - Unhandled errors around I/O, subprocess calls, and JSON parsing are worth
   flagging; hypothetical edge cases in pure logic usually are not.
+- Pre-existing problems visible in or immediately around the changed code are
+  fair game — a good peer mentions the leaked token or the lying docstring
+  sitting right next to the line being edited, even if this change didn't
+  introduce it.
 - Never flag code that is not visible in the provided material.
 - If the diff is incomplete or mid-edit, wait — PASS now, judge next beat.
 - When in doubt: PASS.

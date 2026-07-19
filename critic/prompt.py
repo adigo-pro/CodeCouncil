@@ -99,9 +99,11 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
         parts.append("")
 
     parts.append(
-        "Is there one concrete, high-value issue worth interrupting the developer for? "
-        "Respond per your output protocol: PASS (optionally 'PASS: <reason under 15 "
-        "words>' — e.g. 'PASS: mid-edit, judging next beat'), or one raw JSON object."
+        "Is there one concrete, high-value issue worth interrupting the developer for — "
+        "either introduced by these changes, OR a serious latent problem visible in the "
+        "touched code (a secret, a docstring or comment that promises what the code "
+        "doesn't do, an unportable path)? Respond per your output protocol: PASS "
+        "(optionally 'PASS: <reason under 15 words>'), or one raw JSON object."
     )
     return "\n".join(parts)
 

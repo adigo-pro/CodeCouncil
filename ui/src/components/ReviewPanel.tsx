@@ -1,5 +1,34 @@
+import { useState } from "react";
 import type { Council, Review, Verdict } from "../types";
 import { ago } from "../useCouncil";
+
+/** Lazy-loads the exact prompt the critic judged, from the audit trail. */
+function PromptView({ id }: { id: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <button
+        className="font-mono text-[11px] text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground"
+        onClick={() => {
+          setOpen(!open);
+          if (text === null)
+            fetch(`/api/prompt/${id}`)
+              .then((r) => r.text())
+              .then(setText)
+              .catch(() => setText("(prompt unavailable)"));
+        }}
+      >
+        {open ? "hide" : "show"} what the critic saw
+      </button>
+      {open && (
+        <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-muted p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+          {text ?? "loading…"}
+        </pre>
+      )}
+    </div>
+  );
+}
 
 const SEVERITY: Record<string, string> = {
   high: "border-bad/40 bg-bad/5 text-bad",
@@ -93,6 +122,7 @@ function ReviewCard({ r, now }: { r: Review; now?: string }) {
           reflector: {r.evidence}
         </p>
       )}
+      {r.promptChars ? <PromptView id={r.id} /> : null}
     </div>
   );
 }

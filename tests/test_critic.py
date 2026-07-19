@@ -203,6 +203,10 @@ class TestHeartbeatWithStub(unittest.TestCase):
         rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
         self.assertEqual(rows[0]["verdict"], "PASS")
         self.assertEqual(rows[0]["heuristics_version"], 1)  # seeded from heuristics.seed.md
+        # audit trail: the exact prompt is saved under the verdict id
+        saved = (self.cc / "prompts" / f"{rows[0]['id']}.txt").read_text()
+        self.assertIn("hello", saved)
+        self.assertEqual(rows[0]["prompt_chars"], len(saved))
 
     def test_suggestion_logged_and_offset_advances(self):
         self._set_stub('{"file": "x.py", "line": 2, "severity": "low", "issue": "i", "rationale": "r"}')

@@ -207,6 +207,7 @@ export function aggregate(repo: string) {
         rationale: s.suggestion?.rationale ?? "",
         severity: s.suggestion?.severity ?? "medium",
         deliveredVia: Object.keys(delivered[s.id] ?? {}),
+        promptChars: s.prompt_chars ?? 0,
         outcome: o?.outcome ?? null,
         evidence: o?.evidence ?? "",
         fileTouched: o?.file_touched ?? null,

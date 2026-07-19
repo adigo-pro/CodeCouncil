@@ -23,6 +23,7 @@ export interface Review {
   rationale: string;
   severity: "low" | "medium" | "high";
   deliveredVia: string[];
+  promptChars: number;
   outcome: "accepted" | "rebutted" | "ignored" | "undelivered" | null;
   evidence: string;
   fileTouched: boolean | null;

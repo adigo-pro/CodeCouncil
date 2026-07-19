@@ -102,7 +102,12 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         "beat": beat,
         "heuristics_version": prompt.heuristics_version(heuristics),
         "n_events": len(events),
+        "prompt_chars": len(text),
     }
+    # audit trail: the exact prompt behind every verdict, keyed by verdict id
+    prompts_dir = suggestions_file.parent / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    (prompts_dir / f"{record['id']}.txt").write_text(text, encoding="utf-8")
     try:
         session = f"critic-{uuid.uuid4().hex[:12]}"  # unique per call: each judgment starts clean
         reply = openclaw.ask(text, sandbox=ctx["sandbox"], agent=ctx["agent"], session=session)

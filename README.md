@@ -26,8 +26,9 @@ python3 -m observer . --from-start                 # replay transcripts from the
 ```
 
 Output: live terminal narration + `.codecouncil/observations.ndjsonl` in the watched
-repo (one JSON event per line: `reasoning`, `tool_call`, `diff`). No dependencies —
-Python 3.10+ stdlib only.
+repo (one JSON event per line: `reasoning`, `tool_call`, `diff` — diffs include
+capped contents of new untracked files so the Critic can see brand-new code).
+No dependencies — Python 3.10+ stdlib only.
 
 ## Run the Critic
 
@@ -35,6 +36,11 @@ Python 3.10+ stdlib only.
 python3 -m critic /path/to/repo-being-coded-in    # 30s heartbeat, call only when new material
 python3 -m critic . --once                        # single beat
 ```
+
+Each prompt carries a project-identity header, the critic's recent verdicts with
+their outcomes (rebutted findings are settled), windowed events, and new-file
+contents. Model calls happen only when code actually changed and run on a worker
+thread, so the heartbeat never blocks (`--judge-every-beat` to judge everything).
 
 Requires the `codecouncil` NemoClaw sandbox with a `critic` OpenClaw agent
 (persona: `critic/AGENTS.sandbox.md`, uploaded to `/sandbox/workspaces/critic/AGENTS.md`).

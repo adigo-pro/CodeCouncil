@@ -113,7 +113,9 @@ function truncate(s: string, n: number): string {
 }
 
 /** One-line human summary per observation event, for the live feed. */
-function summarizeEvent(e: Record<string, any>): { kind: string; summary: string; detail: string } {
+function summarizeEvent(
+  e: Record<string, any>,
+): { kind: string; summary: string; detail: string; full?: string } {
   const p = e.payload ?? {};
   if (e.type === "reasoning") {
     const text = String(p.text ?? "");

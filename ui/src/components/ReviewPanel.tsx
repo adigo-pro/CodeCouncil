@@ -125,7 +125,7 @@ function ReviewCard({ r, now }: { r: Review; now?: string }) {
         {r.verification && r.verification.status === "verified" && (
           <span className="rounded-full bg-ok/10 px-2 py-0.5 font-mono text-ok"
                 title={r.verification.note}>
-            ✓ verified in sandbox
+            ✓ verified by repro
           </span>
         )}
         {r.verification && r.verification.status === "refuted" && (

@@ -94,33 +94,6 @@ charts.
   gain came from better inputs, not a bigger model.
 - **Zero-dependency Python** for the three loops; React dashboard.
 
-## The numbers
-
-- **~19 seconds** from an edit to a logged verdict (was ~3 minutes before the
-  latency work). The lying-commit catch took **88s** including repro
-  verification.
-- Beats: observer every **3s**, critic every **10s** — but model calls only
-  fire when code actually changed, with a **45s** floor between calls, so
-  cost stays flat no matter how fast the beats are.
-- Verdict record: **~25+ verdicts** on our own repo, **1 false positive**
-  (rebutted on the record), the rest correct PASSes or catches.
-- Training: **10 unscripted sessions** → 3 catches (2 repro-verified) →
-  2 delivered → **1 accepted, 1 rebutted** — 50% acceptance, 100% agreement
-  between model grades and the code-based cross-check.
-- **Three self-rewrites** (v1→v2→v3), each triggered by real graded outcomes,
-  each recorded in the agent's own ledger with the grades that caused it.
-- Frozen evals (7 cases, two repetitions where available): **v1 ≈ 71%,
-  v2 ≈ 79%, v3 ≈ 71%**. v2 — trained on an acceptance — got sharper and
-  caught more; v3 — trained on three rebuttals — got more cautious and gave
-  one catch back. The behavior tracks its feedback in both directions, and
-  the eval makes both directions visible. That's the point: measured
-  self-modification with regression detection, not a marketing curve.
-- In-the-wild acceptance per version: v1 50% (n=2), v2 0% (n=3 — two
-  rebutted, one ignored; the rebuttals are what taught v3 caution).
-- Model: pluggable — any provider pi supports; set `COUNCIL_MODEL` to choose.
-  Historically we found a 4.5×-larger model made **no difference** in accuracy
-  or speed on our cases.
-
 ## FAQ
 
 **Q: How is this "recursive self-improvement" and not just a code reviewer?**
@@ -202,22 +175,6 @@ adapters beyond Claude Code.
 - *"What's the weakest part?"* — Small sample sizes on the curves (hours old,
   not weeks), and one-model-judging-another for grades — mitigated by the
   deterministic cross-checks, but honestly noted.
-
-## Suggested demo order
-
-1. **Split screen**: Claude Code coding on one side, dashboard on the other —
-   point out the live thinking stream and the beat pulse.
-2. **The lying commit** (the money shot): commit code whose message claims
-   something the code doesn't do → catch lands in ~90s with the
-   verification chip → click "show what the critic saw."
-3. **The steering**: show the transcript where a coding agent, asked only to
-   add a docstring, fixed a flagged bug because the finding was injected —
-   then got blocked at "done" and rebutted cleanly.
-4. **The self-improvement**: heuristics card — the version badge, the +/−
-   rules diff, the dated rewrite ledger — then the two charts: acceptance per
-   version and the frozen-eval scores.
-5. **Close with honesty**: show the rebutted finding recorded as rebutted.
-   People trust systems that admit their misses.
 
 ## Running it
 

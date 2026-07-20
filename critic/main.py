@@ -17,6 +17,7 @@ import time
 import uuid
 from pathlib import Path
 
+from core.store import read_rows, wait_for
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
 
@@ -58,20 +59,9 @@ def project_context(repo: Path) -> str:
 
 def verdict_history(suggestions_file: Path, outcomes_file: Path, limit: int = 5) -> list[dict]:
     """The critic's own recent suggestions joined with how each was received."""
-    def rows(path: Path) -> list[dict]:
-        if not path.exists():
-            return []
-        out = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        return out
-
-    grades = {o.get("suggestion_id"): o.get("outcome") for o in rows(outcomes_file)}
+    grades = {o.get("suggestion_id"): o.get("outcome") for o in read_rows(outcomes_file)}
     history = []
-    for r in rows(suggestions_file):
+    for r in read_rows(suggestions_file):
         if r.get("verdict") != "SUGGESTION":
             continue
         s = r["suggestion"]
@@ -87,6 +77,18 @@ def ensure_heuristics(path: Path) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(SEED_HEURISTICS, path)
     return path.read_text(encoding="utf-8")
+
+
+PROMPTS_KEEP = 200
+
+
+def save_prompt(prompts_dir: Path, verdict_id: str, text: str) -> None:
+    """Audit trail: the exact prompt behind every verdict, capped to newest N."""
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    (prompts_dir / f"{verdict_id}.txt").write_text(text, encoding="utf-8")
+    files = sorted(prompts_dir.glob("*.txt"), key=lambda p: p.stat().st_mtime)
+    for old in files[:-PROMPTS_KEEP]:
+        old.unlink(missing_ok=True)
 
 
 def normalize_file(repo: Path | None, file: str) -> str:
@@ -125,10 +127,7 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         "n_events": len(events),
         "prompt_chars": len(text),
     }
-    # audit trail: the exact prompt behind every verdict, keyed by verdict id
-    prompts_dir = suggestions_file.parent / "prompts"
-    prompts_dir.mkdir(parents=True, exist_ok=True)
-    (prompts_dir / f"{record['id']}.txt").write_text(text, encoding="utf-8")
+    save_prompt(suggestions_file.parent / "prompts", record["id"], text)
     record.update(ask_with_retry(text, ctx))
     if record["verdict"] == "ERROR":
         render_error(beat, ts, record.get("error", "?"))
@@ -211,9 +210,7 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
         "tests_run": bool(prompt.tests_run(events)),
         "prompt_chars": len(text),
     }
-    prompts_dir = suggestions_file.parent / "prompts"
-    prompts_dir.mkdir(parents=True, exist_ok=True)
-    (prompts_dir / f"{record['id']}.txt").write_text(text, encoding="utf-8")
+    save_prompt(suggestions_file.parent / "prompts", record["id"], text)
     record.update(ask_with_retry(text, ctx))
     if record["verdict"] == "ERROR":
         render_error(ctx["beat"], ctx["ts"], record.get("error", "?"))
@@ -345,13 +342,8 @@ def main(argv: list[str] | None = None) -> int:
 
     cc = args.repo.resolve() / ".codecouncil"
     obs_file = cc / "observations.ndjsonl"
-    if not obs_file.exists():
-        if args.once:
-            print(f"error: {obs_file} not found — is the observer running?", file=sys.stderr)
-            return 2
-        print(f"critic: waiting for the observer's first beat ({obs_file})…")
-        while not obs_file.exists():
-            time.sleep(2)
+    if not wait_for(obs_file, "is the observer running?", args.once):
+        return 2
 
     state_path = cc / "critic-state.json"
     state = load_state(state_path)

@@ -13,6 +13,9 @@ import time
 import uuid
 from pathlib import Path
 
+from core.store import append_row as append_ndjson
+from core.store import read_rows as read_ndjson
+from core.store import wait_for
 from critic import agent
 from critic.main import ensure_heuristics
 from critic.prompt import heuristics_version
@@ -22,23 +25,6 @@ from observer.events import now_iso
 from . import judge, rewrite
 
 PERSONA = Path(__file__).parent / "persona.md"
-
-
-def read_ndjson(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return rows
-
-
-def append_ndjson(path: Path, row: dict) -> None:
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def _ask(prompt: str) -> str:
@@ -125,13 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     cc = args.repo.resolve() / ".codecouncil"
-    if not (cc / "suggestions.ndjsonl").exists():
-        if args.once:
-            print(f"error: {cc}/suggestions.ndjsonl not found — has the critic run?", file=sys.stderr)
-            return 2
-        print(f"reflector: waiting for the critic's first verdict…")
-        while not (cc / "suggestions.ndjsonl").exists():
-            time.sleep(5)
+    if not wait_for(cc / "suggestions.ndjsonl", "has the critic run?", args.once, poll_s=5):
+        return 2
 
     state_path = cc / "reflector-state.json"
     state = {}

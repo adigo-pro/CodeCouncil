@@ -18,18 +18,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core.store import read_rows as read_suggestions
 from hooks import ledger as ledger_mod
 from hooks.logic import decide
-
-
-def read_suggestions(path: Path) -> list[dict]:
-    rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return rows
 
 
 def run(stdin_text: str) -> str | None:

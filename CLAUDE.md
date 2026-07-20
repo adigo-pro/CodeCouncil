@@ -41,6 +41,8 @@ Four loops communicating **only through NDJSON/JSON files** in the watched repo'
 
 **Model boundary:** all model calls go through `critic/agent.py` — one non-interactive [pi](https://pi.dev) turn (`pi -p --no-session --no-tools …`, persona via `--system-prompt`). Judgment turns get no tools; verification turns get `read,bash` in a throwaway staging directory (`critic/verify.py`) so repros never touch the watched repo. `COUNCIL_MODEL=provider/model` overrides pi's default; `PI_BIN` overrides the executable. Set `CRITIC_CMD=<executable>` to stub the model in tests: it runs as `$CRITIC_CMD <prompt-file>`, stdout is the reply. Personas live in `critic/persona.md` and `reflector/persona.md`.
 
+`critic/agent.py` also auto-loads `~/.codecouncil/env` (outside any watched repo — a credential placed there can never be committed regardless of which repo CodeCouncil is pointed at) to top up the subprocess environment, and always attaches `critic/pi_extensions/nvidia_provider.mjs` via `pi -e`. If `NVIDIA_API_KEY` resolves (real env or that file) and `COUNCIL_MODEL` is unset, the default becomes NVIDIA-hosted Nemotron (`nvidia-nim/nvidia/nemotron-3-super-120b-a12b`) — zero pi login required. Model `id`s in that extension must be NVIDIA's full catalog string (e.g. `nvidia/nemotron-3-super-120b-a12b`); pi's `openai-completions` provider sends `model.id` verbatim as the request's `model` field, so a shorter id 404s.
+
 **Measurement:** two independent signals of self-improvement — acceptance rate per heuristics version (`reflector/report.py`, mirrored exactly by `ui/server/council.ts` so the dashboard can't diverge from the real metric) and frozen eval cases (`evals/cases/*.json`) replayed against every heuristics version.
 
 ## Conventions

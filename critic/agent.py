@@ -5,12 +5,15 @@ read/bash so the agent can actually run a repro in a staging directory. Every
 turn is ephemeral (--no-session) and stripped of pi's discovery machinery, so
 the persona passed via --system-prompt is the whole identity.
 
-Env:
-  PI_BIN         pi executable (default "pi")
-  COUNCIL_MODEL  optional "provider/model" override (e.g. "openai/gpt-4o", or a
-                 custom OpenAI-compatible provider configured in pi's settings);
-                 otherwise pi's own default model is used
-  CRITIC_CMD     test stub: run as `$CRITIC_CMD <prompt-file>`, stdout = reply
+Env (read from the real environment first, then ~/.codecouncil/env — a local,
+never-committed credentials file outside any watched repo):
+  PI_BIN          pi executable (default "pi")
+  COUNCIL_MODEL   "provider/model" override (e.g. "openai/gpt-4o", or
+                  "nvidia-nim/nvidia/nemotron-3-super-120b-a12b" via the
+                  bundled NVIDIA provider extension); defaults to pi's own default model,
+                  unless NVIDIA_API_KEY is available (then Nemotron 3 Super)
+  NVIDIA_API_KEY  enables the bundled NVIDIA-hosted Nemotron provider
+  CRITIC_CMD      test stub: run as `$CRITIC_CMD <prompt-file>`, stdout = reply
 """
 
 from __future__ import annotations
@@ -23,15 +26,35 @@ from pathlib import Path
 TURN_TIMEOUT = 180
 
 CRITIC_PERSONA = Path(__file__).parent / "persona.md"
+NVIDIA_EXTENSION = Path(__file__).parent / "pi_extensions" / "nvidia_provider.mjs"
+LOCAL_ENV_FILE = Path.home() / ".codecouncil" / "env"
+DEFAULT_NVIDIA_MODEL = "nvidia-nim/nvidia/nemotron-3-super-120b-a12b"
 
 
 class AgentError(Exception):
     pass
 
 
-def _run(cmd: list[str], timeout: int, cwd: str | None = None) -> subprocess.CompletedProcess:
+def _local_env() -> dict[str, str]:
+    """Real process env, topped up from ~/.codecouncil/env for anything unset.
+    That file never lives inside a git repo, so a credential pasted there can
+    never be committed by CodeCouncil regardless of which repo is watched."""
+    env = dict(os.environ)
+    if LOCAL_ENV_FILE.is_file():
+        for line in LOCAL_ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env.setdefault(k.strip(), v.strip())
+    return env
+
+
+def _run(cmd: list[str], timeout: int, cwd: str | None = None,
+         env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                              cwd=cwd, env=env)
     except subprocess.TimeoutExpired as e:
         raise AgentError(f"timed out: {' '.join(cmd[:2])}…") from e
     except OSError as e:
@@ -60,18 +83,23 @@ def ask(prompt: str, system: str | None = None, tools: str | None = None,
         finally:
             Path(prompt_file).unlink(missing_ok=True)
 
-    cmd = [os.environ.get("PI_BIN", "pi"), "-p", "--no-session",
+    env = _local_env()
+    cmd = [env.get("PI_BIN", "pi"), "-p", "--no-session",
            "--no-context-files", "--no-extensions", "--no-skills",
            "--no-prompt-templates", "--no-themes"]
+    # -ne above disables discovery of *installed* extensions; an explicit -e
+    # path still loads (registers the "nvidia" provider), harmless if unused
+    if NVIDIA_EXTENSION.is_file():
+        cmd += ["--extension", str(NVIDIA_EXTENSION)]
     cmd += ["--tools", tools] if tools else ["--no-tools"]
     if system:
         cmd += ["--system-prompt", system]
-    model = os.environ.get("COUNCIL_MODEL")
+    model = env.get("COUNCIL_MODEL") or (DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None)
     if model:
         cmd += ["--model", model]
     cmd.append(prompt)
 
-    res = _run(cmd, timeout=TURN_TIMEOUT, cwd=cwd)
+    res = _run(cmd, timeout=TURN_TIMEOUT, cwd=cwd, env=env)
     if res.returncode != 0:
         raise AgentError(f"pi turn failed: {res.stderr.strip() or res.stdout.strip()}")
     return res.stdout.strip()

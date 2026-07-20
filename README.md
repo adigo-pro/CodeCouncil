@@ -60,6 +60,12 @@ with a provider configured — run `pi` once and `/login`, or set an API key env
 var. `COUNCIL_MODEL=provider/model` overrides pi's default model; the persona
 is `critic/persona.md`, passed via `--system-prompt`. Verification runs the
 repro in a throwaway staging directory with pi's read/bash tools.
+
+**Zero pi-login option:** put `NVIDIA_API_KEY=nvapi-...` in `~/.codecouncil/env`
+(outside any git repo — never committed) and the critic uses NVIDIA's hosted
+Nemotron for free automatically, via the bundled provider extension
+(`critic/pi_extensions/nvidia_provider.mjs`). Override the model with
+`COUNCIL_MODEL=nvidia-nim/nvidia/<model-id>`.
 Output: every verdict (PASS and suggestions) appends to
 `.codecouncil/suggestions.ndjsonl` tagged with `beat` + `heuristics_version` —
 the metrics substrate for the Reflector. Heuristics seed:

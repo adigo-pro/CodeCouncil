@@ -140,7 +140,7 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.heuristics = self.cc / "heuristics.md"
         self.stub = self.cc / "stub.sh"
         self.ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
-                    "sandbox": "sb", "agent": "ag", "project": "",
+                    "persona": "", "project": "",
                     "repo": self.cc, "verify": False}
 
     def tearDown(self):
@@ -274,7 +274,7 @@ class TestAskWithRetry(unittest.TestCase):
             stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
             os.environ["CRITIC_CMD"] = str(stub)
             try:
-                v = ask_with_retry("prompt", {"sandbox": "sb", "agent": "ag"})
+                v = ask_with_retry("prompt", {"persona": ""})
             finally:
                 os.environ.pop("CRITIC_CMD", None)
             self.assertEqual(v["verdict"], "PASS")
@@ -284,7 +284,7 @@ class TestAskWithRetry(unittest.TestCase):
         from critic.main import ask_with_retry
         os.environ["CRITIC_CMD"] = "/nonexistent-cmd"
         try:
-            v = ask_with_retry("prompt", {"sandbox": "sb", "agent": "ag"})
+            v = ask_with_retry("prompt", {"persona": ""})
         finally:
             os.environ.pop("CRITIC_CMD", None)
         self.assertEqual(v["verdict"], "ERROR")

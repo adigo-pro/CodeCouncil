@@ -1,6 +1,6 @@
 # CodeCouncil — Project Guide
 
-*The simple version, for explaining to anyone (including judges).*
+*The simple version, for explaining to anyone.*
 
 ## One sentence
 
@@ -27,11 +27,11 @@ Think of it as four simple programs passing notes through files:
    core trick — that pairing is what no linter has.
 
 2. **Critic** (every 10 seconds): when code actually changed, sends one
-   question to an LLM running in a locked-down sandbox: *"Is there ONE issue
+   question to an LLM (via a headless pi agent turn): *"Is there ONE issue
    here worth interrupting a developer for?"* The answer is almost always
    PASS (with a stated reason). When it does flag something, it first
-   **verifies the finding by writing and running a repro in its sandbox** —
-   findings it refutes are never delivered. It also runs a special "task
+   **verifies the finding by writing and running a repro in a throwaway
+   staging directory** — findings it refutes are never delivered. It also runs a special "task
    review" when the agent declares work finished: are the completion claims
    actually supported by the code? (Including a mechanical check: did a test
    command ever actually run?)
@@ -70,7 +70,7 @@ charts.
 
 - **The lying commit:** we committed code claiming "exponential backoff and
   guaranteed error propagation" that did neither. Caught in 88 seconds,
-  verified in the sandbox, delivered.
+  verified by a running repro, delivered.
 - **The full unscripted loop:** during training, the Critic spotted a
   docstring that promised `None` on bad input while the code raised an
   exception. The finding was injected into a *different* coding session,
@@ -82,28 +82,29 @@ charts.
   repo itself; it flagged its own author's work mid-session (and the author
   rebutted, on the record).
 
-## Tech stack (and why judges should care)
+## Tech stack (and why it matters)
 
 - **Claude Code transcripts + hooks** — structured intent data and a
   sanctioned way to inject feedback into a running agent. No screen-scraping.
-- **NemoClaw + OpenClaw sandbox, NVIDIA Nemotron 3 Super** — all model calls
-  go through routed inference; the reviewer never holds an API key, and its
-  code-executing verification runs inside the sandbox, not on your machine.
-  We benchmarked the 4.5×-larger Nemotron Ultra: same accuracy, same speed —
-  every quality gain came from better inputs, not a bigger model.
+- **pi (pi.dev) as the model runtime** — every model call is one headless
+  `pi -p` turn, so CodeCouncil works with any provider pi supports (API keys,
+  subscriptions, OpenAI-compatible endpoints, local models) and installs with
+  one npm command. No Docker, no sandbox infrastructure. In earlier testing we
+  benchmarked a 4.5×-larger model: same accuracy, same speed — every quality
+  gain came from better inputs, not a bigger model.
 - **Zero-dependency Python** for the three loops; React dashboard.
 
-## Numbers to memorize
+## The numbers
 
 - **~19 seconds** from an edit to a logged verdict (was ~3 minutes before the
-  latency work). The lying-commit catch took **88s** including sandbox
+  latency work). The lying-commit catch took **88s** including repro
   verification.
 - Beats: observer every **3s**, critic every **10s** — but model calls only
   fire when code actually changed, with a **45s** floor between calls, so
   cost stays flat no matter how fast the beats are.
 - Verdict record: **~25+ verdicts** on our own repo, **1 false positive**
   (rebutted on the record), the rest correct PASSes or catches.
-- Training: **10 unscripted sessions** → 3 catches (2 sandbox-verified) →
+- Training: **10 unscripted sessions** → 3 catches (2 repro-verified) →
   2 delivered → **1 accepted, 1 rebutted** — 50% acceptance, 100% agreement
   between model grades and the code-based cross-check.
 - **Three self-rewrites** (v1→v2→v3), each triggered by real graded outcomes,
@@ -116,10 +117,11 @@ charts.
   self-modification with regression detection, not a marketing curve.
 - In-the-wild acceptance per version: v1 50% (n=2), v2 0% (n=3 — two
   rebutted, one ignored; the rebuttals are what taught v3 caution).
-- Model: Nemotron 3 Super (120B). We benchmarked the 550B Ultra: **no
-  difference** in accuracy or speed on our cases.
+- Model: pluggable — any provider pi supports; set `COUNCIL_MODEL` to choose.
+  Historically we found a 4.5×-larger model made **no difference** in accuracy
+  or speed on our cases.
 
-## FAQ — common judge questions
+## FAQ
 
 **Q: How is this "recursive self-improvement" and not just a code reviewer?**
 The reviewer's judgment lives in one rules file it does not share with us: the
@@ -149,7 +151,7 @@ reasoned "I disagree" counts as resolved (and is valuable training data).
 Findings expire after 10 minutes so stale critiques never resurface.
 
 **Q: What if the critic is wrong?** Three defenses, all demonstrated: it must
-verify findings by running code in its sandbox first (refuted findings are
+verify findings by running a repro first (refuted findings are
 never delivered); the coding agent can rebut (recorded honestly, not hidden);
 and rebuttals feed the next heuristics rewrite so the same mistake fades.
 
@@ -164,9 +166,9 @@ an idle hour costs zero calls. Active coding costs roughly one short call per
 
 **Q: Is my code safe?** Everything runs locally: transcripts and diffs are
 read from your machine, and the only thing leaving is the review prompt to
-routed inference. The critic itself runs in a network-restricted sandbox and
-never holds an API key. Its code-execution (verification) happens inside that
-sandbox, never on your machine.
+your chosen model provider (or nothing at all, with a local model). Repro
+verification runs in a throwaway staging directory with only a copy of the
+flagged file — it never touches your repo.
 
 **Q: Does it work with Cursor / other editors?** The architecture needs two
 things: an intent stream and a feedback channel. Claude Code exposes both
@@ -185,7 +187,7 @@ adapters beyond Claude Code.
 
 ## Honest answers to hard questions
 
-- *"Isn't the model just guessing?"* — Findings ship with sandbox-executed
+- *"Isn't the model just guessing?"* — Findings ship with repro-executed
   proof, every verdict's exact input prompt is stored and viewable, and a
   model-free cross-check audits the grades.
 - *"Did it catch anything you didn't plant?"* — The training defects were
@@ -206,7 +208,7 @@ adapters beyond Claude Code.
 1. **Split screen**: Claude Code coding on one side, dashboard on the other —
    point out the live thinking stream and the beat pulse.
 2. **The lying commit** (the money shot): commit code whose message claims
-   something the code doesn't do → catch lands in ~90s with the sandbox
+   something the code doesn't do → catch lands in ~90s with the
    verification chip → click "show what the critic saw."
 3. **The steering**: show the transcript where a coding agent, asked only to
    add a docstring, fixed a flagged bug because the finding was injected —
@@ -215,13 +217,13 @@ adapters beyond Claude Code.
    rules diff, the dated rewrite ledger — then the two charts: acceptance per
    version and the frozen-eval scores.
 5. **Close with honesty**: show the rebutted finding recorded as rebutted.
-   Judges trust systems that admit their misses.
+   People trust systems that admit their misses.
 
 ## Running it
 
 ```sh
 python3 -m observer /path/to/repo        # eyes
-python3 -m critic /path/to/repo          # judgment (+ sandbox verification)
+python3 -m critic /path/to/repo          # judgment (+ repro verification)
 python3 -m reflector /path/to/repo       # grading + self-rewrites
 python3 -m hooks.install /path/to/repo   # steering (once per repo)
 cd ui && npm run dev                     # dashboard at localhost:4700

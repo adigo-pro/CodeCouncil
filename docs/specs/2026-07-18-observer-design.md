@@ -16,7 +16,7 @@ Every heartbeat:
 
 ## Decisions
 
-- **Python 3, stdlib only.** No deps to break at a hackathon.
+- **Python 3, stdlib only.** Nothing to install, nothing to break.
 - **Polling, not fs-watch.** Dumber, more reliable.
 - **Byte-offset bookmarks** per JSONL file, persisted in `.codecouncil/state.json` in the
   watched repo. Restart-safe; only complete lines (up to last `\n`) are consumed.

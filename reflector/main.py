@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
-from critic import openclaw
+from critic import agent
 from critic.main import ensure_heuristics
 from critic.prompt import heuristics_version
 from hooks import ledger as ledger_mod
@@ -21,7 +21,7 @@ from observer.events import now_iso
 
 from . import judge, rewrite
 
-INBOX = "/sandbox/workspaces/reflector/inbox.txt"
+PERSONA = Path(__file__).parent / "persona.md"
 
 
 def read_ndjson(path: Path) -> list[dict]:
@@ -41,12 +41,11 @@ def append_ndjson(path: Path, row: dict) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def _ask(prompt: str, sandbox: str) -> str:
-    return openclaw.ask(prompt, sandbox=sandbox, agent="reflector",
-                        session=f"reflector-{uuid.uuid4().hex[:12]}")
+def _ask(prompt: str) -> str:
+    return agent.ask(prompt, system=PERSONA.read_text(encoding="utf-8"))
 
 
-def grade_pending(cc: Path, sandbox: str) -> int:
+def grade_pending(cc: Path) -> int:
     suggestions = read_ndjson(cc / "suggestions.ndjsonl")
     delivered = ledger_mod.load(cc / "delivered.json")
     outcomes_path = cc / "outcomes.ndjsonl"
@@ -68,8 +67,8 @@ def grade_pending(cc: Path, sandbox: str) -> int:
         d = judge.first_delivery(delivered, row["id"])
         prompt = judge.build_prompt(row, judge.evidence(row, d, observations))
         try:
-            grade = judge.parse_grade(_ask(prompt, sandbox))
-        except openclaw.AgentError as e:
+            grade = judge.parse_grade(_ask(prompt))
+        except agent.AgentError as e:
             print(f"reflector: grading {row['id']} failed ({e}); will retry next beat")
             continue
         append_ndjson(outcomes_path, {
@@ -86,7 +85,7 @@ def grade_pending(cc: Path, sandbox: str) -> int:
     return len(to_judge) + len(undelivered)
 
 
-def maybe_rewrite(cc: Path, sandbox: str, state: dict, force: bool,
+def maybe_rewrite(cc: Path, state: dict, force: bool,
                   rewrite_after: int = rewrite.MIN_NEW_OUTCOMES) -> None:
     outcomes = read_ndjson(cc / "outcomes.ndjsonl")
     if not rewrite.should_rewrite(outcomes, state.get("n_graded_at_last_rewrite", 0), force,
@@ -97,8 +96,8 @@ def maybe_rewrite(cc: Path, sandbox: str, state: dict, force: bool,
     version = heuristics_version(current)
     prompt = rewrite.build_prompt(current, version, outcomes)
     try:
-        new_text = _ask(prompt, sandbox)
-    except openclaw.AgentError as e:
+        new_text = _ask(prompt)
+    except agent.AgentError as e:
         print(f"reflector: rewrite failed ({e}); keeping v{version}")
         return
     err = rewrite.validate(new_text, version + 1)
@@ -123,7 +122,6 @@ def main(argv: list[str] | None = None) -> int:
                     help="rewrite even below the outcome threshold (demo)")
     ap.add_argument("--rewrite-after", type=int, default=rewrite.MIN_NEW_OUTCOMES,
                     help="graded outcomes needed to trigger a rewrite (default 3)")
-    ap.add_argument("--sandbox", default="codecouncil")
     args = ap.parse_args(argv)
 
     cc = args.repo.resolve() / ".codecouncil"
@@ -146,10 +144,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"reflector: watching {cc} · every {args.interval:g}s")
     try:
         while True:
-            n = grade_pending(cc, args.sandbox)
+            n = grade_pending(cc)
             if n == 0:
                 print(f"reflector: nothing to grade")
-            maybe_rewrite(cc, args.sandbox, state, args.force_rewrite,
+            maybe_rewrite(cc, state, args.force_rewrite,
                           rewrite_after=args.rewrite_after)
             state_path.write_text(json.dumps(state), encoding="utf-8")
             if args.once:

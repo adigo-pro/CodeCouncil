@@ -49,13 +49,13 @@ class TestParse(unittest.TestCase):
         self.assertIn("unparseable", v["note"])
 
     def test_prompt_contains_finding_and_path(self):
-        text = verify.build_prompt(_sugg()["suggestion"], "/sandbox/x/a.py")
+        text = verify.build_prompt(_sugg()["suggestion"], "/tmp/staging/a.py")
         self.assertIn("TASK: VERIFY", text)
         self.assertIn("a.py:3", text)
-        self.assertIn("/sandbox/x/a.py", text)
+        self.assertIn("/tmp/staging/a.py", text)
 
     def test_missing_file_is_inconclusive_without_any_call(self):
-        v = verify.verify_finding(Path("/nonexistent-repo"), _sugg()["suggestion"], "sb", "ag")
+        v = verify.verify_finding(Path("/nonexistent-repo"), _sugg()["suggestion"])
         self.assertEqual(v["status"], "inconclusive")
 
 
@@ -69,7 +69,7 @@ class TestDeliveryPolicy(unittest.TestCase):
     def test_verified_delivers_with_proof(self):
         rows = [_sugg({"status": "verified", "note": "ZeroDivisionError raised"})]
         out = decide({"hook_event_name": "PostToolUse", "cwd": "/x"}, rows, {}, NOW)
-        self.assertIn("verified in sandbox: ZeroDivisionError raised",
+        self.assertIn("verified by repro: ZeroDivisionError raised",
                       out["hookSpecificOutput"]["additionalContext"])
 
     def test_inconclusive_and_unverified_still_deliver(self):

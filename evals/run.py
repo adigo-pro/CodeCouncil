@@ -9,13 +9,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from critic import openclaw, prompt  # noqa: E402
+from critic import agent, prompt  # noqa: E402
 from observer.events import now_iso  # noqa: E402
 
 CASES_DIR = Path(__file__).parent / "cases"
@@ -52,8 +51,8 @@ def score(case: dict, verdict: dict) -> bool:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="evals.run", description=__doc__)
     ap.add_argument("repo", type=Path, help="repo whose heuristics versions to evaluate")
-    ap.add_argument("--sandbox", default="codecouncil")
     args = ap.parse_args(argv)
+    persona = agent.CRITIC_PERSONA.read_text(encoding="utf-8")
 
     repo = args.repo.resolve()
     cases = load_cases()
@@ -70,9 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         for case in cases:
             text = prompt.build_prompt(case["events"], case.get("latest_diff"), heur)
             try:
-                verdict = prompt.parse_reply(openclaw.ask(
-                    text, sandbox=args.sandbox, session=f"eval-{uuid.uuid4().hex[:10]}"))
-            except openclaw.AgentError as e:
+                verdict = prompt.parse_reply(agent.ask(text, system=persona))
+            except agent.AgentError as e:
                 verdict = {"verdict": "ERROR", "error": str(e)}
             ok = score(case, verdict)
             if case["expected"] == "flag":

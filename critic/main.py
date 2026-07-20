@@ -1,5 +1,5 @@
 """CodeCouncil Critic: heartbeat loop that reads the Observer's output and asks
-an OpenClaw agent (in the NemoClaw sandbox) whether anything is worth flagging.
+a headless pi agent (https://pi.dev) whether anything is worth flagging.
 
     python3 -m critic /path/to/watched/repo [--interval 30] [--once]
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -19,7 +20,7 @@ from pathlib import Path
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
 
-from . import openclaw, prompt, verify
+from . import agent, prompt, verify
 from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
@@ -89,7 +90,7 @@ def ensure_heuristics(path: Path) -> str:
 
 
 def normalize_file(repo: Path | None, file: str) -> str:
-    """Map sandbox-staging or absolute paths back to repo-relative ones.
+    """Map staging or absolute paths back to repo-relative ones.
     A finding about 'underreview/d4ab-config.py' is really about 'config.py'."""
     if not file:
         return file
@@ -138,7 +139,7 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         if record["verdict"] == "SUGGESTION" and ctx.get("verify", True):
             try:
                 record["verification"] = verify.verify_finding(
-                    ctx["repo"], record["suggestion"], ctx["sandbox"], ctx["agent"])
+                    ctx["repo"], record["suggestion"], system=ctx.get("persona"))
             except Exception as e:  # verification must never lose a finding
                 record["verification"] = {"status": "error", "note": str(e)[:200]}
         render_verdict(beat, ts, record)
@@ -156,9 +157,8 @@ def ask_with_retry(text: str, ctx: dict) -> dict:
     last: dict = {}
     for attempt in range(2):
         try:
-            reply = openclaw.ask(text, sandbox=ctx["sandbox"], agent=ctx["agent"],
-                                 session=f"critic-{uuid.uuid4().hex[:12]}")
-        except openclaw.AgentError as e:
+            reply = agent.ask(text, system=ctx.get("persona"))
+        except agent.AgentError as e:
             last = {"verdict": "ERROR", "error": str(e)}
             continue
         parsed = prompt.parse_reply(reply)
@@ -335,12 +335,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--turn-spacing", type=float, default=45.0,
                     help="minimum seconds between model turn starts (default 45)")
     ap.add_argument("--once", action="store_true", help="run a single heartbeat and exit")
-    ap.add_argument("--sandbox", default="codecouncil", help="NemoClaw sandbox name")
-    ap.add_argument("--agent", default="critic", help="OpenClaw agent id in the sandbox")
     ap.add_argument("--judge-every-beat", action="store_true",
                     help="also judge batches with no code change (reasoning-only)")
     ap.add_argument("--no-verify", action="store_true",
-                    help="skip sandbox verification of findings")
+                    help="skip repro verification of findings")
     ap.add_argument("--task-review-cooldown", type=float, default=TASK_REVIEW_COOLDOWN_S,
                     help="minimum seconds between task reviews (default 600)")
     args = ap.parse_args(argv)
@@ -358,14 +356,14 @@ def main(argv: list[str] | None = None) -> int:
     state_path = cc / "critic-state.json"
     state = load_state(state_path)
     print(f"critic: reading {obs_file}")
-    print(f"critic: judging via `nemoclaw {args.sandbox} agent --agent {args.agent}` every {args.interval:g}s")
+    model = os.environ.get("COUNCIL_MODEL", "pi's default model")
+    print(f"critic: judging via headless pi ({model}) every {args.interval:g}s")
 
     ctx = {
         "repo": args.repo.resolve(),
         "heuristics_path": cc / "heuristics.md",
         "suggestions_file": cc / "suggestions.ndjsonl",
-        "sandbox": args.sandbox,
-        "agent": args.agent,
+        "persona": agent.CRITIC_PERSONA.read_text(encoding="utf-8"),
         "project": project_context(args.repo.resolve()),
         "verify": not args.no_verify,
         "task_review_cooldown": args.task_review_cooldown,

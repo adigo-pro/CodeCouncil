@@ -44,7 +44,7 @@ def wait_for_catch(cc: Path, baseline: int, timeout: int = 240) -> bool:
                 if r.get("verdict") == "SUGGESTION":
                     s, v = r["suggestion"], r.get("verification") or {}
                     print(f"  ■ CAUGHT in {time.time() - t0:.0f}s: [{s['severity']}] "
-                          f"{s['file']} — {s['issue'][:80]} (sandbox: {v.get('status', '…')})")
+                          f"{s['file']} — {s['issue'][:80]} (verify: {v.get('status', '…')})")
                     return True
     print("  (no catch within the window — check the dashboard)")
     return False

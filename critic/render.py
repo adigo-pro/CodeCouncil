@@ -29,7 +29,7 @@ def render_verdict(beat: int, ts: str, verdict: dict) -> None:
     v = verdict.get("verification")
     if v:
         mark = {"verified": "32", "refuted": "31"}.get(v["status"], "2")
-        print(_c(mark, f"  sandbox {v['status']}: {v['note']}"))
+        print(_c(mark, f"  verify {v['status']}: {v['note']}"))
 
 
 def render_quiet(beat: int, ts: str) -> None:

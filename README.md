@@ -6,16 +6,16 @@ measurably better at critiquing your work. Three loops:
 1. **Observer** (done) — heartbeat daemon pairing the agent's *intent* (transcript
    reasoning + tool calls) with what actually *changed* (git diff).
 2. **Critic** (done) — reads observations each beat, mostly says PASS, occasionally
-   flags one high-value issue. Judgment runs as an OpenClaw agent in a NemoClaw
-   sandbox (`nemoclaw codecouncil agent --agent critic`, Nemotron via routed
-   inference — the Critic holds no API key).
+   flags one high-value issue. Judgment runs as a headless [pi](https://pi.dev)
+   agent turn (`pi -p`) — any provider pi supports, including OpenAI-compatible
+   endpoints and local models.
 3. **Hook injection** (done) — Claude Code hooks that deliver Critic suggestions
    into the coding agent's own context: medium/high injected after edits
    (PostToolUse), high blocks completion once (Stop) until fixed or rebutted.
 4. **Reflector** (done) — grades delivered suggestions against what actually
-   happened next (accepted / rebutted / ignored, judged by an OpenClaw agent from
-   post-delivery diffs + reasoning), then rewrites the Critic's heuristics from
-   the grades. The recursive self-improvement loop.
+   happened next (accepted / rebutted / ignored, model-judged from post-delivery
+   diffs + reasoning), then rewrites the Critic's heuristics from the grades.
+   The recursive self-improvement loop.
 
 ## Run the Observer
 
@@ -42,8 +42,11 @@ their outcomes (rebutted findings are settled), windowed events, and new-file
 contents. Model calls happen only when code actually changed and run on a worker
 thread, so the heartbeat never blocks (`--judge-every-beat` to judge everything).
 
-Requires the `codecouncil` NemoClaw sandbox with a `critic` OpenClaw agent
-(persona: `critic/AGENTS.sandbox.md`, uploaded to `/sandbox/workspaces/critic/AGENTS.md`).
+Requires [pi](https://pi.dev) (`npm install -g @earendil-works/pi-coding-agent`)
+with a provider configured — run `pi` once and `/login`, or set an API key env
+var. `COUNCIL_MODEL=provider/model` overrides pi's default model; the persona
+is `critic/persona.md`, passed via `--system-prompt`. Verification runs the
+repro in a throwaway staging directory with pi's read/bash tools.
 Output: every verdict (PASS and suggestions) appends to
 `.codecouncil/suggestions.ndjsonl` tagged with `beat` + `heuristics_version` —
 the metrics substrate for the Reflector. Heuristics seed:

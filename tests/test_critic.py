@@ -365,5 +365,25 @@ class TestSchedulerAsync(unittest.TestCase):
         self.assertEqual([len(c) for c in calls], [1, 2])
 
 
+
+
+class TestPromptAuditCap(unittest.TestCase):
+    def test_save_prompt_prunes_beyond_cap(self):
+        from critic import main as cmain
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td) / "prompts"
+            old_cap = cmain.PROMPTS_KEEP
+            cmain.PROMPTS_KEEP = 3
+            try:
+                for i in range(6):
+                    cmain.save_prompt(d, f"id{i}", f"prompt {i}")
+                    os.utime(d / f"id{i}.txt", (i, i))
+                cmain.save_prompt(d, "id6", "prompt 6")
+                names = sorted(p.name for p in d.glob("*.txt"))
+                self.assertEqual(len(names), 3)
+                self.assertIn("id6.txt", names)
+            finally:
+                cmain.PROMPTS_KEEP = old_cap
+
 if __name__ == "__main__":
     unittest.main()

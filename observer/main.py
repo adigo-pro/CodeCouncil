@@ -1,7 +1,10 @@
-"""CodeCouncil Observer: heartbeat daemon that pairs Claude Code's stated intent
-(transcript reasoning + tool calls) with what actually changed (git diff).
+"""CodeCouncil Observer: event-driven daemon that pairs Claude Code's stated
+intent (transcript reasoning + tool calls) with what actually changed (git diff).
 
-    python -m observer /path/to/watched/repo [--interval 30] [--once] [--from-start]
+A beat fires the moment a session transcript grows; --interval is only the
+fallback ceiling that catches git-only changes the transcript poll cannot see.
+
+    python -m observer /path/to/watched/repo [--interval 10] [--once] [--from-start]
 """
 
 from __future__ import annotations
@@ -38,10 +41,30 @@ def heartbeat(repo: Path, project_dir: Path, state: State, log: EventLog) -> lis
     return events
 
 
+def transcript_sig(project_dir: Path) -> tuple:
+    """Cheap change signal: names + sizes of every session transcript."""
+    try:
+        return tuple(sorted((p.name, p.stat().st_size) for p in project_dir.glob("*.jsonl")))
+    except OSError:
+        return ()
+
+
+def wait_for_material(project_dir: Path, max_wait: float, poll_s: float = 0.5) -> None:
+    """Sleep until a transcript grows, or `max_wait` elapses (the floor that
+    catches git-only changes the transcript poll cannot see)."""
+    baseline = transcript_sig(project_dir)
+    deadline = time.monotonic() + max_wait
+    while time.monotonic() < deadline:
+        time.sleep(min(poll_s, max(deadline - time.monotonic(), 0.05)))
+        if transcript_sig(project_dir) != baseline:
+            return
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="observer", description=__doc__)
     ap.add_argument("repo", type=Path, help="path to the repo being coded in")
-    ap.add_argument("--interval", type=float, default=3.0, help="heartbeat seconds (default 3)")
+    ap.add_argument("--interval", type=float, default=10.0,
+                    help="max seconds between beats; transcript changes trigger instantly (default 10)")
     ap.add_argument("--once", action="store_true", help="run a single heartbeat and exit")
     ap.add_argument(
         "--from-start",
@@ -79,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     log = EventLog(out_dir / "observations.ndjsonl")
 
     print(f"observer: watching {project_dir.name}")
-    print(f"observer: repo {repo} · every {args.interval:g}s · log {log.path}")
+    print(f"observer: repo {repo} · event-driven, {args.interval:g}s floor · log {log.path}")
 
     state.interval = args.interval
     try:
@@ -92,9 +115,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.once:
                 break
             elapsed = time.monotonic() - t0
-            # fast beats are near-free; if a huge repo makes a beat slow, back
-            # off so we never spend more than ~half our time working
-            time.sleep(max(args.interval - elapsed, elapsed, 0.5))
+            # if a huge repo makes a beat slow, raise the floor so we never
+            # spend more than ~half our time working
+            wait_for_material(project_dir, max_wait=max(args.interval, elapsed * 2, 0.5))
     except KeyboardInterrupt:
         print("\nobserver: stopped")
     return 0

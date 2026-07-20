@@ -167,6 +167,22 @@ class TestReport(unittest.TestCase):
                     "payload": {"diff": "", "untracked_contents": {"a.py": "x = 1"}}})
         self.assertTrue(judge.file_touched(sugg(), d, obs))
 
+
+    def test_explicit_rebuttal_marker(self):
+        d = NOW - 300
+        obs = [
+            {"ts": _iso(d - 60), "type": "reasoning",
+             "payload": {"text": "COUNCIL-REBUTTAL: too early, before delivery"}},
+            {"ts": _iso(d + 60), "type": "reasoning",
+             "payload": {"text": "Thinking about it.\nCOUNCIL-REBUTTAL: guard exists on line 2\nmore text"}},
+        ]
+        self.assertEqual(judge.explicit_rebuttal(d, obs), "guard exists on line 2")
+        # marker before delivery only -> None
+        self.assertIsNone(judge.explicit_rebuttal(d, obs[:1]))
+        # no marker at all -> None
+        self.assertIsNone(judge.explicit_rebuttal(
+            d, [{"ts": _iso(d + 60), "type": "reasoning", "payload": {"text": "I disagree"}}]))
+
     def test_xcheck_column_math(self):
         rows = build_rows(
             [sugg("a"), sugg("b")],

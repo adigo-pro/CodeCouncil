@@ -48,7 +48,8 @@ def _read_untracked(repo: Path, paths: list[str]) -> dict[str, str]:
 
 def capture(repo: Path) -> dict:
     """Snapshot uncommitted work. Falls back gracefully in a repo with no commits."""
-    diff = _git(repo, "diff", "HEAD") or _git(repo, "diff")
+    # -U8: enough surrounding source that the critic judges hunks in context
+    diff = _git(repo, "diff", "-U8", "HEAD") or _git(repo, "diff", "-U8")
     stat = _git(repo, "diff", "HEAD", "--stat") or _git(repo, "diff", "--stat")
     untracked = [
         p for p in _git(repo, "ls-files", "--others", "--exclude-standard").splitlines() if p
@@ -74,7 +75,7 @@ def head(repo: Path) -> str | None:
 def capture_commits(repo: Path, old: str, new: str) -> dict:
     """What landed between two HEADs — so committed work stays reviewable."""
     subjects = [s for s in _git(repo, "log", "--format=%h %s", f"{old}..{new}").splitlines() if s]
-    diff = _git(repo, "diff", old, new)
+    diff = _git(repo, "diff", "-U8", old, new)
     if len(diff) > COMMIT_DIFF_MAX_CHARS:
         diff = diff[:COMMIT_DIFF_MAX_CHARS] + f"\n… [commit diff truncated, {len(diff)} chars total]"
     stat = _git(repo, "diff", old, new, "--stat").strip()

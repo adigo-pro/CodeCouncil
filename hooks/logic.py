@@ -82,7 +82,8 @@ def decide(event: dict, suggestions: list[dict], ledger: dict, now: float) -> di
                 "additionalContext": (
                     "Peer reviewer (CodeCouncil) flagged on recent changes:\n"
                     f"{lines}\n"
-                    "Address each if valid, or briefly say why you disagree."
+                    "Address each if valid. If you disagree, reply with a line "
+                    "`COUNCIL-REBUTTAL: <your reason>` so the disagreement is recorded."
                 ),
             }
         }
@@ -99,8 +100,8 @@ def decide(event: dict, suggestions: list[dict], ledger: dict, now: float) -> di
             "decision": "block",
             "reason": (
                 "CodeCouncil peer reviewer has an unresolved finding: "
-                f"{_describe(row)}. Fix it if you agree, or state briefly why "
-                "you disagree — then finish."
+                f"{_describe(row)}. Fix it if you agree, or reply with a line "
+                "`COUNCIL-REBUTTAL: <your reason>` if you disagree — then finish."
             ),
         }
 

@@ -51,12 +51,16 @@ def grade_pending(cc: Path) -> int:
 
     for row in to_judge:
         d = judge.first_delivery(delivered, row["id"])
-        prompt = judge.build_prompt(row, judge.evidence(row, d, observations))
-        try:
-            grade = judge.parse_grade(_ask(prompt))
-        except agent.AgentError as e:
-            print(f"reflector: grading {row['id']} failed ({e}); will retry next beat")
-            continue
+        reason = judge.explicit_rebuttal(d, observations)
+        if reason is not None:
+            grade = {"outcome": "rebutted", "evidence": f"explicit rebuttal: {reason}"}
+        else:
+            prompt = judge.build_prompt(row, judge.evidence(row, d, observations))
+            try:
+                grade = judge.parse_grade(_ask(prompt))
+            except agent.AgentError as e:
+                print(f"reflector: grading {row['id']} failed ({e}); will retry next beat")
+                continue
         append_ndjson(outcomes_path, {
             "id": uuid.uuid4().hex[:12], "suggestion_id": row["id"], "ts": now_iso(),
             "outcome": grade["outcome"], "evidence": grade.get("evidence", ""),

@@ -17,13 +17,26 @@ measurably better at critiquing your work. Three loops:
    diffs + reasoning), then rewrites the Critic's heuristics from the grades.
    The recursive self-improvement loop.
 
+## Quick start — one command
+
+```sh
+python3 -m codecouncil /path/to/repo-being-coded-in   # hooks + all three loops
+```
+
+Requires [pi](https://pi.dev) with a provider configured (see below). Pass
+`--model provider/id` to pick the model, `--no-hooks` to skip hook install.
+The sections below run each loop individually.
+
 ## Run the Observer
 
 ```sh
-python3 -m observer /path/to/repo-being-coded-in   # 30s heartbeat
+python3 -m observer /path/to/repo-being-coded-in   # event-driven, 10s floor
 python3 -m observer . --once                       # single beat
 python3 -m observer . --from-start                 # replay transcripts from the top
 ```
+
+Beats fire the moment a session transcript grows; `--interval` is only the
+fallback ceiling that catches git-only changes.
 
 Output: live terminal narration + `.codecouncil/observations.ndjsonl` in the watched
 repo (one JSON event per line: `reasoning`, `tool_call`, `diff` — diffs include

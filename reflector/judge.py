@@ -14,6 +14,7 @@ MAX_EVIDENCE_TOOL_CALLS = 8
 MAX_EVIDENCE_DIFF_CHARS = 8_000
 
 OUTCOMES = {"accepted", "rebutted", "ignored"}
+REBUTTAL_MARKER = "COUNCIL-REBUTTAL"
 
 
 def _epoch(iso: str) -> float | None:
@@ -87,6 +88,23 @@ def evidence(row: dict, delivery_ts: float, observations: list[dict]) -> str:
     else:
         parts.append("(no diff captured in window)")
     return "\n".join(parts)
+
+
+def explicit_rebuttal(delivery_ts: float, observations: list[dict]) -> str | None:
+    """Deterministic rebuttal: the coding agent used the COUNCIL-REBUTTAL marker
+    (which the hook's injection text asks for) in post-delivery reasoning.
+    Returns the stated reason, or None. No model call needed when this fires."""
+    for o in observations:
+        if o.get("type") != "reasoning":
+            continue
+        t = _epoch(o.get("ts", ""))
+        if t is None or not (delivery_ts <= t <= delivery_ts + EVIDENCE_WINDOW_S):
+            continue
+        text = (o.get("payload") or {}).get("text", "")
+        if REBUTTAL_MARKER in text:
+            m = re.search(REBUTTAL_MARKER + r"\s*[:—–-]\s*(.+)", text)
+            return (m.group(1).split("\n")[0].strip() if m else text)[:300]
+    return None
 
 
 def file_touched(row: dict, delivery_ts: float, observations: list[dict]) -> bool:

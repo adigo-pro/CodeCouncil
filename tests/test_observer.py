@@ -118,5 +118,26 @@ class TestStateAndLog(unittest.TestCase):
             self.assertEqual([r["type"] for r in rows], [DIFF, REASONING])
 
 
+
+
+class TestEventDrivenPacing(unittest.TestCase):
+    def test_transcript_sig_changes_on_append(self):
+        from observer.main import transcript_sig, wait_for_material
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "s.jsonl").write_text("{}\n")
+            before = transcript_sig(d)
+            self.assertEqual(before, (("s.jsonl", 3),))
+            (d / "s.jsonl").write_text("{}\n{}\n")
+            self.assertNotEqual(before, transcript_sig(d))
+
+    def test_wait_returns_at_floor_when_quiet(self):
+        from observer.main import wait_for_material
+        import time as _time
+        with tempfile.TemporaryDirectory() as td:
+            t0 = _time.monotonic()
+            wait_for_material(Path(td), max_wait=0.2, poll_s=0.05)
+            self.assertLess(_time.monotonic() - t0, 1.0)
+
 if __name__ == "__main__":
     unittest.main()

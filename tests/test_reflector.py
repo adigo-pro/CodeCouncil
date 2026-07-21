@@ -618,6 +618,101 @@ class TestGradePendingHarvestsCases(unittest.TestCase):
         self.assertFalse((self.harvested_dir / "harvest-s1.json").exists())
 
 
+# Distinguishes TASK: GRADE from TASK: DISTILL calls by the marker each
+# prompt starts with (both come from build_prompt/build_distill_prompt).
+REBUT_AND_DISTILL_STUB = """#!/usr/bin/env python3
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+if "TASK: DISTILL" in text:
+    print("Tests are stdlib unittest run via discover.")
+elif "TASK: GRADE" in text:
+    print('{"outcome": "rebutted", "evidence": "agent disagreed: coverage already exists"}')
+else:
+    print("PASS")
+"""
+
+
+class TestGradePendingDistillsKnowledge(unittest.TestCase):
+    """Task 5: a rebutted grade — on either the explicit-marker path or the
+    model-judged path — distills into .codecouncil/knowledge.md so the same
+    rebuttal never has to recur."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name) / ".codecouncil"
+        self.cc.mkdir()
+        self.harvested_dir = Path(self.td.name) / "cases-harvested"
+        self.patcher = mock.patch("reflector.harvest.HARVESTED_DIR", self.harvested_dir)
+        self.patcher.start()
+
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
+            "id": "s1", "ts": _iso(NOW - 400), "verdict": "SUGGESTION",
+            "heuristics_version": 1,
+            "suggestion": {"file": "a.py", "line": 3, "severity": "medium",
+                          "issue": "missing test coverage", "rationale": "r"},
+        }) + "\n", encoding="utf-8")
+        (self.cc / "delivered.json").write_text(
+            json.dumps({"s1": {"context": NOW - 300}}), encoding="utf-8")
+
+    def tearDown(self):
+        self.patcher.stop()
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def test_rebutted_grade_distills_a_fact(self):
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), REBUT_AND_DISTILL_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "rebutted")
+        self.assertIn("stdlib unittest", (self.cc / "knowledge.md").read_text())
+
+    def test_explicit_rebuttal_also_distills_a_fact(self):
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), REBUT_AND_DISTILL_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        (self.cc / "observations.ndjsonl").write_text(json.dumps({
+            "ts": _iso(NOW - 250), "type": "reasoning",
+            "payload": {"text": "COUNCIL-REBUTTAL: coverage already exists in b_test.py"}},
+        ) + "\n", encoding="utf-8")
+
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "rebutted")
+        self.assertIn("stdlib unittest", (self.cc / "knowledge.md").read_text())
+
+    def test_distill_failure_never_kills_grading(self):
+        """A distill call that raises must not take down grade_pending — the
+        outcome row it already appended must survive."""
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), REBUT_AND_DISTILL_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        real_ask = main_mod._ask
+
+        def flaky_ask(prompt_text):
+            if prompt_text.startswith("TASK: DISTILL"):
+                raise RuntimeError("model unreachable")
+            return real_ask(prompt_text)
+
+        with mock.patch("reflector.main._ask", side_effect=flaky_ask):
+            n = main_mod.grade_pending(self.cc)
+
+        self.assertEqual(n, 1)
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0]["outcome"], "rebutted")
+        self.assertFalse((self.cc / "knowledge.md").exists())
+
+
 class TestMissedGrading(unittest.TestCase):
     """Task 3: grade_pending must also detect PASS verdicts later contradicted
     by a fix commit (reflector.misses), grade them 'missed' with no model

@@ -20,6 +20,13 @@ Reply with EXACTLY one raw JSON object, nothing else:
 Ground your answer only in the provided evidence. When evidence is thin or
 ambiguous, the answer is "ignored".
 
+## TASK: DISTILL
+
+You get one code-review finding and the developer's rebuttal. Reply with
+exactly ONE sentence stating the repo-specific fact or convention that makes
+the finding wrong (max 200 chars), or the single word NONE if the rebuttal
+reveals no reusable fact. No preamble.
+
 ## TASK: REWRITE HEURISTICS
 
 You get the current review-heuristics file (version N) and graded outcomes of

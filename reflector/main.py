@@ -13,6 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
+from core import knowledge
 from core.store import append_row as append_ndjson
 from core.store import read_rows as read_ndjson
 from core.store import read_tail_rows, wait_for
@@ -82,6 +83,17 @@ def grade_pending(cc: Path) -> int:
         appended_ids.add(row["id"])
         print(f"reflector: {row['id']} → {grade['outcome']}"
               + (f" ({grade['evidence']})" if grade.get("evidence") else ""))
+        if grade["outcome"] == "rebutted":
+            # Distill on BOTH rebuttal paths above (explicit-marker and
+            # model-judged) — daemons never die: a distill failure must not
+            # affect the outcome row already appended above.
+            try:
+                distill_prompt = knowledge.build_distill_prompt(row, grade.get("evidence", ""))
+                fact = knowledge.parse_fact(_ask(distill_prompt))
+                if fact and knowledge.add_fact(cc, fact):
+                    print(f"reflector: {row['id']} → distilled fact: {fact}")
+            except Exception as e:  # daemons never die: distillation is best-effort
+                print(f"reflector: distill failed for {row['id']} ({e}) — continuing")
         try:
             case_name = harvest.maybe_harvest(cc, {**row, "file_touched": touched}, grade["outcome"])
         except Exception as e:  # daemons never die: harvesting is best-effort, never fatal

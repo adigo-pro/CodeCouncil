@@ -40,8 +40,20 @@ def heuristics_version(heuristics: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def _render_knowledge(knowledge: str) -> list[str]:
+    """The REPO KNOWLEDGE section — facts distilled from past rebuttals
+    (core.knowledge, reflector/main.py's distill step) — rendered right after
+    HEURISTICS so the model sees repo-specific overrides before generic
+    rules. Omitted entirely when there's nothing learned yet."""
+    if not knowledge:
+        return []
+    return ["REPO KNOWLEDGE (learned from past reviews — trust these over generic rules):",
+           knowledge.strip(), ""]
+
+
 def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
-                 project: str = "", verdict_history: list[dict] | None = None) -> str:
+                 project: str = "", verdict_history: list[dict] | None = None,
+                 knowledge: str = "") -> str:
     all_reasoning = [e for e in events if e["type"] == "reasoning"]
     all_tools = [e for e in events if e["type"] == "tool_call"]
     reasoning = all_reasoning[-MAX_REASONING_EVENTS:]
@@ -52,6 +64,7 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
     if project:
         parts += [project.strip(), ""]
     parts += [f"HEURISTICS (v{heuristics_version(heuristics)}):", heuristics.strip(), ""]
+    parts += _render_knowledge(knowledge)
 
     parts.append("CODING AGENT'S RECENT REASONING:")
     if reasoning:
@@ -173,7 +186,8 @@ def mechanical_fact(events: list[dict], tests_run_sticky: str | None = None) -> 
 
 
 def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: str,
-                      project: str = "", tests_run_sticky: str | None = None) -> str:
+                      project: str = "", tests_run_sticky: str | None = None,
+                      knowledge: str = "") -> str:
     """The 'agent says it's done' review: claims vs what the diff supports.
 
     tests_run_sticky: the most recent test-command timestamp seen anywhere
@@ -189,6 +203,7 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
     if project:
         parts += [project.strip(), ""]
     parts += [f"HEURISTICS (v{heuristics_version(heuristics)}):", heuristics.strip(), ""]
+    parts += _render_knowledge(knowledge)
     parts.append("TASK REVIEW — the coding agent has just declared this work finished.")
     parts.append("")
     parts.append("THE AGENT'S STATEMENTS DURING THE TASK (its claims live here):")

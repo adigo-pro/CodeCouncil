@@ -18,6 +18,7 @@ import uuid
 from collections import Counter
 from pathlib import Path
 
+from core import knowledge
 from core.store import read_tail_rows, wait_for
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
@@ -207,8 +208,10 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     suggestions_file = ctx["suggestions_file"]
     heuristics = ensure_heuristics(ctx["heuristics_path"])
     history = verdict_history(suggestions_file, suggestions_file.parent / "outcomes.ndjsonl")
+    kb = knowledge.load(suggestions_file.parent)  # fresh every call, same pattern as heuristics
     text = prompt.build_prompt(events, ctx.get("latest_diff"), heuristics,
-                               project=ctx.get("project", ""), verdict_history=history)
+                               project=ctx.get("project", ""), verdict_history=history,
+                               knowledge=kb)
     record = {
         "id": uuid.uuid4().hex[:12],
         "ts": ts,
@@ -337,10 +340,12 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
     events = recent_events(obs_file, since_epoch)
     heuristics = ensure_heuristics(ctx["heuristics_path"])
     tests_run_sticky = ctx.get("tests_run_sticky")
+    suggestions_file = ctx["suggestions_file"]
+    kb = knowledge.load(suggestions_file.parent)  # fresh every call, same pattern as heuristics
     text = prompt.build_task_review(events, ctx.get("latest_diff"), heuristics,
                                     project=ctx.get("project", ""),
-                                    tests_run_sticky=tests_run_sticky)
-    suggestions_file = ctx["suggestions_file"]
+                                    tests_run_sticky=tests_run_sticky,
+                                    knowledge=kb)
     record = {
         "id": uuid.uuid4().hex[:12],
         "ts": ctx["ts"],

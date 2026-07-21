@@ -117,6 +117,36 @@ class TestPrompt(unittest.TestCase):
         text = prompt.build_prompt(self._events(), None, "version: 1")
         self.assertNotIn("RECENT VERDICTS", text)
 
+    def test_prompt_renders_knowledge_after_heuristics(self):
+        text = prompt.build_prompt(self._events(), None, "version: 1\n- rule",
+                                   knowledge="# Repo knowledge\n\n- tests are stdlib unittest")
+        self.assertIn("REPO KNOWLEDGE (learned from past reviews — trust these over generic rules):", text)
+        self.assertIn("tests are stdlib unittest", text)
+        heuristics_pos = text.index("HEURISTICS (v1):")
+        knowledge_pos = text.index("REPO KNOWLEDGE")
+        reasoning_pos = text.index("CODING AGENT'S RECENT REASONING:")
+        self.assertTrue(heuristics_pos < knowledge_pos < reasoning_pos)
+
+    def test_no_knowledge_no_section(self):
+        text = prompt.build_prompt(self._events(), None, "version: 1")
+        self.assertNotIn("REPO KNOWLEDGE", text)
+        text = prompt.build_prompt(self._events(), None, "version: 1", knowledge="")
+        self.assertNotIn("REPO KNOWLEDGE", text)
+
+    def test_task_review_renders_knowledge_after_heuristics(self):
+        text = prompt.build_task_review(self._events(), None, "version: 1\n- rule",
+                                        knowledge="- known fact")
+        self.assertIn("REPO KNOWLEDGE (learned from past reviews — trust these over generic rules):", text)
+        self.assertIn("known fact", text)
+        heuristics_pos = text.index("HEURISTICS (v1):")
+        knowledge_pos = text.index("REPO KNOWLEDGE")
+        review_pos = text.index("TASK REVIEW —")
+        self.assertTrue(heuristics_pos < knowledge_pos < review_pos)
+
+    def test_task_review_no_knowledge_no_section(self):
+        text = prompt.build_task_review(self._events(), None, "version: 1")
+        self.assertNotIn("REPO KNOWLEDGE", text)
+
     def test_commit_events_rendered_and_open_gate(self):
         events = self._events() + [{"type": "commit", "payload": {
             "subjects": ["abc123 fix the frobnicator"], "diff": "+frob()", "stat": ""}}]

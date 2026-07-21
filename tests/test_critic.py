@@ -592,6 +592,21 @@ class TestReviewedFiles(unittest.TestCase):
         row = json.loads(self.suggestions.read_text().splitlines()[-1])
         self.assertEqual(row["reviewed_files"], ["a.py", "new.py"])
 
+    def test_commit_only_batch_records_reviewed_files(self):
+        # a file written-and-committed within one beat carries no "diff"
+        # event (only a "commit" event) — its path must still land in
+        # reviewed_files so it isn't invisible to miss detection
+        self._set_stub("PASS")
+        self._write_obs([
+            {"ts": _iso(NOW), "beat": 1, "type": "commit", "session": "s", "payload": {
+                "from": "aaa", "to": "bbb", "subjects": ["add feature"],
+                "diff": "--- a/committed.py\n+++ b/committed.py\n+x=1\n", "stat": ""}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        self._beat(state, TurnScheduler())
+        row = json.loads(self.suggestions.read_text().splitlines()[-1])
+        self.assertIn("committed.py", row["reviewed_files"])
+
     def test_pass_verdict_saves_case_material(self):
         # same beat as above; PASS row id must have case-material JSON on disk
         self._set_stub("PASS")

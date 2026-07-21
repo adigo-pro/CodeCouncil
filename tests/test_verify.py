@@ -48,6 +48,22 @@ class TestParse(unittest.TestCase):
         self.assertEqual(v["status"], "inconclusive")
         self.assertIn("unparseable", v["note"])
 
+    def test_bracket_label_confirmed(self):
+        # observed live: the verifier model replied "[CONFIRMED] ..." with no
+        # colon, which the old colon-only regex missed entirely
+        self.assertEqual(verify.parse("[CONFIRMED] repro raised ZeroDivisionError"),
+                         {"status": "verified", "note": "repro raised ZeroDivisionError"})
+
+    def test_bracket_label_false_alarm(self):
+        self.assertEqual(verify.parse("[FALSE-ALARM] guard exists")["status"], "refuted")
+
+    def test_bare_label_without_separator_is_not_matched(self):
+        # a sentence that happens to start with the label word but has no
+        # "[:—–-]" separator must NOT be treated as a status line
+        v = verify.parse("Confirmed by looking at the file, this is fine")
+        self.assertEqual(v["status"], "inconclusive")
+        self.assertIn("unparseable", v["note"])
+
     def test_prompt_contains_finding_and_path(self):
         text = verify.build_prompt(_sugg()["suggestion"], "/tmp/staging/a.py")
         self.assertIn("TASK: VERIFY", text)

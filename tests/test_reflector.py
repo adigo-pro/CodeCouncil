@@ -102,6 +102,47 @@ class TestEvidence(unittest.TestCase):
         self.assertIn("deliberate: keep as is", text)
         self.assertNotIn("OLD", text)
 
+    def test_untracked_file_contents_included(self):
+        # a real fix living in an UNTRACKED file (never a tracked diff) must
+        # still reach the grading model, or it gets under-credited as "ignored"
+        d = NOW - 300
+        obs = [
+            {"ts": _iso(d + 60), "type": "diff", "payload": {
+                "diff": "", "untracked_contents": {"new_file.py": "def fixed(): return 1"}}},
+        ]
+        text = judge.evidence(sugg(), d, obs)
+        self.assertIn("NEW/UNTRACKED FILE CONTENTS AFTER DELIVERY:", text)
+        self.assertIn("new_file.py", text)
+        self.assertIn("def fixed(): return 1", text)
+
+    def test_touched_contents_also_included(self):
+        d = NOW - 300
+        obs = [
+            {"ts": _iso(d + 60), "type": "diff", "payload": {
+                "diff": "", "touched_contents": {"a.py": "def touched(): return 2"}}},
+        ]
+        text = judge.evidence(sugg(), d, obs)
+        self.assertIn("def touched(): return 2", text)
+
+    def test_newfile_section_is_none_when_absent(self):
+        d = NOW - 300
+        obs = [{"ts": _iso(d + 60), "type": "diff", "payload": {"diff": "+something"}}]
+        text = judge.evidence(sugg(), d, obs)
+        idx = text.index("NEW/UNTRACKED FILE CONTENTS AFTER DELIVERY:")
+        self.assertIn("(none)", text[idx:idx + 80])
+
+    def test_newfile_section_capped(self):
+        d = NOW - 300
+        obs = [
+            {"ts": _iso(d + 60), "type": "diff", "payload": {
+                "diff": "", "untracked_contents": {"big.py": "x" * 20000}}},
+        ]
+        text = judge.evidence(sugg(), d, obs)
+        idx = text.index("NEW/UNTRACKED FILE CONTENTS AFTER DELIVERY:")
+        section = text[idx:]
+        self.assertLessEqual(len(section) - len("NEW/UNTRACKED FILE CONTENTS AFTER DELIVERY:\n"),
+                             judge.MAX_EVIDENCE_NEWFILE_CHARS + 20)
+
 
 class TestParseGrade(unittest.TestCase):
     def test_valid(self):
@@ -644,6 +685,60 @@ class TestGradePendingHarvestsCases(unittest.TestCase):
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0]["outcome"], "accepted")
         self.assertFalse((self.harvested_dir / "harvest-s1.json").exists())
+
+
+# Only grades "accepted" when the prompt actually carries the fixed content —
+# proves evidence() must surface untracked-file contents for grade_pending to
+# credit a real fix that lives entirely in a new/untracked file.
+FIX_MARKER_STUB = """#!/usr/bin/env python3
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+if "def fixed_safe_divide" in text:
+    print('{"outcome": "accepted", "evidence": "untracked file now has the fix"}')
+else:
+    print('{"outcome": "ignored", "evidence": "no fix visible"}')
+"""
+
+
+class TestGradePendingCreditsUntrackedFix(unittest.TestCase):
+    """Fix 3: a real fix living entirely in an untracked file (never a tracked
+    diff) must reach the grading model via evidence(), or it gets
+    under-credited as 'ignored' — observed live."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name) / ".codecouncil"
+        self.cc.mkdir()
+
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
+            "id": "s1", "ts": _iso(NOW - 400), "verdict": "SUGGESTION",
+            "heuristics_version": 1,
+            "suggestion": {"file": "safe_math.py", "line": 3, "severity": "high",
+                          "issue": "divide by zero", "rationale": "r"},
+        }) + "\n", encoding="utf-8")
+        (self.cc / "delivered.json").write_text(
+            json.dumps({"s1": {"context": NOW - 300}}), encoding="utf-8")
+        (self.cc / "observations.ndjsonl").write_text(json.dumps({
+            "ts": _iso(NOW - 250), "type": "diff", "payload": {
+                "diff": "",
+                "untracked_contents": {
+                    "safe_math.py": "def fixed_safe_divide(a, b):\n    return a / b if b else 0"},
+            }}) + "\n", encoding="utf-8")
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def test_untracked_fix_is_accepted(self):
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), FIX_MARKER_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "accepted")
 
 
 # Distinguishes TASK: GRADE from TASK: DISTILL calls by the marker each

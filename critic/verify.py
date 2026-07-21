@@ -23,8 +23,16 @@ STATUSES = {
     "CONFIRMED": "verified", "FALSE-ALARM": "refuted", "INCONCLUSIVE": "inconclusive",
     "VERIFIED": "verified", "REFUTED": "refuted",  # legacy labels still parse
 }
+# Two accepted shapes for a status line: "[LABEL] <note>" (brackets — the
+# separator after the bracket is optional) or "LABEL: <note>" (bare label —
+# here the "[:—–-]" separator is REQUIRED, or a sentence like "Confirmed by
+# reading the file, this is fine" would false-positive as a status line).
+# Observed live: the verifier model replied "[CONFIRMED] ..." with no colon
+# at all, which the old colon-only regex missed — a genuinely confirmed
+# finding was stored "inconclusive".
 _LINE_RE = re.compile(
-    r"^(CONFIRMED|FALSE-ALARM|INCONCLUSIVE|VERIFIED|REFUTED)\s*[:—–-]\s*(.+)$",
+    r"^(?:\[(CONFIRMED|FALSE-ALARM|INCONCLUSIVE|VERIFIED|REFUTED)\]"
+    r"|(CONFIRMED|FALSE-ALARM|INCONCLUSIVE|VERIFIED|REFUTED)\s*[:—–-])\s*(.+)$",
     re.MULTILINE | re.IGNORECASE)
 
 VERIFY_TOOLS = "read,bash,write,ls"
@@ -48,8 +56,9 @@ def build_prompt(suggestion: dict, staged_path: str) -> str:
 def parse(raw: str) -> dict:
     matches = _LINE_RE.findall(raw.strip())
     if matches:
-        status, note = matches[-1]
-        return {"status": STATUSES[status.upper()], "note": note.strip()[:300]}
+        bracket_label, colon_label, note = matches[-1]
+        status = (bracket_label or colon_label).upper()
+        return {"status": STATUSES[status], "note": note.strip()[:300]}
     return {"status": "inconclusive", "note": f"unparseable verify reply: {raw[:200]}"}
 
 

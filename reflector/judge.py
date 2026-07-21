@@ -12,6 +12,7 @@ UNDELIVERED_AFTER_S = 900   # past this with no delivery, grade "undelivered" fo
 MAX_EVIDENCE_REASONING = 6
 MAX_EVIDENCE_TOOL_CALLS = 8
 MAX_EVIDENCE_DIFF_CHARS = 8_000
+MAX_EVIDENCE_NEWFILE_CHARS = 6_000
 
 OUTCOMES = {"accepted", "rebutted", "ignored"}
 REBUTTAL_MARKER = "COUNCIL-REBUTTAL"
@@ -87,6 +88,25 @@ def evidence(row: dict, delivery_ts: float, observations: list[dict]) -> str:
         parts.append(diff[:MAX_EVIDENCE_DIFF_CHARS] or "(no tracked changes)")
     else:
         parts.append("(no diff captured in window)")
+    parts.append("")
+    # A real fix can live entirely in a new/untracked file (never a tracked
+    # diff) — observed live, this under-credited a genuine fix as "ignored"
+    # because only the (empty) tracked diff reached the grading model.
+    # untracked_contents/touched_contents are captured, redacted, and capped
+    # already at diff-capture time (observer/gitwatch.py) — safe to render
+    # verbatim here.
+    parts.append("NEW/UNTRACKED FILE CONTENTS AFTER DELIVERY:")
+    newfile_entries = []
+    if diffs:
+        payload = diffs[-1]["payload"]
+        for path, text in (payload.get("untracked_contents", {}) or {}).items():
+            newfile_entries.append(f"--- {path} ---\n{text}")
+        for path, text in (payload.get("touched_contents", {}) or {}).items():
+            newfile_entries.append(f"--- {path} ---\n{text}")
+    if newfile_entries:
+        parts.append("\n".join(newfile_entries)[:MAX_EVIDENCE_NEWFILE_CHARS])
+    else:
+        parts.append("(none)")
     return "\n".join(parts)
 
 

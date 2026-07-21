@@ -187,20 +187,29 @@ def majority_session(events: list[dict]) -> str | None:
     return Counter(sessions).most_common(1)[0][0]
 
 
-def reviewed_files(latest_diff: dict | None) -> list[str]:
+def reviewed_files(latest_diff: dict | None, events: list[dict]) -> list[str]:
     """Repo-relative paths a verdict actually covered: the sorted union of
     touched_contents keys, untracked paths, and paths parsed from the raw
     diff's `+++ b/<path>` headers. The third source matters on its own:
     touched_contents (observer/gitwatch.py's _read_touched) caps by total
     chars and excluded prefixes, so a file can be in the diff yet missing
-    from touched_contents — re-parsing the diff recovers it. Empty when
-    there's no diff to review yet."""
-    if not latest_diff:
-        return []
-    payload = latest_diff.get("payload", {}) or {}
-    paths = set(payload.get("touched_contents", {}) or {})
-    paths.update(payload.get("untracked", []) or [])
-    paths.update(_touched_paths(payload.get("diff", "") or ""))
+    from touched_contents — re-parsing the diff recovers it.
+
+    Also unions in paths parsed from every "commit" event's diff in this
+    judged batch: a file written-and-committed within a single beat carries
+    no "diff" event at all (only "commit"), so without this it would never
+    appear in any verdict's reviewed_files and could never be miss-graded.
+    Empty when there's nothing to review yet."""
+    paths: set[str] = set()
+    if latest_diff:
+        payload = latest_diff.get("payload", {}) or {}
+        paths.update(payload.get("touched_contents", {}) or {})
+        paths.update(payload.get("untracked", []) or [])
+        paths.update(_touched_paths(payload.get("diff", "") or ""))
+    for e in events:
+        if e.get("type") == "commit":
+            payload = e.get("payload") or {}
+            paths.update(_touched_paths(payload.get("diff", "") or ""))
     return sorted(paths)
 
 
@@ -224,7 +233,7 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         "heuristics_version": prompt.heuristics_version(heuristics),
         "n_events": len(events),
         "prompt_chars": len(text),
-        "reviewed_files": reviewed_files(ctx.get("latest_diff")),
+        "reviewed_files": reviewed_files(ctx.get("latest_diff"), events),
     }
     save_prompt(suggestions_file.parent / "prompts", record["id"], text)
     record.update(ask_with_retry(text, ctx))

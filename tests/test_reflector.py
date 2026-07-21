@@ -153,7 +153,7 @@ class TestRewriteGuardrails(unittest.TestCase):
         ]
         text = rewrite.build_prompt(current, 3, outcomes)
         self.assertIn("R3: ", text)
-        self.assertIn("2 suggested, 1 accepted, 1 rebutted", text)
+        self.assertIn("2 graded, 1 accepted, 1 rebutted", text)
         self.assertIn("Prefer dropping or sharpening rules with rebuttals/ignores; "
                       "preserve rules with accepts.", text)
 

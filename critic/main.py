@@ -139,13 +139,16 @@ def save_prompt(prompts_dir: Path, verdict_id: str, text: str) -> None:
 
 
 def save_case_material(cc_dir: Path, verdict_id: str, events: list[dict], latest_diff) -> None:
-    """Freeze the exact batch inputs (events + latest_diff) a SUGGESTION verdict
-    was judged from — what build_prompt received, not a re-derivation. The
-    Reflector later harvests accepted/rebutted findings into frozen eval
-    cases (evals/cases-harvested/) from this material (reflector/harvest.py),
-    so the eval set grows from real outcomes instead of staying frozen.
-    Skips silently if the material is unreasonably large; capped to newest N
-    like save_prompt."""
+    """Freeze the exact batch inputs (events + latest_diff) a verdict was
+    judged from — what build_prompt received, not a re-derivation. Saved for
+    every non-ERROR verdict (PASS included, not just SUGGESTION): the
+    Reflector harvests both accepted/rebutted findings AND missed PASSes
+    (a PASS later contradicted by a fix commit, reflector/misses.py) into
+    frozen eval cases (evals/cases-harvested/) from this material
+    (reflector/harvest.py), so the eval set grows from real outcomes instead
+    of staying frozen. A missed PASS can only be harvested if its judgment
+    packet was kept, hence saving on PASS too. Skips silently if the material
+    is unreasonably large; capped to newest N like save_prompt."""
     material = {"events": events, "latest_diff": latest_diff}
     text = json.dumps(material, ensure_ascii=False)
     if len(text.encode("utf-8")) > CASE_MATERIAL_MAX_BYTES:

@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from datetime import datetime, timedelta
-from reflector.misses import detect_misses, FIX_RE, LOOKBACK_S
+from reflector.misses import _paths_match, detect_misses, FIX_RE, LOOKBACK_S
 
 
 NOW = 1000.0  # anchor time in seconds since epoch
@@ -197,6 +197,53 @@ class TestMissDetection(unittest.TestCase):
         result = detect_misses(pass_rows, commit_events, set())
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["commit_subject"], "Fix")
+
+
+class TestFileOverlapMatching(unittest.TestCase):
+    """_paths_match must be exact-path-or-basename equality, not substring
+    containment — the old bidirectional `in` check wrongly matched
+    'utils.py' against 'tests/test_utils.py'."""
+
+    def test_different_basenames_no_match(self):
+        self.assertFalse(_paths_match("utils.py", "tests/test_utils.py"))
+        self.assertFalse(_paths_match("tests/test_utils.py", "utils.py"))
+
+    def test_basename_match(self):
+        self.assertTrue(_paths_match("src/app.py", "app.py"))
+        self.assertTrue(_paths_match("app.py", "src/app.py"))
+
+    def test_exact_match(self):
+        self.assertTrue(_paths_match("src/app.py", "src/app.py"))
+
+    def test_detect_misses_no_false_positive_on_substring_filename(self):
+        """End-to-end regression: a PASS reviewing utils.py must not be
+        flagged as missed by a later fix commit that only touched the
+        unrelated tests/test_utils.py."""
+        pass_rows = [_pass_row("p1", NOW, ("utils.py",))]
+        commit_events = [
+            _commit(
+                NOW + 100,
+                "fix flaky test",
+                "--- a/tests/test_utils.py\n+++ b/tests/test_utils.py\n@@ -1 +1 @@\n-old\n+new",
+            )
+        ]
+        result = detect_misses(pass_rows, commit_events, set())
+        self.assertEqual(len(result), 0)
+
+    def test_detect_misses_basename_match_still_flags(self):
+        """A staging-path-tolerant basename match (src/app.py vs app.py)
+        still detects the miss."""
+        pass_rows = [_pass_row("p1", NOW, ("src/app.py",))]
+        commit_events = [
+            _commit(
+                NOW + 100,
+                "fix crash",
+                "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new",
+            )
+        ]
+        result = detect_misses(pass_rows, commit_events, set())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["file"], "src/app.py")
 
 
 class TestFixRegex(unittest.TestCase):

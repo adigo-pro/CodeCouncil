@@ -136,7 +136,8 @@ def grade_pending(cc: Path) -> int:
             print(f"reflector: {miss['pass_id']} → missed ({miss['evidence']})")
             try:
                 case_name = harvest.maybe_harvest(cc, pass_row or {}, "missed",
-                                                  miss_file=miss["file"])
+                                                  miss_file=miss["file"],
+                                                  commit_subject=miss.get("commit_subject"))
             except Exception as e:  # harvesting is best-effort, never fatal
                 print(f"reflector: harvest failed for {miss['pass_id']} ({e}) — continuing")
                 case_name = None

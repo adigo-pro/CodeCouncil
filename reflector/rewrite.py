@@ -62,7 +62,7 @@ def _rule_stat_lines(outcomes: list[dict], version: int) -> list[str]:
     for r in rows:
         rule_label = f"R{r['rule']}" if r["rule"] is not None else "R?"
         suggested = r["accepted"] + r["rebutted"] + r["ignored"]
-        lines.append(f"{rule_label}: {suggested} suggested, {r['accepted']} accepted, "
+        lines.append(f"{rule_label}: {suggested} graded, {r['accepted']} accepted, "
                      f"{r['rebutted']} rebutted, {r['ignored']} ignored")
     return lines
 

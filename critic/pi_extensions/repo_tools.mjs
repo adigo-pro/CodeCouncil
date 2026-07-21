@@ -38,6 +38,13 @@ const MAX_READ_LINES = 2000;
 const MAX_GREP_MATCHES = 200;
 const MAX_FIND_RESULTS = 500;
 const MAX_LS_ENTRIES = 500;
+// Catastrophic-backtracking guard: params.pattern is model-authored and run
+// as a live RegExp against every line of every walked file. A pathological
+// pattern (nested quantifiers) against an unbounded-length line (e.g. a
+// minified bundle) can hang the process. Truncating the line before
+// regex.test caps the work any single line can force, independent of the
+// pattern itself.
+const MAX_GREP_LINE_CHARS = 2000;
 
 function errorResult(text) {
   return { content: [{ type: "text", text: `Error: ${text}` }] };
@@ -107,8 +114,11 @@ export default function (pi) {
         const relFile = relative(root, file);
         const lines = text.split("\n");
         for (let i = 0; i < lines.length && matches.length < MAX_GREP_MATCHES; i++) {
-          if (regex.test(lines[i])) {
-            matches.push(`${relFile}:${i + 1}: ${lines[i].slice(0, 300)}`);
+          const line = lines[i].length > MAX_GREP_LINE_CHARS
+            ? lines[i].slice(0, MAX_GREP_LINE_CHARS)
+            : lines[i];
+          if (regex.test(line)) {
+            matches.push(`${relFile}:${i + 1}: ${line.slice(0, 300)}`);
           }
         }
       }

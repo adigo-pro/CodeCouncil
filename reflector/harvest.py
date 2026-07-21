@@ -34,8 +34,19 @@ HARVESTED_DIR = Path(__file__).resolve().parents[1] / "evals" / "cases-harvested
 MAX_HARVESTED = 40
 
 
-def _content_hash(file: str, issue: str) -> str:
-    return hashlib.sha1(f"{file}|{issue}".encode("utf-8")).hexdigest()[:12]
+def _content_hash(file: str, issue: str, extra: str = "") -> str:
+    return hashlib.sha1(f"{file}|{issue}|{extra}".encode("utf-8")).hexdigest()[:12]
+
+
+def _prune_dir(dir_path: Path, pattern: str, keep: int) -> None:
+    """Cap a directory to its newest `keep` files (by mtime), oldest evicted
+    first. Mirrors critic/main.py's _prune_dir (prompts/, case-material/) so
+    evals/cases-harvested/ grows without limit either — it caps and rolls
+    over instead. evals/cases/ (hand-made) is a sibling, separate directory
+    and is never touched by this."""
+    files = sorted(dir_path.glob(pattern), key=lambda p: p.stat().st_mtime)
+    for old in files[:-keep]:
+        old.unlink(missing_ok=True)
 
 
 def _load_material(cc: Path, sid: str) -> dict | None:
@@ -49,12 +60,16 @@ def _load_material(cc: Path, sid: str) -> dict | None:
 
 
 def _write_case(sid: str, hash_file: str, file_name: str, issue: str,
-                expected: str, material: dict) -> str | None:
+                expected: str, material: dict, dedupe_extra: str = "") -> str | None:
     """Shared dedupe + cap + write tail, used by both the SUGGESTION-graded
     path and the missed-PASS path below. `hash_file` is the raw (possibly
     directory-qualified) file identifier the dedupe hash is keyed on;
-    `file_name` is the basename that actually goes into expect_files."""
-    content_hash = _content_hash(hash_file, issue)
+    `file_name` is the basename that actually goes into expect_files.
+    `dedupe_extra` folds additional context into the dedupe hash — the
+    missed-PASS path uses it for the fix commit's subject, so two distinct
+    misses on the same file (different fix commits) don't collapse into one
+    harvested case."""
+    content_hash = _content_hash(hash_file, issue, dedupe_extra)
 
     HARVESTED_DIR.mkdir(parents=True, exist_ok=True)
     existing_files = sorted(HARVESTED_DIR.glob("*.json"))
@@ -66,9 +81,6 @@ def _write_case(sid: str, hash_file: str, file_name: str, issue: str,
         if existing_obj.get("_content_hash") == content_hash:
             return None  # dedupe: same flagged file+issue already harvested
 
-    if len(existing_files) >= MAX_HARVESTED:
-        return None  # cap reached — never evict hand-made or harvested cases
-
     name = f"harvest-{sid}"
     case = {
         "name": name,
@@ -79,11 +91,19 @@ def _write_case(sid: str, hash_file: str, file_name: str, issue: str,
         "_content_hash": content_hash,
     }
     (HARVESTED_DIR / f"{name}.json").write_text(json.dumps(case, indent=1), encoding="utf-8")
+    # Cap the directory to the newest MAX_HARVESTED cases, oldest evicted
+    # first — mirrors critic/main.py's _prune_dir pattern (prompts/,
+    # case-material/) rather than refusing to harvest once full. Runs after
+    # the write so the just-written case is itself eligible to count toward
+    # (and, on a future call, be evicted alongside) the cap. evals/cases/
+    # (hand-made) is a separate directory and is never touched.
+    _prune_dir(HARVESTED_DIR, "*.json", MAX_HARVESTED)
     return name
 
 
 def maybe_harvest(cc: Path, suggestion_row: dict, outcome: str,
-                  miss_file: str | None = None) -> str | None:
+                  miss_file: str | None = None,
+                  commit_subject: str | None = None) -> str | None:
     """Freeze a graded suggestion's judged inputs into a new eval case, if it
     qualifies. Returns the case name written, or None.
 
@@ -97,6 +117,10 @@ def maybe_harvest(cc: Path, suggestion_row: dict, outcome: str,
       reviewed file, see reflector.misses) -> must-FLAG case. `suggestion_row`
       here is the PASS row itself, which has no "suggestion" dict to read a
       file from, so the flagged file comes from `miss_file` instead.
+      `commit_subject` (the fix commit's subject, from reflector.misses'
+      output) is folded into the dedupe hash so two distinct misses on the
+      same file — different fix commits — harvest as two cases instead of
+      collapsing into one under the old (file, "") hash.
     """
     if outcome == "missed":
         if not miss_file:
@@ -109,7 +133,8 @@ def maybe_harvest(cc: Path, suggestion_row: dict, outcome: str,
             return None
         file_name = Path(miss_file).name
         issue = suggestion_row.get("reason", "")
-        return _write_case(sid, miss_file, file_name, issue, "flag", material)
+        return _write_case(sid, miss_file, file_name, issue, "flag", material,
+                           dedupe_extra=commit_subject or "")
 
     if suggestion_row.get("verdict") != "SUGGESTION":
         return None

@@ -198,7 +198,14 @@ class TestMaybeHarvest(unittest.TestCase):
         self.assertFalse(self.harvested_dir.exists() and
                          any(self.harvested_dir.glob("*.json")))
 
-    def test_cap_at_max_harvested(self):
+    def test_cap_evicts_oldest_harvested_file(self):
+        """Beyond MAX_HARVESTED, harvest.maybe_harvest prunes the oldest
+        harvested case by mtime (mirrors critic/main.py's _prune_dir) rather
+        than refusing to harvest once full — a 4th case (cap=3) evicts the
+        1st, and evals/cases/ (hand-made, a separate directory entirely) is
+        never touched by this."""
+        import os
+
         old_max = harvest.MAX_HARVESTED
         harvest.MAX_HARVESTED = 3
         try:
@@ -209,13 +216,47 @@ class TestMaybeHarvest(unittest.TestCase):
                                       verification={"status": "verified"})
                 name = harvest.maybe_harvest(self.cc, row, "accepted")
                 self.assertEqual(name, f"harvest-{sid}")
+                os.utime(self.harvested_dir / f"{name}.json", (i, i))
             _write_material(self.cc, "cap-overflow")
             row = _suggestion_row("cap-overflow", file="overflow.py", issue="overflow issue",
                                   verification={"status": "verified"})
-            self.assertIsNone(harvest.maybe_harvest(self.cc, row, "accepted"))
-            self.assertEqual(len(list(self.harvested_dir.glob("*.json"))), 3)
+            name = harvest.maybe_harvest(self.cc, row, "accepted")
+            self.assertEqual(name, "harvest-cap-overflow")
+            names = sorted(p.name for p in self.harvested_dir.glob("*.json"))
+            self.assertEqual(len(names), 3)
+            self.assertNotIn("harvest-cap0.json", names)  # oldest evicted
+            self.assertIn("harvest-cap-overflow.json", names)
         finally:
             harvest.MAX_HARVESTED = old_max
+
+    def test_missed_dedupe_includes_commit_subject_two_fixes_two_cases(self):
+        """Two misses on the same file with different fix commits must
+        harvest as two distinct cases — the old (file, "") dedupe hash
+        collapsed them into one, losing the second fix's signal."""
+        _write_material(self.cc, "p1")
+        _write_material(self.cc, "p2")
+        row1 = {"id": "p1", "verdict": "PASS", "reason": "looked fine"}
+        row2 = {"id": "p2", "verdict": "PASS", "reason": "looked fine"}
+        first = harvest.maybe_harvest(self.cc, row1, "missed", miss_file="a.py",
+                                      commit_subject="fix null deref")
+        second = harvest.maybe_harvest(self.cc, row2, "missed", miss_file="a.py",
+                                       commit_subject="fix off-by-one")
+        self.assertEqual(first, "harvest-p1")
+        self.assertEqual(second, "harvest-p2")
+        self.assertEqual(len(list(self.harvested_dir.glob("*.json"))), 2)
+
+    def test_missed_dedupe_same_commit_subject_collapses(self):
+        _write_material(self.cc, "p1")
+        _write_material(self.cc, "p1-again")
+        row1 = {"id": "p1", "verdict": "PASS", "reason": "looked fine"}
+        row2 = {"id": "p1-again", "verdict": "PASS", "reason": "looked fine"}
+        first = harvest.maybe_harvest(self.cc, row1, "missed", miss_file="a.py",
+                                      commit_subject="fix null deref")
+        second = harvest.maybe_harvest(self.cc, row2, "missed", miss_file="a.py",
+                                       commit_subject="fix null deref")
+        self.assertEqual(first, "harvest-p1")
+        self.assertIsNone(second)
+        self.assertEqual(len(list(self.harvested_dir.glob("*.json"))), 1)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ import json
 import re
 from typing import Any
 
+from core.redact import redact
+
 MAX_REASONING_EVENTS = 8
 MAX_TOOL_EVENTS = 15
 MAX_DIFF_CHARS = 12_000
@@ -13,7 +15,23 @@ PROMPT_BUDGET_CHARS = 16_000
 MIN_DIFF_CHARS = 1_000
 TOUCHED_PROMPT_CHARS = 5_000
 
+# The model-authored "issue"/"rationale" text in a SUGGESTION reply is fed
+# by the judgment turn's own read-only repo tools (repo_read/repo_grep/...,
+# critic/pi_extensions/repo_tools.mjs) — an investigation-shaped sink that
+# can echo live file contents (including a secret the tool happened to
+# read) straight into suggestions.ndjsonl and, downstream, hook-delivered
+# text and dashboard views. Cap + redact here, once, at the parse boundary,
+# rather than trusting every consumer to do it.
+MAX_ISSUE_CHARS = 300
+MAX_RATIONALE_CHARS = 600
+
 PASS = "PASS"
+
+
+def _cap(text: str, limit: int) -> str:
+    """Truncate with the same '… [N chars total]' marker used elsewhere in
+    the codebase (observer/transcript.py's _truncate, observer/gitwatch.py)."""
+    return text if len(text) <= limit else text[:limit] + f"… [{len(text)} chars total]"
 
 
 def _render_touched_contents(touched_contents: dict[str, str]) -> list[str]:
@@ -314,8 +332,8 @@ def parse_reply(raw: str) -> dict[str, Any]:
                         "file": obj["file"],
                         "line": obj.get("line"),
                         "severity": obj.get("severity", "medium"),
-                        "issue": obj["issue"],
-                        "rationale": obj.get("rationale", ""),
+                        "issue": _cap(redact(obj["issue"]), MAX_ISSUE_CHARS),
+                        "rationale": _cap(redact(obj.get("rationale", "")), MAX_RATIONALE_CHARS),
                         # "the heuristic (R1, R2, …) that most motivated this
                         # finding" — kept only when it's a positive int;
                         # anything else (missing, string, 0, negative) is

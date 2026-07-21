@@ -71,6 +71,44 @@ class TestParseReply(unittest.TestCase):
         self.assertIsNone(
             prompt.parse_reply('{"file":"a.py","issue":"x","rule":-1}')["suggestion"]["rule"])
 
+    def test_suggestion_issue_is_redacted(self):
+        """The model's judgment turn has read-only repo tools (repo_read,
+        repo_grep, ...) that can echo live file contents back into "issue"/
+        "rationale" — an unredacted, uncapped sink for a secret those tools
+        happened to read. parse_reply must redact both fields."""
+        secret = "nvapi-" + "b" * 30
+        raw = json.dumps({"file": "a.py", "issue": f"found key {secret} in config"})
+        v = prompt.parse_reply(raw)
+        self.assertNotIn(secret, v["suggestion"]["issue"])
+        self.assertIn("«REDACTED:nvidia-key»", v["suggestion"]["issue"])
+
+    def test_suggestion_rationale_is_redacted(self):
+        secret = "nvapi-" + "c" * 30
+        raw = json.dumps({"file": "a.py", "issue": "x", "rationale": f"see {secret}"})
+        v = prompt.parse_reply(raw)
+        self.assertNotIn(secret, v["suggestion"]["rationale"])
+        self.assertIn("«REDACTED:nvidia-key»", v["suggestion"]["rationale"])
+
+    def test_suggestion_issue_is_capped_at_300_chars(self):
+        raw = json.dumps({"file": "a.py", "issue": "x" * 1000})
+        v = prompt.parse_reply(raw)
+        issue = v["suggestion"]["issue"]
+        self.assertLess(len(issue), 1000)
+        self.assertIn("… [1000 chars total]", issue)
+
+    def test_suggestion_rationale_is_capped_at_600_chars(self):
+        raw = json.dumps({"file": "a.py", "issue": "x", "rationale": "y" * 1000})
+        v = prompt.parse_reply(raw)
+        rationale = v["suggestion"]["rationale"]
+        self.assertLess(len(rationale), 1000)
+        self.assertIn("… [1000 chars total]", rationale)
+
+    def test_suggestion_short_issue_and_rationale_untouched(self):
+        raw = json.dumps({"file": "a.py", "issue": "short issue", "rationale": "short rationale"})
+        v = prompt.parse_reply(raw)
+        self.assertEqual(v["suggestion"]["issue"], "short issue")
+        self.assertEqual(v["suggestion"]["rationale"], "short rationale")
+
 
 class TestPrompt(unittest.TestCase):
     def _events(self):

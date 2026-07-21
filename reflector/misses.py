@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from pathlib import Path
 
 from observer.gitwatch import _touched_paths
 
@@ -20,6 +21,22 @@ FIX_RE = re.compile(
     re.I
 )
 LOOKBACK_S = 3600  # one hour
+
+
+def _paths_match(reviewed: str, touched: str) -> bool:
+    """True if `reviewed` and `touched` name the same file: exact (relative)
+    path equality, or matching basenames. Basename equality is deliberate —
+    it tolerates a staging-path prefix (e.g. 'underreview/d4ab-app.py' vs
+    'app.py') the same way critic/main.py's normalize_file already does —
+    but it is NOT substring containment: the previous bidirectional
+    `a in b or b in a` check wrongly matched 'utils.py' against
+    'tests/test_utils.py' (one string contains the other), poisoning the
+    miss detector with a false 'missed' grade. Path(...).name comparison
+    rejects that pair (their basenames differ) while still matching
+    'src/app.py' against 'app.py'."""
+    if reviewed == touched:
+        return True
+    return Path(reviewed).name == Path(touched).name
 
 
 def _epoch(iso: str) -> float | None:
@@ -95,7 +112,7 @@ def detect_misses(
             matching_file = None
             for reviewed_file in reviewed_files:
                 for touched_file in touched:
-                    if reviewed_file in touched_file or touched_file in reviewed_file:
+                    if _paths_match(reviewed_file, touched_file):
                         matching_file = reviewed_file
                         break
                 if matching_file:

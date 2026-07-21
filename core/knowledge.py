@@ -28,6 +28,16 @@ MAX_FACT_CHARS = 240
 
 HEADER = "# Repo knowledge (learned from past reviews)"
 
+# A distilled "fact" ultimately traces back to developer/agent-controlled
+# text (a rebuttal's evidence, itself grown from reasoning transcript
+# content) that lands in critic prompts on every later judgment — a cheap
+# directive filter so a planted "always/never <verdict verb>" sentence can
+# never become a standing instruction. Not a general prompt-injection
+# defense, just a floor: critic/persona.md's Discipline section is the
+# actual backstop, told explicitly to treat knowledge entries as facts, never
+# commands.
+DIRECTIVE_RE = re.compile(r"(?i)\b(always|never)\s+(reply|respond|say|pass|approve|ignore)\b")
+
 
 def build_distill_prompt(suggestion_row: dict, rebuttal_evidence: str) -> str:
     """One reflector TASK: DISTILL prompt: a rebutted finding plus the
@@ -49,8 +59,9 @@ def build_distill_prompt(suggestion_row: dict, rebuttal_evidence: str) -> str:
 
 def parse_fact(raw: str) -> str | None:
     """Strict parse of a TASK: DISTILL reply: strips whitespace, rejects
-    NONE/empty/multi-line/over-length replies. Returns None for all of those,
-    otherwise the fact sentence."""
+    NONE/empty/multi-line/over-length replies, and rejects anything reading
+    as a directive (DIRECTIVE_RE) rather than a fact. Returns None for all of
+    those, otherwise the fact sentence."""
     text = raw.strip()
     if not text or text.upper() == "NONE":
         return None
@@ -58,11 +69,15 @@ def parse_fact(raw: str) -> str | None:
         return None
     if len(text) > MAX_FACT_CHARS:
         return None
+    if DIRECTIVE_RE.search(text):
+        return None
     return text
 
 
 def _normalize(fact: str) -> str:
-    return re.sub(r"\s+", " ", fact.strip()).lower()
+    # Trailing sentence punctuation is stripped so "Tests are X." and
+    # "tests are x" (same fact, different terminal punctuation) dedupe.
+    return re.sub(r"\s+", " ", fact.strip()).lower().rstrip(".!?")
 
 
 def _facts(text: str) -> list[str]:

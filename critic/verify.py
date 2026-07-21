@@ -15,6 +15,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from core.redact import redact
+
 from . import agent
 
 # labels are about the FINDING, phrased so they cannot be read as being about
@@ -35,6 +37,21 @@ _LINE_RE = re.compile(
     r"|(CONFIRMED|FALSE-ALARM|INCONCLUSIVE|VERIFIED|REFUTED)\s*[:—–-])\s*(.+)$",
     re.MULTILINE | re.IGNORECASE)
 
+# A verified finding is delivered to a coding AGENT, not a human — a plain
+# repro command it can run itself is worth more than another sentence of
+# prose. Same bracket-tolerant two-form shape as _LINE_RE above: "[REPRO]
+# <cmd>" (bracket, no separator required) or "REPRO: <cmd>" (bare label,
+# separator required so ordinary prose mentioning "repro" doesn't match).
+_REPRO_RE = re.compile(
+    r"^(?:\[REPRO\]|REPRO\s*[:—–-])\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE)
+
+# Delivered inline in hook-injected text (hooks/logic.py's _describe) — kept
+# short for the same reason the status note is capped, using the same
+# "… [N chars total]" marker as the rest of the codebase (observer/gitwatch.py,
+# observer/transcript.py, critic/prompt.py).
+REPRO_MAX_CHARS = 200
+
 VERIFY_TOOLS = "read,bash,write,ls"
 
 
@@ -49,17 +66,40 @@ def build_prompt(suggestion: dict, staged_path: str) -> str:
         "file, then reply with exactly one line:\n"
         "CONFIRMED: <observed proof> — the problem is REAL (you reproduced the bad behavior)\n"
         "FALSE-ALARM: <why> — the code actually behaves correctly; the finding is wrong\n"
-        "INCONCLUSIVE: <why> — cannot be tested in isolation"
+        "INCONCLUSIVE: <why> — cannot be tested in isolation\n\n"
+        "If CONFIRMED, add a second line:\n"
+        "REPRO: <one shell command, runnable from the repo root, that demonstrates the problem>"
     )
 
 
+def _cap(text: str, limit: int) -> str:
+    """Truncate with the same '… [N chars total]' marker used elsewhere in
+    the codebase (observer/transcript.py, observer/gitwatch.py, critic/prompt.py)."""
+    return text if len(text) <= limit else text[:limit] + f"… [{len(text)} chars total]"
+
+
+def localize_repro(repro: str, staging: Path) -> str:
+    """Best-effort: the verifier only ever sees the throwaway staging copy of
+    the file (an absolute tempdir path meaningless outside that sandbox), so
+    rewrite any mention of the staging dir back to a repo-root-relative '.'
+    — the repro command a receiving agent copy-pastes must run from the
+    repo it's actually working in."""
+    return repro.replace(str(staging), ".")
+
+
 def parse(raw: str) -> dict:
-    matches = _LINE_RE.findall(raw.strip())
+    stripped = raw.strip()
+    matches = _LINE_RE.findall(stripped)
     if matches:
         bracket_label, colon_label, note = matches[-1]
         status = (bracket_label or colon_label).upper()
-        return {"status": STATUSES[status], "note": note.strip()[:300]}
-    return {"status": "inconclusive", "note": f"unparseable verify reply: {raw[:200]}"}
+        result = {"status": STATUSES[status], "note": note.strip()[:300]}
+    else:
+        result = {"status": "inconclusive", "note": f"unparseable verify reply: {raw[:200]}"}
+    repro_matches = _REPRO_RE.findall(stripped)
+    if repro_matches:
+        result["repro"] = _cap(redact(repro_matches[-1].strip()), REPRO_MAX_CHARS)
+    return result
 
 
 def verify_finding(repo: Path, suggestion: dict, system: str | None = None) -> dict:
@@ -79,4 +119,7 @@ def verify_finding(repo: Path, suggestion: dict, system: str | None = None) -> d
         return {"status": "error", "note": str(e)[:200]}
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-    return parse(reply)
+    result = parse(reply)
+    if "repro" in result:
+        result["repro"] = localize_repro(result["repro"], staging)
+    return result

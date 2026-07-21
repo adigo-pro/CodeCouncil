@@ -74,6 +74,10 @@ def _describe(row: dict) -> str:
     v = row.get("verification") or {}
     if v.get("status") == "verified":
         text += f" [verified by repro: {v.get('note', '')}]"
+        if v.get("repro"):
+            # the receiving end is a coding AGENT, not a human — a runnable
+            # command it can execute itself beats another line of prose
+            text += f" [verify yourself: {v['repro']}]"
     return text
 
 

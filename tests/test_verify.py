@@ -1,6 +1,9 @@
 """Verification tests: reply parsing, prompt shape, delivery policy for refuted."""
 
+import os
+import stat
 import sys
+import tempfile
 import time
 import unittest
 from datetime import datetime, timezone
@@ -70,9 +73,94 @@ class TestParse(unittest.TestCase):
         self.assertIn("a.py:3", text)
         self.assertIn("/tmp/staging/a.py", text)
 
+    def test_prompt_asks_for_repro_line(self):
+        text = verify.build_prompt(_sugg()["suggestion"], "/tmp/staging/a.py")
+        self.assertIn("REPRO:", text)
+
     def test_missing_file_is_inconclusive_without_any_call(self):
         v = verify.verify_finding(Path("/nonexistent-repo"), _sugg()["suggestion"])
         self.assertEqual(v["status"], "inconclusive")
+
+
+class TestParseRepro(unittest.TestCase):
+    def test_colon_form(self):
+        raw = "CONFIRMED: raised ZeroDivisionError\nREPRO: python3 -c \"1/0\""
+        v = verify.parse(raw)
+        self.assertEqual(v["repro"], 'python3 -c "1/0"')
+
+    def test_bracket_form(self):
+        raw = "CONFIRMED: raised ZeroDivisionError\n[REPRO] python3 -c \"1/0\""
+        v = verify.parse(raw)
+        self.assertEqual(v["repro"], 'python3 -c "1/0"')
+
+    def test_takes_last_repro_line(self):
+        raw = "REPRO: old one\nCONFIRMED: yes\nREPRO: python3 repro.py"
+        v = verify.parse(raw)
+        self.assertEqual(v["repro"], "python3 repro.py")
+
+    def test_no_repro_line_means_no_key(self):
+        v = verify.parse("CONFIRMED: raised ZeroDivisionError")
+        self.assertNotIn("repro", v)
+
+    def test_repro_is_redacted(self):
+        raw = "CONFIRMED: leak\nREPRO: curl -H 'Authorization: nvapi-" + "a" * 25 + "' http://x"
+        v = verify.parse(raw)
+        self.assertIn("«REDACTED:nvidia-key»", v["repro"])
+        self.assertNotIn("nvapi-", v["repro"])
+
+    def test_repro_is_capped_at_200(self):
+        raw = "CONFIRMED: yes\nREPRO: " + "x" * 500
+        v = verify.parse(raw)
+        self.assertLessEqual(len(v["repro"]), 200 + len("… [500 chars total]"))
+        self.assertIn("… [500 chars total]", v["repro"])
+
+
+class TestVerifyFindingReproEndToEnd(unittest.TestCase):
+    """verify_finding() wires parse()'s repro through localize_repro() using
+    the real staging dir — a stub CRITIC_CMD echoes the staged path it was
+    told about, so the test can confirm the returned repro is rewritten to
+    be repo-root-relative rather than leaking the throwaway tempdir."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.repo = Path(self.td.name)
+        (self.repo / "a.py").write_text("1/0\n")
+        self.stub = self.repo / "stub.sh"
+        self.stub.write_text(
+            "#!/bin/sh\n"
+            "path=$(grep -o 'is at: .*' \"$1\" | sed 's/is at: //')\n"
+            "echo \"CONFIRMED: reproduced\"\n"
+            "echo \"REPRO: python3 $path\"\n"
+        )
+        self.stub.chmod(self.stub.stat().st_mode | stat.S_IEXEC)
+        self._saved = os.environ.get("CRITIC_CMD")
+        os.environ["CRITIC_CMD"] = str(self.stub)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("CRITIC_CMD", None)
+        else:
+            os.environ["CRITIC_CMD"] = self._saved
+        self.td.cleanup()
+
+    def test_repro_staging_path_localized_to_repo_root(self):
+        suggestion = {"file": "a.py", "line": 1, "severity": "high",
+                     "issue": "boom", "rationale": "r"}
+        result = verify.verify_finding(self.repo, suggestion)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["repro"], "python3 ./a.py")
+
+
+class TestLocalizeRepro(unittest.TestCase):
+    def test_replaces_staging_prefix_with_dot(self):
+        staging = Path("/tmp/codecouncil-verify-abc123")
+        repro = verify.localize_repro(f"python3 {staging}/a.py", staging)
+        self.assertEqual(repro, "python3 ./a.py")
+
+    def test_no_staging_prefix_present_is_unchanged(self):
+        staging = Path("/tmp/codecouncil-verify-abc123")
+        repro = verify.localize_repro("python3 a.py", staging)
+        self.assertEqual(repro, "python3 a.py")
 
 
 class TestDeliveryPolicy(unittest.TestCase):
@@ -94,6 +182,25 @@ class TestDeliveryPolicy(unittest.TestCase):
             rows = [_sugg(verification)]
             out = decide({"hook_event_name": "PostToolUse", "cwd": "/x"}, rows, {}, NOW)
             self.assertIsNotNone(out, str(verification))
+
+    def test_verified_with_repro_appends_verify_yourself_hint(self):
+        rows = [_sugg({"status": "verified", "note": "ZeroDivisionError raised",
+                       "repro": 'python3 -c "1/0"'})]
+        out = decide({"hook_event_name": "PostToolUse", "cwd": "/x"}, rows, {}, NOW)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('[verify yourself: python3 -c "1/0"]', ctx)
+
+    def test_verified_without_repro_no_verify_yourself_hint(self):
+        rows = [_sugg({"status": "verified", "note": "ZeroDivisionError raised"})]
+        out = decide({"hook_event_name": "PostToolUse", "cwd": "/x"}, rows, {}, NOW)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("verify yourself", ctx)
+
+    def test_verified_with_repro_appends_hint_on_block_channel_too(self):
+        rows = [_sugg({"status": "verified", "note": "boom", "repro": "python3 repro.py"})]
+        out = decide({"hook_event_name": "Stop", "cwd": "/x", "stop_hook_active": False},
+                      rows, {}, NOW)
+        self.assertIn("[verify yourself: python3 repro.py]", out["reason"])
 
 
 if __name__ == "__main__":

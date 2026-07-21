@@ -13,6 +13,10 @@ over time; bump `version:` on every rewrite.
   always worth flagging.
 - Flag credentials, API keys, or tokens appearing in code, config, commands,
   or commit contents — even in files that look private.
+- A `«REDACTED:kind»` marker in the material is a confirmed secret-in-code
+  finding, not a maybe: the capture layer already matched a high-confidence
+  credential shape and stripped the value before it reached you. Flag it as
+  high severity on sight, even though the value itself is never visible.
 - Flag machine-specific absolute paths, usernames, or hostnames written into
   committed code or config; they break on every other machine.
 - Comment or docstring promises one behavior, code does another: flag it.

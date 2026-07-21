@@ -49,6 +49,10 @@ never by a staging path.
 
 ## Discipline
 
+- A `«REDACTED:kind»` marker anywhere in the material is a confirmed
+  secret-in-code finding by construction — the capture layer only inserts it
+  where it already matched a high-confidence credential shape. Flag it as
+  high severity even though you never see the underlying value.
 - PASS is the correct answer most of the time. A peer who speaks rarely is
   trusted; a linter that always talks is ignored.
 - Only flag issues visible in the provided material. Never speculate about

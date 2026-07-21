@@ -6,6 +6,8 @@ import hashlib
 import subprocess
 from pathlib import Path
 
+from core.redact import redact
+
 DIFF_MAX_CHARS = 50_000
 NEW_FILE_MAX_CHARS = 4_000
 NEW_FILES_TOTAL_CHARS = 20_000
@@ -38,7 +40,7 @@ def _read_untracked(repo: Path, paths: list[str]) -> dict[str, str]:
             continue
         if b"\0" in data:
             continue  # binary
-        text = data.decode("utf-8", errors="replace")
+        text = redact(data.decode("utf-8", errors="replace"))
         if len(text) > NEW_FILE_MAX_CHARS:
             text = text[:NEW_FILE_MAX_CHARS] + "\n… [truncated]"
         out[p] = text
@@ -54,6 +56,7 @@ def capture(repo: Path) -> dict:
     untracked = [
         p for p in _git(repo, "ls-files", "--others", "--exclude-standard").splitlines() if p
     ]
+    diff = redact(diff)
     if len(diff) > DIFF_MAX_CHARS:
         diff = diff[:DIFF_MAX_CHARS] + f"\n… [diff truncated, {len(diff)} chars total]"
     return {
@@ -75,7 +78,7 @@ def head(repo: Path) -> str | None:
 def capture_commits(repo: Path, old: str, new: str) -> dict:
     """What landed between two HEADs — so committed work stays reviewable."""
     subjects = [s for s in _git(repo, "log", "--format=%h %s", f"{old}..{new}").splitlines() if s]
-    diff = _git(repo, "diff", "-U8", old, new)
+    diff = redact(_git(repo, "diff", "-U8", old, new))
     if len(diff) > COMMIT_DIFF_MAX_CHARS:
         diff = diff[:COMMIT_DIFF_MAX_CHARS] + f"\n… [commit diff truncated, {len(diff)} chars total]"
     stat = _git(repo, "diff", old, new, "--stat").strip()

@@ -66,6 +66,44 @@ class TestUntrackedContents(unittest.TestCase):
         fp2 = gitwatch.fingerprint(gitwatch.capture(self.repo))
         self.assertNotEqual(fp1, fp2)
 
+    def test_untracked_secret_redacted(self):
+        secret = "AKIAABCDEFGHIJKLMNOP"
+        (self.repo / "creds.py").write_text(f"aws_key = '{secret}'\n")
+        snap = gitwatch.capture(self.repo)
+        text = snap["untracked_contents"]["creds.py"]
+        self.assertNotIn(secret, text)
+        self.assertIn("«REDACTED:aws-key»", text)
+
+    def test_tracked_diff_secret_redacted(self):
+        (self.repo / "config.py").write_text("aws_key = ''\n")
+        subprocess.run(["git", "-C", str(self.repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "init"], check=True)
+        secret = "AKIAABCDEFGHIJKLMNOP"
+        (self.repo / "config.py").write_text(f"aws_key = '{secret}'\n")
+        snap = gitwatch.capture(self.repo)
+        self.assertNotIn(secret, snap["diff"])
+        self.assertIn("«REDACTED:aws-key»", snap["diff"])
+
+    def test_commit_diff_secret_redacted(self):
+        (self.repo / "config.py").write_text("aws_key = ''\n")
+        subprocess.run(["git", "-C", str(self.repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "init"], check=True)
+        old = gitwatch.head(self.repo)
+        secret = "AKIAABCDEFGHIJKLMNOP"
+        (self.repo / "config.py").write_text(f"aws_key = '{secret}'\n")
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qam", "add key"], check=True)
+        new = gitwatch.head(self.repo)
+        c = gitwatch.capture_commits(self.repo, old, new)
+        self.assertNotIn(secret, c["diff"])
+        self.assertIn("«REDACTED:aws-key»", c["diff"])
+
+    def test_fingerprint_stable_with_secret_across_calls(self):
+        secret = "AKIAABCDEFGHIJKLMNOP"
+        (self.repo / "creds.py").write_text(f"aws_key = '{secret}'\n")
+        fp1 = gitwatch.fingerprint(gitwatch.capture(self.repo))
+        fp2 = gitwatch.fingerprint(gitwatch.capture(self.repo))
+        self.assertEqual(fp1, fp2)
+
 
 if __name__ == "__main__":
     unittest.main()

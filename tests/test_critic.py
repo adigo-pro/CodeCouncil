@@ -485,6 +485,48 @@ class TestSchedulerAsync(unittest.TestCase):
         self.assertEqual([len(c) for c in calls], [1, 2])
 
 
+class TestSchedulerRequeueOnFailure(unittest.TestCase):
+    """A judge_fn exception (bad event shape, disk error mid-write, ...) must
+    not silently drop the batch even without a process crash: the failed
+    batch is re-queued, ahead of anything accumulated since, and replays on
+    the next dispatch — committed_offset must never advance past it in the
+    meantime."""
+
+    def test_failed_batch_requeues_and_replays_without_masking_committed_offset(self):
+        calls = []
+        committed = []
+        should_fail = {"a": True}
+
+        def flaky_judge(batch, ctx):
+            calls.append(list(batch))
+            if should_fail["a"]:
+                should_fail["a"] = False
+                raise RuntimeError("boom")
+
+        s = TurnScheduler(judge_fn=flaky_judge, judge_every_beat=True,
+                          on_committed=lambda off: committed.append(off))
+
+        # Batch A dispatches at offset 10 and its judge_fn raises.
+        status = s.submit([{"type": "diff", "id": "A"}], {"offset_now": 10})
+        self.assertEqual(status, "dispatched")
+        s.thread.join()
+
+        # No masking: committed_offset must not advance past A's span.
+        self.assertEqual(committed, [])
+        # A's events are back in pending, ready to replay.
+        self.assertEqual(s.pending, [{"type": "diff", "id": "A"}])
+
+        # Next beat: batch B's event arrives and merges with re-queued A.
+        status = s.submit([{"type": "diff", "id": "B"}], {"offset_now": 20})
+        self.assertEqual(status, "dispatched")
+        s.thread.join()
+
+        # judge_fn ran twice: once with just A (failed), once with A+B (ok).
+        self.assertEqual([len(c) for c in calls], [1, 2])
+        self.assertEqual([e["id"] for e in calls[1]], ["A", "B"])  # order preserved
+        # committed_offset only advances once A actually got re-judged
+        # alongside B — it is never set to a value that would mask A.
+        self.assertEqual(committed, [20])
 
 
 class TestSessionTagging(unittest.TestCase):

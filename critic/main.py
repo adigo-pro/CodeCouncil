@@ -261,6 +261,10 @@ class TurnScheduler:
         # judge_fn returns successfully (its record durably appended) — a
         # crash or exception mid-turn must never advance this.
         self.on_committed = on_committed
+        # guards self.pending: the main thread mutates it in submit(), the
+        # worker thread mutates it in _run()'s failure path (re-queueing a
+        # batch whose judge_fn raised) — both must not race.
+        self._lock = threading.Lock()
 
     def busy(self) -> bool:
         return self.thread is not None and self.thread.is_alive()
@@ -272,17 +276,18 @@ class TurnScheduler:
 
     def submit(self, events: list[dict], ctx: dict) -> str:
         """Returns what happened: idle | gated | busy | cooling | dispatched."""
-        self.pending.extend(events)
-        if not self.pending:
-            return "idle"
-        if not self._gate_open():
-            return "gated"
-        if self.busy():
-            return "busy"
-        if time.monotonic() - self.last_dispatch < self.min_spacing:
-            return "cooling"
-        self.last_dispatch = time.monotonic()
-        batch, self.pending = self.pending, []
+        with self._lock:
+            self.pending.extend(events)
+            if not self.pending:
+                return "idle"
+            if not self._gate_open():
+                return "gated"
+            if self.busy():
+                return "busy"
+            if time.monotonic() - self.last_dispatch < self.min_spacing:
+                return "cooling"
+            self.last_dispatch = time.monotonic()
+            batch, self.pending = self.pending, []
         offset_at_dispatch = ctx.get("offset_now")
         self.thread = threading.Thread(
             target=self._run, args=(batch, ctx, offset_at_dispatch), daemon=True)
@@ -290,7 +295,21 @@ class TurnScheduler:
         return "dispatched"
 
     def _run(self, batch: list[dict], ctx: dict, offset_at_dispatch) -> None:
-        self.judge_fn(batch, ctx)  # if this raises, on_committed below never runs
+        try:
+            self.judge_fn(batch, ctx)
+        except Exception as e:
+            # No crash needed to lose a batch this way: a bug in judge_fn
+            # (bad event shape, disk error mid-write, ...) must not silently
+            # drop it either. Re-queue at the front, ahead of whatever
+            # accumulated since dispatch, so order is preserved and the
+            # batch replays on a later beat through the normal gate — it
+            # still carries the diff/commit events that opened the gate the
+            # first time. on_committed is skipped: this offset span did not
+            # durably land.
+            with self._lock:
+                self.pending = batch + self.pending
+            print(f"critic: batch judgment failed ({e}); re-queued {len(batch)} event(s)")
+            return
         if self.on_committed is not None and offset_at_dispatch is not None:
             self.on_committed(offset_at_dispatch)
 
@@ -398,8 +417,11 @@ def main(argv: list[str] | None = None) -> int:
         "task_review_cooldown": args.task_review_cooldown,
     }
     def _on_committed(offset: int) -> None:
-        # plain int assignment on the main-thread state dict — atomic under
-        # the GIL; the daemon persists state to disk on the main loop below.
+        # Runs on the scheduler's worker thread (called from TurnScheduler._run
+        # after judge_fn succeeds), mutating the state dict the main thread
+        # owns. A plain int assignment is atomic under the GIL, so this is
+        # safe without a lock; the daemon persists state to disk on the main
+        # loop below.
         state["committed_offset"] = offset
 
     scheduler = TurnScheduler(judge_every_beat=args.judge_every_beat,

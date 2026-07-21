@@ -39,8 +39,12 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "assignment",
         re.compile(
-            r"(?i)(?P<prefix>\b(?:api[_-]?key|secret|token|password|passwd)"
-            r"\s*[=:]\s*['\"]?)"
+            # The keyword only needs to appear *somewhere* in the name, so
+            # SECRET_KEY / DB_PASSWORD / CLIENT_SECRET / JWT_SECRET /
+            # AUTH_TOKEN — the common prefixed/compound env-var shapes — all
+            # trigger redaction, not just a bare `key`/`secret`/... name.
+            r"(?i)(?P<prefix>\b[A-Za-z0-9_-]*(?:key|secret|token|password|passwd)"
+            r"[A-Za-z0-9_-]*\s*[=:]\s*['\"]?)"
             r"[A-Za-z0-9+/_=-]{" + str(ASSIGNMENT_MIN_VALUE_LEN) + r",}",
         ),
     ),

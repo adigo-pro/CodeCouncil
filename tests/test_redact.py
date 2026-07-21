@@ -74,6 +74,34 @@ class TestRedact(unittest.TestCase):
         self.assertIn("password", out)
         self.assertIn("«REDACTED:assignment»", out)
 
+    def test_assignment_compound_names(self):
+        # The keyword needs only to appear somewhere in the name -- this is
+        # the single most common env-var naming convention (SECRET_KEY,
+        # DB_PASSWORD, ...) and was missed by a stricter "name IS the
+        # keyword" pattern.
+        secret = "abcdefghijklmnopqrstuvwxyz012345"
+        for name in ("SECRET_KEY", "DB_PASSWORD", "CLIENT_SECRET", "JWT_SECRET", "AUTH_TOKEN"):
+            with self.subTest(name=name):
+                out = redact.redact(f'{name} = "{secret}"')
+                self.assertNotIn(secret, out)
+                self.assertIn(name, out)
+                self.assertIn("«REDACTED:assignment»", out)
+
+    def test_assignment_incidental_substring_name_is_a_known_tradeoff(self):
+        # "monkey" merely CONTAINS "key" -- broadening the keyword match to
+        # catch compound names like SECRET_KEY means a name like this also
+        # triggers, since there is no cheap way to tell "key as a real
+        # credential-name component" from "key as a substring of an English
+        # word" without name-boundary heuristics that would themselves risk
+        # missing real compound names. This is accepted as a tolerable false
+        # positive, guarded by the 16+ char value-length requirement: a
+        # `monkey = <16+ char opaque-looking value>` assignment is itself an
+        # unusual enough shape that flagging it costs little.
+        secret = "abcdefghijklmnopqrstuvwxyz012345"
+        out = redact.redact(f'monkey = "{secret}"')
+        self.assertNotIn(secret, out)
+        self.assertIn("«REDACTED:assignment»", out)
+
     def test_short_value_not_redacted(self):
         # Below the 16-char floor -- not high-confidence, must be left alone.
         text = 'token = "short1"'

@@ -82,6 +82,15 @@ class TestPrompt(unittest.TestCase):
         self.assertIn("NEW FILES (not yet committed):", text)
         self.assertIn("def g(): pass", text)
 
+    def test_redaction_marker_survives_into_prompt(self):
+        # Redaction happens upstream at observer capture time (observer/gitwatch.py);
+        # build_prompt must not mangle the marker on its way into the model's context.
+        diff = {"type": "diff", "payload": {
+            "diff": "+aws_key = '«REDACTED:aws-key»'", "untracked": [],
+        }}
+        text = prompt.build_prompt(self._events(), diff, "version: 1")
+        self.assertIn("«REDACTED:aws-key»", text)
+
     def test_project_header_first(self):
         text = prompt.build_prompt(self._events(), None, "version: 1",
                                    project="PROJECT: demo (/x)\nREADME: a demo")

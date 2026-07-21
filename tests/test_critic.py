@@ -687,5 +687,95 @@ class TestPromptAuditCap(unittest.TestCase):
             finally:
                 cmain.PROMPTS_KEEP = old_cap
 
+    def test_save_case_material_prunes_beyond_cap(self):
+        from critic import main as cmain
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td)
+            old_cap = cmain.CASE_MATERIAL_KEEP
+            cmain.CASE_MATERIAL_KEEP = 3
+            try:
+                for i in range(6):
+                    cmain.save_case_material(cc, f"id{i}", [{"n": i}], None)
+                    os.utime(cc / "case-material" / f"id{i}.json", (i, i))
+                cmain.save_case_material(cc, "id6", [{"n": 6}], None)
+                names = sorted(p.name for p in (cc / "case-material").glob("*.json"))
+                self.assertEqual(len(names), 3)
+                self.assertIn("id6.json", names)
+            finally:
+                cmain.CASE_MATERIAL_KEEP = old_cap
+
+    def test_save_case_material_skips_when_too_large(self):
+        from critic import main as cmain
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td)
+            huge_events = [{"payload": {"text": "x" * 1000}} for _ in range(500)]
+            cmain.save_case_material(cc, "big", huge_events, None)
+            self.assertFalse((cc / "case-material" / "big.json").exists())
+
+    def test_save_case_material_round_trips_events_and_diff(self):
+        from critic import main as cmain
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td)
+            events = [{"type": "diff", "payload": {"diff": "+x = 1"}}]
+            diff = {"type": "diff", "payload": {"diff": "+x = 1"}}
+            cmain.save_case_material(cc, "abc123", events, diff)
+            saved = json.loads((cc / "case-material" / "abc123.json").read_text())
+            self.assertEqual(saved["events"], events)
+            self.assertEqual(saved["latest_diff"], diff)
+
+
+class TestJudgeBatchCaseMaterial(unittest.TestCase):
+    """judge_batch must freeze the exact batch inputs behind a SUGGESTION
+    verdict, so the reflector can later harvest it into a frozen eval case."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name)
+        self.suggestions = self.cc / "suggestions.ndjsonl"
+        self.heuristics = self.cc / "heuristics.md"
+        self.stub = self.cc / "stub.sh"
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def _set_stub(self, reply: str):
+        self.stub.write_text(f"#!/bin/sh\necho '{reply}'\n")
+        self.stub.chmod(self.stub.stat().st_mode | stat.S_IEXEC)
+        os.environ["CRITIC_CMD"] = str(self.stub)
+
+    def test_suggestion_verdict_writes_case_material(self):
+        from critic.main import judge_batch
+
+        self._set_stub('{"file": "x.py", "line": 2, "severity": "low", '
+                       '"issue": "bug", "rationale": "r"}')
+        ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
+               "persona": "", "project": "", "repo": self.cc, "verify": False,
+               "beat": 1, "ts": "2026-01-01T00:00:00",
+               "latest_diff": {"type": "diff", "payload": {"diff": "+bad"}}}
+        events = [{"type": "diff", "session": None,
+                   "payload": {"diff": "+bad", "stat": "", "untracked": []}}]
+        judge_batch(events, ctx)
+        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        verdict_id = rows[0]["id"]
+        material_path = self.cc / "case-material" / f"{verdict_id}.json"
+        self.assertTrue(material_path.exists())
+        material = json.loads(material_path.read_text())
+        self.assertEqual(material["events"], events)
+        self.assertEqual(material["latest_diff"], ctx["latest_diff"])
+
+    def test_pass_verdict_writes_no_case_material(self):
+        from critic.main import judge_batch
+
+        self._set_stub("PASS")
+        ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
+               "persona": "", "project": "", "repo": self.cc, "verify": False,
+               "beat": 1, "ts": "2026-01-01T00:00:00"}
+        events = [{"type": "diff", "session": None,
+                   "payload": {"diff": "+ok", "stat": "", "untracked": []}}]
+        judge_batch(events, ctx)
+        self.assertFalse((self.cc / "case-material").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

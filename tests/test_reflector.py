@@ -281,7 +281,8 @@ class TestGateCandidate(unittest.TestCase):
         _write_case(self.cases_dir, "c1", "pass", "nothing risky")
         stub = _make_stub(Path(self.td.name), CANDIDATE_WORSE_STUB)
         os.environ["CRITIC_CMD"] = str(stub)
-        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir), \
+             mock.patch("evals.run.HARVESTED_CASES_DIR", Path(self.td.name) / "no-harvested"):
             ok, note = rewrite.gate_candidate("version: 2\n- candidate rule\n",
                                               "version: 1\n- current rule\n")
         self.assertFalse(ok)
@@ -292,7 +293,8 @@ class TestGateCandidate(unittest.TestCase):
         _write_case(self.cases_dir, "c1", "pass", "nothing risky")
         stub = _make_stub(Path(self.td.name), ALWAYS_PASS_STUB)
         os.environ["CRITIC_CMD"] = str(stub)
-        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir), \
+             mock.patch("evals.run.HARVESTED_CASES_DIR", Path(self.td.name) / "no-harvested"):
             ok, note = rewrite.gate_candidate("version: 2\n- candidate rule\n",
                                               "version: 1\n- current rule\n")
         self.assertTrue(ok)
@@ -301,7 +303,8 @@ class TestGateCandidate(unittest.TestCase):
 
     def test_no_cases_dir_ungated(self):
         # self.cases_dir is never created — load_cases() sees an empty glob.
-        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir), \
+             mock.patch("evals.run.HARVESTED_CASES_DIR", Path(self.td.name) / "no-harvested"):
             ok, note = rewrite.gate_candidate("version: 2\n- x\n", "version: 1\n- y\n")
         self.assertTrue(ok)
         self.assertEqual(note, "no eval cases — ungated")
@@ -365,7 +368,8 @@ class TestMaybeRewriteGateIntegration(unittest.TestCase):
 
         stub = _make_stub(Path(self.td.name), REWRITE_GATE_FAIL_STUB)
         os.environ["CRITIC_CMD"] = str(stub)
-        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir), \
+             mock.patch("evals.run.HARVESTED_CASES_DIR", Path(self.td.name) / "no-harvested"):
             main_mod.maybe_rewrite(self.cc, {}, force=False)
 
         self.assertEqual(self.heuristics.read_text(), "version: 1\n- old rule\n")
@@ -382,7 +386,8 @@ class TestMaybeRewriteGateIntegration(unittest.TestCase):
 
         stub = _make_stub(Path(self.td.name), REWRITE_GATE_PASS_STUB)
         os.environ["CRITIC_CMD"] = str(stub)
-        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir), \
+             mock.patch("evals.run.HARVESTED_CASES_DIR", Path(self.td.name) / "no-harvested"):
             main_mod.maybe_rewrite(self.cc, {}, force=False)
 
         self.assertEqual(self.heuristics.read_text(), "version: 2\n- new rule\n")
@@ -404,14 +409,16 @@ class TestMaybeRewriteGateIntegration(unittest.TestCase):
         calls_log = Path(self.td.name) / "calls.log"
         state: dict = {}
 
-        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir), \
+             mock.patch("evals.run.HARVESTED_CASES_DIR", Path(self.td.name) / "no-harvested"):
             main_mod.maybe_rewrite(self.cc, state, force=False)
         self.assertTrue(calls_log.exists())
         first_pass_calls = len(calls_log.read_text().splitlines())
         self.assertGreater(first_pass_calls, 0)
         self.assertIn("n_graded_at_last_rewrite", state)
 
-        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir), \
+             mock.patch("evals.run.HARVESTED_CASES_DIR", Path(self.td.name) / "no-harvested"):
             main_mod.maybe_rewrite(self.cc, state, force=False)  # same outcomes on disk
 
         self.assertEqual(len(calls_log.read_text().splitlines()), first_pass_calls,
@@ -505,6 +512,83 @@ class TestMaybeRollback(unittest.TestCase):
         self.assertEqual(self.heuristics.read_text(), "version: 2\n- v2 rule\n")
         self.assertFalse((self.cc / "reflections.ndjsonl").exists())
         self.assertEqual(state, {})
+
+
+ACCEPTED_GRADE_STUB = """#!/usr/bin/env python3
+print('{"outcome": "accepted", "evidence": "diff added the guard"}')
+"""
+
+
+class TestGradePendingHarvestsCases(unittest.TestCase):
+    """Task 8: grade_pending must call reflector.harvest.maybe_harvest after
+    appending each outcome row, so accepted/rebutted findings with case
+    material grow the frozen eval set."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name) / ".codecouncil"
+        self.cc.mkdir()
+        self.harvested_dir = Path(self.td.name) / "cases-harvested"
+        self.patcher = mock.patch("reflector.harvest.HARVESTED_DIR", self.harvested_dir)
+        self.patcher.start()
+
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
+            "id": "s1", "ts": _iso(NOW - 400), "verdict": "SUGGESTION",
+            "heuristics_version": 1,
+            "suggestion": {"file": "a.py", "line": 3, "severity": "high",
+                          "issue": "off-by-one", "rationale": "r"},
+            "verification": {"status": "verified"},
+        }) + "\n", encoding="utf-8")
+        (self.cc / "delivered.json").write_text(
+            json.dumps({"s1": {"context": NOW - 300}}), encoding="utf-8")
+        material_dir = self.cc / "case-material"
+        material_dir.mkdir()
+        (material_dir / "s1.json").write_text(json.dumps({
+            "events": [{"type": "diff", "payload": {"diff": "+guard"}}],
+            "latest_diff": {"type": "diff", "payload": {"diff": "+guard"}},
+        }), encoding="utf-8")
+
+    def tearDown(self):
+        self.patcher.stop()
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def test_accepted_grade_harvests_a_flag_case(self):
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), ACCEPTED_GRADE_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        n = main_mod.grade_pending(self.cc)
+        self.assertEqual(n, 1)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "accepted")
+
+        case_path = self.harvested_dir / "harvest-s1.json"
+        self.assertTrue(case_path.exists())
+        case = json.loads(case_path.read_text())
+        self.assertEqual(case["expected"], "flag")
+        self.assertEqual(case["expect_files"], ["a.py"])
+
+    def test_explicit_rebuttal_with_untouched_file_harvests_a_pass_case(self):
+        import reflector.main as main_mod
+
+        os.environ["CRITIC_CMD"] = "/nonexistent"  # rebuttal is model-free; must not be called
+        (self.cc / "observations.ndjsonl").write_text(json.dumps({
+            "ts": _iso(NOW - 250), "type": "reasoning",
+            "payload": {"text": "COUNCIL-REBUTTAL: guard already exists on line 2"}},
+        ) + "\n", encoding="utf-8")
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "rebutted")
+        self.assertFalse(outcomes[0]["file_touched"])
+
+        case_path = self.harvested_dir / "harvest-s1.json"
+        self.assertTrue(case_path.exists())
+        self.assertEqual(json.loads(case_path.read_text())["expected"], "pass")
 
 
 if __name__ == "__main__":

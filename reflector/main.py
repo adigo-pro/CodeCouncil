@@ -22,7 +22,7 @@ from critic.prompt import heuristics_version
 from hooks import ledger as ledger_mod
 from observer.events import now_iso
 
-from . import judge, report, rewrite
+from . import harvest, judge, report, rewrite
 
 PERSONA = Path(__file__).parent / "persona.md"
 
@@ -65,16 +65,20 @@ def grade_pending(cc: Path) -> int:
             except agent.AgentError as e:
                 print(f"reflector: grading {row['id']} failed ({e}); will retry next beat")
                 continue
+        touched = judge.file_touched(row, d, observations)
         append_ndjson(outcomes_path, {
             "id": uuid.uuid4().hex[:12], "suggestion_id": row["id"], "ts": now_iso(),
             "outcome": grade["outcome"], "evidence": grade.get("evidence", ""),
             "issue": row["suggestion"]["issue"],
             "heuristics_version": row.get("heuristics_version", 0),
-            "file_touched": judge.file_touched(row, d, observations),
+            "file_touched": touched,
             **({"malformed": grade["malformed"]} if "malformed" in grade else {}),
         })
         print(f"reflector: {row['id']} → {grade['outcome']}"
               + (f" ({grade['evidence']})" if grade.get("evidence") else ""))
+        case_name = harvest.maybe_harvest(cc, {**row, "file_touched": touched}, grade["outcome"])
+        if case_name:
+            print(f"reflector: harvested eval case {case_name}")
 
     return len(to_judge) + len(undelivered)
 

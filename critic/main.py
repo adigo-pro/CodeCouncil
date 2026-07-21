@@ -96,15 +96,40 @@ def ensure_heuristics(path: Path) -> str:
 
 
 PROMPTS_KEEP = 200
+CASE_MATERIAL_KEEP = 200
+CASE_MATERIAL_MAX_BYTES = 200_000
+
+
+def _prune_dir(dir_path: Path, pattern: str, keep: int) -> None:
+    """Cap a directory to its newest `keep` files (by mtime), oldest evicted first."""
+    files = sorted(dir_path.glob(pattern), key=lambda p: p.stat().st_mtime)
+    for old in files[:-keep]:
+        old.unlink(missing_ok=True)
 
 
 def save_prompt(prompts_dir: Path, verdict_id: str, text: str) -> None:
     """Audit trail: the exact prompt behind every verdict, capped to newest N."""
     prompts_dir.mkdir(parents=True, exist_ok=True)
     (prompts_dir / f"{verdict_id}.txt").write_text(text, encoding="utf-8")
-    files = sorted(prompts_dir.glob("*.txt"), key=lambda p: p.stat().st_mtime)
-    for old in files[:-PROMPTS_KEEP]:
-        old.unlink(missing_ok=True)
+    _prune_dir(prompts_dir, "*.txt", PROMPTS_KEEP)
+
+
+def save_case_material(cc_dir: Path, verdict_id: str, events: list[dict], latest_diff) -> None:
+    """Freeze the exact batch inputs (events + latest_diff) a SUGGESTION verdict
+    was judged from — what build_prompt received, not a re-derivation. The
+    Reflector later harvests accepted/rebutted findings into frozen eval
+    cases (evals/cases-harvested/) from this material (reflector/harvest.py),
+    so the eval set grows from real outcomes instead of staying frozen.
+    Skips silently if the material is unreasonably large; capped to newest N
+    like save_prompt."""
+    material = {"events": events, "latest_diff": latest_diff}
+    text = json.dumps(material, ensure_ascii=False)
+    if len(text.encode("utf-8")) > CASE_MATERIAL_MAX_BYTES:
+        return
+    case_dir = cc_dir / "case-material"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    (case_dir / f"{verdict_id}.json").write_text(text, encoding="utf-8")
+    _prune_dir(case_dir, "*.json", CASE_MATERIAL_KEEP)
 
 
 def normalize_file(repo: Path | None, file: str) -> str:
@@ -162,6 +187,8 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         if record["verdict"] == "SUGGESTION":
             record["suggestion"]["file"] = normalize_file(
                 ctx.get("repo"), record["suggestion"].get("file", ""))
+            save_case_material(suggestions_file.parent, record["id"], events,
+                              ctx.get("latest_diff"))
         if record["verdict"] == "SUGGESTION" and ctx.get("verify", True):
             try:
                 record["verification"] = verify.verify_finding(

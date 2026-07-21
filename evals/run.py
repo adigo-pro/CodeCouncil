@@ -18,10 +18,16 @@ from critic import agent, prompt  # noqa: E402
 from observer.events import now_iso  # noqa: E402
 
 CASES_DIR = Path(__file__).parent / "cases"
+# Auto-grown by reflector.harvest.maybe_harvest from real graded outcomes —
+# sibling of CASES_DIR, loaded after it so hand-made cases always sort first.
+HARVESTED_CASES_DIR = Path(__file__).parent / "cases-harvested"
 
 
 def load_cases() -> list[dict]:
-    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(CASES_DIR.glob("*.json"))]
+    paths = sorted(CASES_DIR.glob("*.json"))
+    if HARVESTED_CASES_DIR.is_dir():
+        paths += sorted(HARVESTED_CASES_DIR.glob("*.json"))
+    return [json.loads(p.read_text(encoding="utf-8")) for p in paths]
 
 
 def heuristics_versions(repo: Path) -> list[tuple[int, str]]:

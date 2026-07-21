@@ -1,0 +1,41 @@
+"""Tests for the codecouncil launcher's preflight warnings."""
+
+import os
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from codecouncil import main as launcher
+
+
+class TestPreflight(unittest.TestCase):
+    def test_warns_when_pi_missing(self):
+        with mock.patch.object(launcher.shutil, "which", return_value=None):
+            with mock.patch.object(launcher.agent, "_local_env", return_value={"NVIDIA_API_KEY": "x"}):
+                warns = launcher.preflight(model=None)
+        self.assertTrue(any("not found on PATH" in w for w in warns))
+
+    def test_warns_when_no_model_and_no_key(self):
+        with mock.patch.object(launcher.shutil, "which", return_value="/usr/bin/pi"):
+            with mock.patch.object(launcher.agent, "_local_env", return_value={}):
+                warns = launcher.preflight(model=None)
+        self.assertTrue(any("no model configured" in w for w in warns))
+
+    def test_clean_when_pi_present_and_key_set(self):
+        with mock.patch.object(launcher.shutil, "which", return_value="/usr/bin/pi"):
+            with mock.patch.object(launcher.agent, "_local_env", return_value={"NVIDIA_API_KEY": "x"}):
+                warns = launcher.preflight(model=None)
+        self.assertEqual(warns, [])
+
+    def test_clean_when_model_passed_explicitly(self):
+        with mock.patch.object(launcher.shutil, "which", return_value="/usr/bin/pi"):
+            with mock.patch.object(launcher.agent, "_local_env", return_value={}):
+                warns = launcher.preflight(model="openai/gpt-4o")
+        self.assertEqual(warns, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

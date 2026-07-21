@@ -17,7 +17,7 @@ import time
 import uuid
 from pathlib import Path
 
-from core.store import read_rows, wait_for
+from core.store import read_rows, read_tail_rows, wait_for
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
 
@@ -179,16 +179,11 @@ def should_task_review(state: dict, n_new_requests: int, now: float,
 def recent_events(obs_file: Path, since_epoch: float) -> list[dict]:
     from datetime import datetime
     out = []
-    try:
-        lines = obs_file.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    for line in lines[-2000:]:
+    for e in read_tail_rows(obs_file):  # bounded: task reviews only need recent events
         try:
-            e = json.loads(line)
             if datetime.fromisoformat(e["ts"]).timestamp() >= since_epoch:
                 out.append(e)
-        except (json.JSONDecodeError, KeyError, ValueError):
+        except (KeyError, ValueError):
             continue
     return out
 

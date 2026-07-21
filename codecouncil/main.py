@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -18,7 +19,28 @@ import threading
 import time
 from pathlib import Path
 
+from critic import agent
 from hooks.install import install as install_hooks
+
+KEY_VARS = ("NVIDIA_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY")
+
+
+def preflight(model: str | None) -> list[str]:
+    """Warnings to surface before launching — a misconfigured backend otherwise
+    just makes all three loops fail every beat with no obvious cause."""
+    warns = []
+    pi_bin = os.environ.get("PI_BIN", "pi")
+    if shutil.which(pi_bin) is None:
+        warns.append(f"'{pi_bin}' not found on PATH — install pi (https://pi.dev) "
+                     "or set PI_BIN. The critic and reflector cannot run without it.")
+    env = agent._local_env()  # includes ~/.codecouncil/env
+    has_key = any(env.get(v) for v in KEY_VARS)
+    if not model and not env.get("COUNCIL_MODEL") and not has_key:
+        warns.append("no model configured: pass --model, set COUNCIL_MODEL, or put an "
+                     "API key in ~/.codecouncil/env. pi will fall back to its own default, "
+                     "which may not be authenticated.")
+    return warns
 
 LOOPS = ["observer", "critic", "reflector"]
 COLORS = {"observer": "36", "critic": "33", "reflector": "35"}
@@ -46,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
     if not repo.is_dir():
         print(f"error: {repo} is not a directory", file=sys.stderr)
         return 2
+
+    for w in preflight(args.model):
+        print(f"{_tag('critic')} warning: {w}", flush=True)
 
     if not args.no_hooks:
         added = install_hooks(repo)

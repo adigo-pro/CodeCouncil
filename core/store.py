@@ -28,6 +28,35 @@ def read_rows(path: Path) -> list[dict]:
     return rows
 
 
+def read_tail_rows(path: Path, max_bytes: int = 2_000_000) -> list[dict]:
+    """Like read_rows, but parses only the last `max_bytes` of the file — for
+    append-only logs (observations) that grow without bound over a session.
+
+    A possibly-truncated first line is dropped. Safe for the callers here, whose
+    time windows (grading evidence, task-review recency) only ever reach back
+    minutes; 2 MB is far more than any such window's worth of events, while
+    keeping per-pass work flat no matter how long the session runs.
+    """
+    if not path.exists():
+        return []
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+                f.readline()  # discard the partial line the seek landed inside
+            data = f.read()
+    except OSError:
+        return []
+    rows = []
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
 def append_row(path: Path, row: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:

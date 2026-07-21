@@ -48,6 +48,6 @@ Four loops communicating **only through NDJSON/JSON files** in the watched repo'
 ## Conventions
 
 - Tests are stdlib `unittest`, one file per loop in `tests/`; anything touching model calls stubs the sandbox via `CRITIC_CMD`. Fixtures include a real session transcript (`tests/fixtures/session.jsonl`).
-- All NDJSON readers must tolerate a partial trailing line (files are appended mid-write) and skip unparseable lines rather than crash.
+- All NDJSON readers must tolerate a partial trailing line (files are appended mid-write) and skip unparseable lines rather than crash. `observations.ndjsonl` grows unbounded over a session, so whole-file consumers use `core.store.read_tail_rows` (and the UI server's `readNdjsonTail`) — the critic hot path is already O(new bytes) via byte offsets. Only reach back a bounded window; never re-parse the whole log per cycle.
 - Daemons never die on missing inputs — they wait; state files that fail to parse are discarded and rebuilt, not fatal.
 - Long text going into events/prompts is always truncated with an explicit `… [N chars total]` marker; caps are module-level constants.

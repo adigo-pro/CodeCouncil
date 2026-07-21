@@ -15,7 +15,7 @@ from pathlib import Path
 
 from core.store import append_row as append_ndjson
 from core.store import read_rows as read_ndjson
-from core.store import wait_for
+from core.store import read_tail_rows, wait_for
 from critic import agent
 from critic.main import ensure_heuristics
 from critic.prompt import heuristics_version
@@ -36,7 +36,8 @@ def grade_pending(cc: Path) -> int:
     delivered = ledger_mod.load(cc / "delivered.json")
     outcomes_path = cc / "outcomes.ndjsonl"
     graded_ids = {o["suggestion_id"] for o in read_ndjson(outcomes_path)}
-    observations = read_ndjson(cc / "observations.ndjsonl")
+    # only recent observations matter here (evidence windows reach back minutes)
+    observations = read_tail_rows(cc / "observations.ndjsonl")
     now = time.time()
 
     to_judge, undelivered = judge.pending(suggestions, delivered, graded_ids, now)

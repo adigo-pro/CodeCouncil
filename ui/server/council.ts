@@ -30,6 +30,39 @@ function readNdjson(file: string): Record<string, any>[] {
   return rows;
 }
 
+// Bounded reader for the append-only observations log, which grows without
+// limit over a session. The dashboard only ever needs the tail (last ~120
+// events, the latest beat, the newest timestamp), so parsing the whole file
+// every 2s poll is wasted work. Reads at most maxBytes from the end and drops
+// the partial first line the offset may land inside.
+function readNdjsonTail(file: string, maxBytes = 1_000_000): Record<string, any>[] {
+  let fd: number | undefined;
+  try {
+    const size = fs.statSync(file).size;
+    const start = Math.max(0, size - maxBytes);
+    const length = size - start;
+    const buf = Buffer.allocUnsafe(length);
+    fd = fs.openSync(file, "r");
+    fs.readSync(fd, buf, 0, length, start);
+    let text = buf.toString("utf-8");
+    if (start > 0) text = text.slice(text.indexOf("\n") + 1); // drop partial line
+    const rows: Record<string, any>[] = [];
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        rows.push(JSON.parse(line));
+      } catch {
+        /* mid-write partial line — skip */
+      }
+    }
+    return rows;
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
 function readJson(file: string): Record<string, any> {
   try {
     const raw = JSON.parse(fs.readFileSync(file, "utf-8"));
@@ -195,7 +228,7 @@ export function aggregate(repo: string) {
   const suggestions = readNdjson(path.join(cc, "suggestions.ndjsonl"));
   const outcomes = readNdjson(path.join(cc, "outcomes.ndjsonl"));
   const reflections = readNdjson(path.join(cc, "reflections.ndjsonl"));
-  const observations = readNdjson(path.join(cc, "observations.ndjsonl"));
+  const observations = readNdjsonTail(path.join(cc, "observations.ndjsonl"));
   const delivered = readJson(path.join(cc, "delivered.json"));
   const heuristicsText = readText(path.join(cc, "heuristics.md"));
 

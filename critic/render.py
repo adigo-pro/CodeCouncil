@@ -11,6 +11,26 @@ def _c(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m" if _TTY else text
 
 
+# Short human-readable gloss for each merge_council() agreement outcome
+# (critic/main.py), keyed by council["agreement"]. "prober-only" is called
+# out as needing proof: delivery gating on it is Task 3's job, but the
+# console should make clear this finding hasn't been corroborated by the
+# precision-anchor primary.
+_COUNCIL_NOTES = {
+    "both": "council: prober agreed",
+    "prober-only": "council: prober-only finding (needs proof)",
+    "primary-only": "council: primary-only",
+}
+
+
+def _council_line(verdict: dict) -> str | None:
+    council = verdict.get("council")
+    if not council:
+        return None
+    note = _COUNCIL_NOTES.get(council.get("agreement"), f"council: {council.get('agreement')}")
+    return f"  {note}"
+
+
 def render_verdict(beat: int, ts: str, verdict: dict) -> None:
     clock = ts.split("T")[1][:8] if "T" in ts else ts
     if "malformed" in verdict:
@@ -20,6 +40,9 @@ def render_verdict(beat: int, ts: str, verdict: dict) -> None:
         note = " (malformed reply)" if "malformed" in verdict else ""
         reason = f" — {verdict['reason']}" if verdict.get("reason") else ""
         print(_c("2", f"✓ beat {beat} · {clock} · PASS{reason}{note}"))
+        council_line = _council_line(verdict)
+        if council_line:
+            print(_c("2", council_line))
         return
     s = verdict["suggestion"]
     sev_color = {"high": "31", "medium": "33", "low": "36"}.get(s["severity"], "33")
@@ -33,6 +56,9 @@ def render_verdict(beat: int, ts: str, verdict: dict) -> None:
     if v:
         mark = {"verified": "32", "refuted": "31"}.get(v["status"], "2")
         print(_c(mark, f"  verify {v['status']}: {v['note']}"))
+    council_line = _council_line(verdict)
+    if council_line:
+        print(_c("2", council_line))
 
 
 def render_quiet(beat: int, ts: str) -> None:

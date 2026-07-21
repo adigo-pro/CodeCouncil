@@ -816,7 +816,7 @@ class TestJudgeToolsPlumbing(unittest.TestCase):
         from critic import main as main_mod
         captured = {}
 
-        def fake_ask(text, system=None, tools=None, cwd=None):
+        def fake_ask(text, system=None, tools=None, cwd=None, model=None):
             captured["tools"] = tools
             captured["cwd"] = cwd
             return "PASS"
@@ -1591,6 +1591,202 @@ class TestReceiptTaskReviewIntegration(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["verdict"], "PASS")
         self.assertFalse((self.cc / "receipts").exists())
+
+
+PRIMARY_SUGGESTION = {"verdict": "SUGGESTION",
+                      "suggestion": {"file": "primary.py", "line": 1,
+                                    "severity": "medium", "issue": "primary issue",
+                                    "rationale": "", "rule": None, "failure_mode": None}}
+PROBER_SUGGESTION = {"verdict": "SUGGESTION",
+                     "suggestion": {"file": "prober.py", "line": 2,
+                                   "severity": "high", "issue": "prober issue",
+                                   "rationale": "", "rule": None, "failure_mode": None}}
+PRIMARY_PASS = {"verdict": "PASS"}
+PROBER_PASS = {"verdict": "PASS"}
+PRIMARY_ERROR = {"verdict": "ERROR", "error": "boom"}
+PROBER_ERROR = {"verdict": "ERROR", "error": "boom"}
+
+
+class TestMergeCouncil(unittest.TestCase):
+    """Task 2: merge_council is pure (no I/O, no model calls) so all six
+    combos from the brief's table are unit-testable directly."""
+
+    def test_both_suggest_primary_wins_agreement_both(self):
+        from critic.main import merge_council
+        chosen, council = merge_council(PRIMARY_SUGGESTION, PROBER_SUGGESTION)
+        self.assertEqual(chosen, PRIMARY_SUGGESTION)
+        self.assertEqual(council["agreement"], "both")
+        self.assertEqual(council["prober_verdict"], "SUGGESTION")
+
+    def test_primary_suggests_prober_passes_agreement_primary_only(self):
+        from critic.main import merge_council
+        chosen, council = merge_council(PRIMARY_SUGGESTION, PROBER_PASS)
+        self.assertEqual(chosen, PRIMARY_SUGGESTION)
+        self.assertEqual(council["agreement"], "primary-only")
+        self.assertEqual(council["prober_verdict"], "PASS")
+
+    def test_primary_suggests_prober_errors_agreement_primary_only(self):
+        from critic.main import merge_council
+        chosen, council = merge_council(PRIMARY_SUGGESTION, PROBER_ERROR)
+        self.assertEqual(chosen, PRIMARY_SUGGESTION)
+        self.assertEqual(council["agreement"], "primary-only")
+        self.assertEqual(council["prober_verdict"], "ERROR")
+
+    def test_primary_passes_prober_suggests_agreement_prober_only(self):
+        from critic.main import merge_council
+        chosen, council = merge_council(PRIMARY_PASS, PROBER_SUGGESTION)
+        self.assertEqual(chosen, PROBER_SUGGESTION)
+        self.assertEqual(council["agreement"], "prober-only")
+        self.assertEqual(council["prober_verdict"], "SUGGESTION")
+
+    def test_both_pass_agreement_both(self):
+        from critic.main import merge_council
+        chosen, council = merge_council(PRIMARY_PASS, PROBER_PASS)
+        self.assertEqual(chosen, PRIMARY_PASS)
+        self.assertEqual(council["agreement"], "both")
+        self.assertEqual(council["prober_verdict"], "PASS")
+
+    def test_primary_passes_prober_errors_agreement_primary_only(self):
+        from critic.main import merge_council
+        chosen, council = merge_council(PRIMARY_PASS, PROBER_ERROR)
+        self.assertEqual(chosen, PRIMARY_PASS)
+        self.assertEqual(council["agreement"], "primary-only")
+        self.assertEqual(council["prober_verdict"], "ERROR")
+
+
+# Multi-model stub: branches on argv[2] (the resolved model, per agent.ask's
+# CRITIC_CMD contract) rather than argv[1]'s prompt content, since the whole
+# point of council mode is the SAME prompt going to two different models.
+COUNCIL_PRIMARY_PASS_PROBER_SUGGESTS = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+calls_log = Path(__file__).parent / "calls.log"
+model = sys.argv[2] if len(sys.argv) > 2 else ""
+with calls_log.open("a") as f:
+    f.write(model + "\\n")
+if model == "prober/model":
+    print('{"file": "found-by-prober.py", "line": 3, "issue": "recall catch", "severity": "high"}')
+else:
+    print("PASS")
+"""
+
+COUNCIL_ONLY_ONE_CALL_EXPECTED = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+calls_log = Path(__file__).parent / "calls.log"
+model = sys.argv[2] if len(sys.argv) > 2 else ""
+with calls_log.open("a") as f:
+    f.write(model + "\\n")
+print("PASS")
+"""
+
+COUNCIL_PROBER_ERRORS = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+calls_log = Path(__file__).parent / "calls.log"
+model = sys.argv[2] if len(sys.argv) > 2 else ""
+with calls_log.open("a") as f:
+    f.write(model + "\\n")
+if model == "prober/model":
+    sys.exit(1)  # simulates an AgentError (stub failed)
+print("PASS")
+"""
+
+
+class TestCouncilJudgeBatch(unittest.TestCase):
+    """Task 2: judge_batch wires ctx['prober'] through to a second ask_with_retry
+    call and merges the two verdicts via merge_council."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name)
+        self.suggestions = self.cc / "suggestions.ndjsonl"
+        self.heuristics = self.cc / "heuristics.md"
+        self.calls_log = self.cc / "calls.log"
+        self.events = [{"type": "diff", "session": None,
+                        "payload": {"diff": "+code", "stat": "", "untracked": []}}]
+        self.base_ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
+                         "persona": "", "project": "", "repo": self.cc,
+                         "beat": 1, "ts": "2026-01-01T00:00:00"}
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def _set_stub(self, script: str):
+        stub = self.cc / "stub.py"
+        stub.write_text(script)
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+        os.environ["CRITIC_CMD"] = str(stub)
+
+    def _rows(self):
+        return [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+
+    def _calls(self):
+        if not self.calls_log.exists():
+            return []
+        return [l for l in self.calls_log.read_text().splitlines() if l or l == ""]
+
+    def test_prober_only_finding_gets_council_agreement_and_survives(self):
+        from critic.main import judge_batch
+        self._set_stub(COUNCIL_PRIMARY_PASS_PROBER_SUGGESTS)
+        # verify True (the default): a prober is only consulted when
+        # verification is possible — see test_no_verify_skips_prober below.
+        # The flagged file doesn't exist under self.cc, so verify_finding
+        # short-circuits on its own "file not found" check without an extra
+        # model call, keeping the call count at exactly 2 (primary + prober).
+        ctx = {**self.base_ctx, "verify": True, "prober": "prober/model"}
+        judge_batch(self.events, ctx)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["verdict"], "SUGGESTION")
+        self.assertEqual(row["suggestion"]["issue"], "recall catch")
+        self.assertIn("council", row)
+        self.assertEqual(row["council"]["agreement"], "prober-only")
+        self.assertEqual(row["council"]["prober_verdict"], "SUGGESTION")
+        self.assertEqual(row["council"]["prober_model"], "prober/model")
+        calls = self._calls()
+        self.assertEqual(len(calls), 2)
+        self.assertIn("prober/model", calls)
+
+    def test_prober_agent_error_never_blocks_primary_verdict(self):
+        from critic.main import judge_batch
+        self._set_stub(COUNCIL_PROBER_ERRORS)
+        ctx = {**self.base_ctx, "verify": True, "prober": "prober/model"}
+        judge_batch(self.events, ctx)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["verdict"], "PASS")
+        self.assertIn("council", row)
+        self.assertEqual(row["council"]["prober_verdict"], "ERROR")
+        self.assertEqual(row["council"]["agreement"], "primary-only")
+
+    def test_no_prober_configured_no_council_key_single_call(self):
+        from critic.main import judge_batch
+        self._set_stub(COUNCIL_ONLY_ONE_CALL_EXPECTED)
+        ctx = {**self.base_ctx, "verify": False}  # no "prober" key at all
+        judge_batch(self.events, ctx)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertNotIn("council", row)
+        self.assertEqual(len(self._calls()), 1)
+
+    def test_no_verify_skips_prober_even_when_configured(self):
+        """A prober without a verifier is a false-positive machine (bake-off
+        data) — --no-verify must suppress the prober call entirely, not just
+        the verification step."""
+        from critic.main import judge_batch
+        self._set_stub(COUNCIL_ONLY_ONE_CALL_EXPECTED)
+        ctx = {**self.base_ctx, "verify": False, "prober": "prober/model"}
+        judge_batch(self.events, ctx)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertNotIn("council", row)
+        self.assertEqual(len(self._calls()), 1)
 
 
 if __name__ == "__main__":

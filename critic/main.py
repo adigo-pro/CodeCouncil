@@ -259,7 +259,31 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         "reviewed_files": reviewed_files(ctx.get("latest_diff"), events),
     }
     save_prompt(suggestions_file.parent / "prompts", record["id"], text)
-    record.update(ask_with_retry(text, ctx))
+    primary_parsed = ask_with_retry(text, ctx)
+    if ctx.get("prober") and ctx.get("verify", True):
+        # Council mode: ask a second, recall-oriented model the SAME prompt.
+        # Measured basis (docs/benchmarks/): the primary (precision anchor)
+        # has 0 false positives but misses catches; the prober catches
+        # everything but false-positives on clean changes. A prober-only
+        # finding is therefore only trustworthy once verify.verify_finding
+        # (below, gated on record["verdict"] == "SUGGESTION") has a chance to
+        # run a repro against it — an unverifiable prober is a
+        # false-positive machine per the bake-off. That's why the prober is
+        # gated on ctx["verify"] here too, not just ctx["prober"]: with
+        # verification disabled there is no repro step to catch a prober
+        # false-positive, so we skip the prober call entirely and fall back
+        # to exactly today's single-model flow (no "council" key at all)
+        # rather than deliver an unverifiable guess into the record.
+        try:
+            prober_parsed = ask_with_retry(text, ctx, model=ctx["prober"])
+        except Exception as e:  # a prober failure must never cost the primary verdict
+            prober_parsed = {"verdict": "ERROR", "error": str(e)[:200]}
+        merged, council = merge_council(primary_parsed, prober_parsed)
+        council["prober_model"] = ctx["prober"]
+        record.update(merged)
+        record["council"] = council
+    else:
+        record.update(primary_parsed)
     if record["verdict"] == "ERROR":
         render_error(beat, ts, record.get("error", "?"))
     else:
@@ -295,18 +319,24 @@ PERSISTED_STATE_KEYS = (
 )
 
 
-def ask_with_retry(text: str, ctx: dict) -> dict:
+def ask_with_retry(text: str, ctx: dict, model: str | None = None) -> dict:
     """One agent turn, retried once on transport failure or malformed reply —
-    transient gateway errors were observed eating real catches."""
+    transient gateway errors were observed eating real catches.
+
+    model: explicit "provider/model" override for this call, passed straight
+        through to agent.ask (see its docstring). None = today's ambient
+        resolution (COUNCIL_MODEL / NVIDIA default) — this is how council
+        mode's prober call in judge_batch asks the SAME prompt of a second
+        model without touching the primary call site or os.environ."""
     last: dict = {}
     repo = ctx.get("repo")
     for attempt in range(2):
         try:
             if repo:
                 reply = agent.ask(text, system=ctx.get("persona"),
-                                  tools=JUDGE_TOOLS, cwd=str(repo))
+                                  tools=JUDGE_TOOLS, cwd=str(repo), model=model)
             else:
-                reply = agent.ask(text, system=ctx.get("persona"))
+                reply = agent.ask(text, system=ctx.get("persona"), model=model)
         except agent.AgentError as e:
             last = {"verdict": "ERROR", "error": str(e)}
             continue
@@ -315,6 +345,40 @@ def ask_with_retry(text: str, ctx: dict) -> dict:
             return parsed
         last = parsed
     return last
+
+
+def merge_council(primary: dict, prober: dict) -> tuple[dict, dict]:
+    """Pure merge of two parsed verdicts (ask_with_retry's return shape) into
+    one chosen verdict + a council info dict. No I/O, no model calls — the
+    whole point is that this unit-tests without a stub.
+
+    Six-combo table (measured basis in docs/benchmarks/: primary is a
+    precision anchor with 0 false positives but misses catches; prober has
+    full recall but false-positives on clean changes):
+      primary SUGGESTION + prober SUGGESTION -> primary's suggestion, "both"
+      primary SUGGESTION + prober PASS/ERROR -> primary's,   "primary-only"
+      primary PASS       + prober SUGGESTION -> prober's suggestion, "prober-only"
+      primary PASS       + prober PASS       -> primary's PASS, "both"
+      primary PASS       + prober ERROR      -> primary's PASS, "primary-only"
+
+    Deliberately does NOT stamp "prober_model" into the returned council
+    dict: that's a static config value the caller (judge_batch) already has
+    in ctx["prober"], not something this function needs to know about — the
+    caller fills it in after the call, keeping this function free of any
+    ctx/config coupling.
+    """
+    primary_verdict = primary.get("verdict")
+    prober_verdict = prober.get("verdict")
+    if primary_verdict == "SUGGESTION":
+        chosen = primary
+        agreement = "both" if prober_verdict == "SUGGESTION" else "primary-only"
+    elif prober_verdict == "SUGGESTION":
+        chosen = prober
+        agreement = "prober-only"
+    else:
+        chosen = primary
+        agreement = "both" if prober_verdict == "PASS" else "primary-only"
+    return chosen, {"prober_verdict": prober_verdict, "agreement": agreement}
 
 
 def should_task_review(state: dict, n_new_requests: int, now: float,

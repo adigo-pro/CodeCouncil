@@ -63,7 +63,10 @@ def build_distill_prompt(suggestion_row: dict, rebuttal_evidence: str) -> str:
         f"DEVELOPER'S REBUTTAL:\n{rebuttal_evidence}\n\n"
         "Reply with exactly ONE sentence stating the repo-specific fact or "
         "convention that makes the finding wrong (max 200 chars), or the "
-        "single word NONE if the rebuttal reveals no reusable fact."
+        "single word NONE if the rebuttal reveals no reusable fact. If the "
+        "rebuttal reveals a durable trait of this agent or repo (how it "
+        "runs tests, what it considers in-scope), the fact may state that "
+        "trait."
     )
 
 

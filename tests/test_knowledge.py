@@ -98,6 +98,12 @@ class TestBuildDistillPrompt(unittest.TestCase):
         self.assertTrue(text.startswith("TASK: DISTILL"))
         self.assertIn("off-by-one", text)
         self.assertIn("guard exists on line 2", text)
+        self.assertIn(
+            "If the rebuttal reveals a durable trait of this agent or repo "
+            "(how it runs tests, what it considers in-scope), the fact may "
+            "state that trait.",
+            text,
+        )
 
 
 if __name__ == "__main__":

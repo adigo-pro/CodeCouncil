@@ -67,6 +67,24 @@ def _rule_stat_lines(outcomes: list[dict], version: int) -> list[str]:
     return lines
 
 
+def _mode_stat_lines(outcomes: list[dict], version: int) -> list[str]:
+    """Per-failure-mode stat lines for the CURRENT version only — same
+    derivation and caveat as _rule_stat_lines above (this call only has
+    outcomes, so "graded" is accepted+rebutted+ignored under that mode, not
+    a true suggested count). Answers "does this decorrelated check ever
+    land" rather than "did this specific rule do well"."""
+    from .report import build_mode_rows  # same-loop import; lazy to avoid any cycle risk
+
+    rows = [r for r in build_mode_rows([], outcomes) if r["version"] == version]
+    lines = []
+    for r in rows:
+        mode_label = r["failure_mode"] if r["failure_mode"] is not None else "?"
+        graded = r["accepted"] + r["rebutted"] + r["ignored"]
+        lines.append(f"{mode_label}: {graded} graded, {r['accepted']} accepted, "
+                     f"{r['rebutted']} rebutted, {r['ignored']} ignored")
+    return lines
+
+
 def build_prompt(current: str, version: int, outcomes: list[dict]) -> str:
     lines = []
     for o in outcomes:
@@ -81,6 +99,13 @@ def build_prompt(current: str, version: int, outcomes: list[dict]) -> str:
         + "\nPrefer dropping or sharpening rules with rebuttals/ignores; "
           "preserve rules with accepts."
     ) if rule_lines else ""
+    mode_lines = _mode_stat_lines(outcomes, version)
+    mode_block = (
+        "\n\nPER-FAILURE-MODE STATS FOR THE CURRENT VERSION:\n" + "\n".join(mode_lines)
+        + "\nModes with accepts are where your independent perspective pays — keep "
+          "hunting them; modes with only rebuttals/ignores need sharper rules, not "
+          "abandonment."
+    ) if mode_lines else ""
     return (
         "TASK: REWRITE HEURISTICS\n\n"
         f"CURRENT FILE (version {version}):\n{current.strip()}\n\n"
@@ -89,6 +114,7 @@ def build_prompt(current: str, version: int, outcomes: list[dict]) -> str:
         + f"\n\nSTATS: accepted={counts['accepted']} rebutted={counts['rebutted']} "
         f"ignored={counts['ignored']}"
         + rule_block
+        + mode_block
         + f"\n\nProduce version {version + 1} per your REWRITE protocol: output only the "
         f"complete new file, first line exactly 'version: {version + 1}', max {MAX_LINES} lines."
     )

@@ -108,6 +108,42 @@ def build_rule_rows(suggestions: list[dict], outcomes: list[dict]) -> list[dict]
     return rows
 
 
+def build_mode_rows(suggestions: list[dict], outcomes: list[dict]) -> list[dict]:
+    """Per (heuristics_version, failure_mode) suggested/accepted/rebutted/
+    ignored counts — the decorrelated-checks companion to build_rule_rows:
+    instead of "did R3 do well", this answers "does the claim-drift check
+    ever land", which is what a rewrite needs to decide where the critic's
+    independent perspective (vs the coding agent's own self-report) is
+    actually paying off versus where it's just noise.
+
+    Same shape and conventions as build_rule_rows: "suggested" comes from
+    `suggestions` (any verdict=="SUGGESTION" row, whether or not it was ever
+    delivered/graded); accepted/rebutted/ignored come from `outcomes` for
+    the matching (version, failure_mode). A row with no "failure_mode"
+    (unset, legacy suggestion predating this feature, or a reply the model
+    didn't tag) lands in the failure_mode=None bucket — rendered "?" by
+    render_mode_rows — so untagged findings stay visible instead of
+    silently vanishing.
+
+    Sorted by (version, failure_mode), with the None bucket sorted last
+    within its version."""
+    per: dict[tuple[int, str | None], dict] = defaultdict(lambda: {
+        "suggested": 0, "accepted": 0, "rebutted": 0, "ignored": 0,
+    })
+    for s in suggestions:
+        if s.get("verdict") == "SUGGESTION":
+            key = (s.get("heuristics_version", 0), (s.get("suggestion") or {}).get("failure_mode"))
+            per[key]["suggested"] += 1
+    for o in outcomes:
+        outcome = o.get("outcome")
+        if outcome in GRADED:
+            key = (o.get("heuristics_version", 0), o.get("failure_mode"))
+            per[key][outcome] += 1
+    rows = [{"version": v, "failure_mode": m, **counts} for (v, m), counts in per.items()]
+    rows.sort(key=lambda row: (row["version"], row["failure_mode"] is None, row["failure_mode"] or ""))
+    return rows
+
+
 def render_rule_rows(rows: list[dict]) -> str:
     header = f"{'version':>7}  {'rule':>5}  {'suggested':>9}  {'accepted':>8}  {'rebutted':>8}  {'ignored':>7}"
     lines = [header, "-" * len(header)]
@@ -115,6 +151,18 @@ def render_rule_rows(rows: list[dict]) -> str:
         rule_label = f"R{r['rule']}" if r["rule"] is not None else "R?"
         lines.append(
             f"{'v' + str(r['version']):>7}  {rule_label:>5}  {r['suggested']:>9}  "
+            f"{r['accepted']:>8}  {r['rebutted']:>8}  {r['ignored']:>7}"
+        )
+    return "\n".join(lines)
+
+
+def render_mode_rows(rows: list[dict]) -> str:
+    header = f"{'version':>7}  {'mode':>16}  {'suggested':>9}  {'accepted':>8}  {'rebutted':>8}  {'ignored':>7}"
+    lines = [header, "-" * len(header)]
+    for r in rows:
+        mode_label = r["failure_mode"] if r["failure_mode"] is not None else "?"
+        lines.append(
+            f"{'v' + str(r['version']):>7}  {mode_label:>16}  {r['suggested']:>9}  "
             f"{r['accepted']:>8}  {r['rebutted']:>8}  {r['ignored']:>7}"
         )
     return "\n".join(lines)
@@ -161,6 +209,15 @@ def main(argv: list[str] | None = None) -> int:
     if has_rule_data:
         print()
         print(render_rule_rows(build_rule_rows(suggestions, outcomes)))
+
+    has_mode_data = (
+        any(s.get("verdict") == "SUGGESTION" and (s.get("suggestion") or {}).get("failure_mode") is not None
+            for s in suggestions)
+        or any(o.get("failure_mode") is not None for o in outcomes)
+    )
+    if has_mode_data:
+        print()
+        print(render_mode_rows(build_mode_rows(suggestions, outcomes)))
     return 0
 
 

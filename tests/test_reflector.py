@@ -14,7 +14,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from reflector import judge, rewrite
-from reflector.report import build_rows, build_rule_rows, consistent
+from reflector.report import build_mode_rows, build_rows, build_rule_rows, consistent
 
 NOW = time.time()
 
@@ -23,11 +23,12 @@ def _iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def sugg(sid="s1", ts=None, version=1, rule=None):
+def sugg(sid="s1", ts=None, version=1, rule=None, failure_mode=None):
     return {"id": sid, "ts": _iso(NOW - 400 if ts is None else ts), "verdict": "SUGGESTION",
             "heuristics_version": version,
             "suggestion": {"file": "a.py", "line": 3, "severity": "high",
-                           "issue": "bug", "rationale": "r", "rule": rule}}
+                           "issue": "bug", "rationale": "r", "rule": rule,
+                           "failure_mode": failure_mode}}
 
 
 class TestGradePendingBoundedReads(unittest.TestCase):
@@ -198,6 +199,22 @@ class TestRewriteGuardrails(unittest.TestCase):
         self.assertIn("Prefer dropping or sharpening rules with rebuttals/ignores; "
                       "preserve rules with accepts.", text)
 
+    def test_rewrite_prompt_includes_per_mode_stats(self):
+        current = "version: 3\n- rule one\n- rule two\n- rule three"
+        outcomes = [
+            {"outcome": "accepted", "issue": "x", "heuristics_version": 3, "failure_mode": "claim-drift"},
+            {"outcome": "rebutted", "issue": "y", "heuristics_version": 3, "failure_mode": "claim-drift"},
+        ]
+        text = rewrite.build_prompt(current, 3, outcomes)
+        self.assertIn("claim-drift: ", text)
+        self.assertIn("2 graded, 1 accepted, 1 rebutted", text)
+        self.assertIn(
+            "Modes with accepts are where your independent perspective pays — keep "
+            "hunting them; modes with only rebuttals/ignores need sharper rules, not "
+            "abandonment.",
+            text,
+        )
+
     def test_rewrite_record_diffs_and_headline(self):
         old = "version: 1\n- keep this rule\n- drop this rule\n"
         new = "version: 2\n- keep this rule\n- brand new rule\n  with continuation\n"
@@ -309,6 +326,24 @@ class TestReport(unittest.TestCase):
         r_none = next(r for r in rows if r["version"] == 1 and r["rule"] is None)
         self.assertEqual((r_none["suggested"], r_none["ignored"]), (1, 1))
         self.assertEqual(rows, sorted(rows, key=lambda r: (r["version"], (r["rule"] is None, r["rule"]))))
+
+    def test_build_mode_rows_aggregates_per_version_mode(self):
+        suggestions = [sugg("a", version=1, failure_mode="claim-drift"),
+                      sugg("b", version=1, failure_mode="claim-drift"),
+                      sugg("c", version=1, failure_mode=None)]
+        outcomes = [
+            {"suggestion_id": "a", "outcome": "accepted", "heuristics_version": 1, "failure_mode": "claim-drift"},
+            {"suggestion_id": "b", "outcome": "rebutted", "heuristics_version": 1, "failure_mode": "claim-drift"},
+            {"suggestion_id": "c", "outcome": "ignored", "heuristics_version": 1, "failure_mode": None},
+        ]
+        rows = build_mode_rows(suggestions, outcomes)
+        r_cd = next(r for r in rows if r["version"] == 1 and r["failure_mode"] == "claim-drift")
+        self.assertEqual((r_cd["suggested"], r_cd["accepted"], r_cd["rebutted"], r_cd["ignored"]),
+                         (2, 1, 1, 0))
+        r_none = next(r for r in rows if r["version"] == 1 and r["failure_mode"] is None)
+        self.assertEqual((r_none["suggested"], r_none["ignored"]), (1, 1))
+        self.assertEqual(rows, sorted(rows, key=lambda r: (r["version"],
+                                                            (r["failure_mode"] is None, r["failure_mode"]))))
 
 
 def _write_case(cases_dir: Path, name: str, expected: str, marker: str,

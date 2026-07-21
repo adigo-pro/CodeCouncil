@@ -288,6 +288,29 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertEqual(rows[0]["verdict"], "SUGGESTION")
         self.assertEqual(state["latest_diff"]["payload"]["diff"], "+bad")
 
+    def test_heartbeat_records_sticky_tests_run_at_for_session(self):
+        """Task 9: a test command is credited to its session in state even
+        when the beat carries no diff/commit (so it never dispatches to the
+        scheduler) — the sticky fact must survive independent of the gate."""
+        self._write_obs([
+            {"ts": "2026-01-01T00:00:00+00:00", "beat": 1, "type": "tool_call",
+             "session": "sess-A",
+             "payload": {"tool": "Bash", "input": {"command": "python3 -m unittest discover"}}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        self._beat(state, TurnScheduler())
+        self.assertEqual(state["tests_run_at"].get("sess-A"), "2026-01-01T00:00:00+00:00")
+
+    def test_heartbeat_ignores_non_test_commands(self):
+        self._write_obs([
+            {"ts": "2026-01-01T00:00:00+00:00", "beat": 1, "type": "tool_call",
+             "session": "sess-A",
+             "payload": {"tool": "Bash", "input": {"command": "git status"}}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        self._beat(state, TurnScheduler())
+        self.assertNotIn("tests_run_at", state)
+
     def test_verdict_history_joins_outcomes(self):
         self.suggestions.write_text(json.dumps({
             "id": "s1", "verdict": "SUGGESTION",
@@ -429,6 +452,22 @@ class TestTaskReview(unittest.TestCase):
         self.assertIn("NO test command was executed", text)
         self.assertIn("abc done", text)
         self.assertIn("UNSUPPORTED", text)
+
+    def test_build_task_review_sticky_middle_state(self):
+        """Task 9: no test command in the review window, but one ran earlier
+        this session — the false 'no tests were run' flag this fixes."""
+        events = [{"type": "reasoning", "payload": {"kind": "text", "text": "All done."}}]
+        text = prompt.build_task_review(events, None, "version: 2",
+                                        tests_run_sticky="2026-01-01T00:00:00+00:00")
+        self.assertIn(
+            "no test command in this window, but one ran at "
+            "2026-01-01T00:00:00+00:00 earlier this session", text)
+        self.assertNotIn("NO test command was executed", text)
+
+    def test_build_task_review_hard_no_tests_state_without_sticky(self):
+        events = [{"type": "reasoning", "payload": {"kind": "text", "text": "All done."}}]
+        text = prompt.build_task_review(events, None, "version: 2", tests_run_sticky=None)
+        self.assertIn("NO test command was executed", text)
 
     def test_should_task_review_debounce(self):
         from critic.main import should_task_review
@@ -667,6 +706,20 @@ class TestCommittedOffset(unittest.TestCase):
         loaded = load_state(state_path)
         self.assertEqual(loaded["offset"], 500)
         self.assertEqual(loaded["committed_offset"], 500)
+
+    def test_tests_run_at_is_in_persisted_state_keys_and_round_trips(self):
+        """Task 9: the sticky tests-run fact must survive a daemon restart —
+        it lives in the same persisted-keys list main() writes on every loop."""
+        from critic.main import PERSISTED_STATE_KEYS
+        self.assertIn("tests_run_at", PERSISTED_STATE_KEYS)
+        state = {"offset": 0, "beat": 1, "committed_offset": 0,
+                 "tests_run_at": {"sess-A": "2026-01-01T00:00:00+00:00"}}
+        state_path = self.cc / "critic-state.json"
+        state_path.write_text(json.dumps(
+            {k: state[k] for k in PERSISTED_STATE_KEYS if k in state}
+        ), encoding="utf-8")
+        loaded = load_state(state_path)
+        self.assertEqual(loaded["tests_run_at"], {"sess-A": "2026-01-01T00:00:00+00:00"})
 
 
 class TestPromptAuditCap(unittest.TestCase):

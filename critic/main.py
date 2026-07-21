@@ -204,6 +204,14 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
 
 TASK_REVIEW_COOLDOWN_S = 600
 
+# Fields the daemon loop in main() persists to critic-state.json every beat.
+# tests_run_at (Task 9): {session: iso_ts} — must survive a daemon restart or
+# a test run just before a restart would silently stop counting.
+PERSISTED_STATE_KEYS = (
+    "offset", "committed_offset", "beat", "latest_diff", "interval",
+    "review_offset", "last_task_review", "material_since_review", "tests_run_at",
+)
+
 
 def ask_with_retry(text: str, ctx: dict) -> dict:
     """One agent turn, retried once on transport failure or malformed reply —
@@ -243,12 +251,37 @@ def recent_events(obs_file: Path, since_epoch: float) -> list[dict]:
     return out
 
 
+TESTS_RUN_STICKY_MAX_AGE_S = 24 * 3600
+
+
+def sticky_tests_run(tests_run_at: dict | None, now_epoch: float,
+                     max_age_s: float = TESTS_RUN_STICKY_MAX_AGE_S) -> str | None:
+    """The most recent test-command timestamp seen anywhere this session
+    (state["tests_run_at"], keyed by session — see heartbeat()), bounded to
+    max_age_s so a stale run from days ago never masks a truly untested
+    change. A single value across sessions: task reviews carry no session
+    tag (see task_review), so this can't be scoped to one."""
+    from datetime import datetime
+    best: str | None = None
+    best_epoch = float("-inf")
+    for ts in (tests_run_at or {}).values():
+        try:
+            t = datetime.fromisoformat(ts).timestamp()
+        except (TypeError, ValueError):
+            continue
+        if now_epoch - t <= max_age_s and t > best_epoch:
+            best, best_epoch = ts, t
+    return best
+
+
 def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
     """One 'is it actually done?' turn. Runs on the scheduler's worker thread."""
     events = recent_events(obs_file, since_epoch)
     heuristics = ensure_heuristics(ctx["heuristics_path"])
+    tests_run_sticky = ctx.get("tests_run_sticky")
     text = prompt.build_task_review(events, ctx.get("latest_diff"), heuristics,
-                                    project=ctx.get("project", ""))
+                                    project=ctx.get("project", ""),
+                                    tests_run_sticky=tests_run_sticky)
     suggestions_file = ctx["suggestions_file"]
     record = {
         "id": uuid.uuid4().hex[:12],
@@ -258,7 +291,7 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
         "review_kind": "task",
         "heuristics_version": prompt.heuristics_version(heuristics),
         "n_events": len(events),
-        "tests_run": bool(prompt.tests_run(events)),
+        "tests_run": bool(prompt.tests_run(events) or tests_run_sticky),
         "prompt_chars": len(text),
     }
     save_prompt(suggestions_file.parent / "prompts", record["id"], text)
@@ -379,8 +412,16 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
     if any(e.get("type") in ("diff", "commit") for e in events):
         state["material_since_review"] = True
 
+    # Sticky tests-run fact (Task 9): a test command is credited to its
+    # session as soon as it's seen, independent of the scheduler gate below —
+    # a task review beats later can outlive this event's short review window.
+    for e in events:
+        if e.get("type") == "tool_call" and prompt.tests_run([e]):
+            state.setdefault("tests_run_at", {})[e.get("session")] = e.get("ts", ts)
+
     ctx = {**ctx, "beat": beat, "ts": ts, "latest_diff": state.get("latest_diff"),
-           "offset_now": state["offset"]}
+           "offset_now": state["offset"],
+           "tests_run_sticky": sticky_tests_run(state.get("tests_run_at"), time.time())}
     status = scheduler.submit(events, ctx)
 
     # the coding agent declared itself done: consider a task-level claim review
@@ -466,10 +507,7 @@ def main(argv: list[str] | None = None) -> int:
                                  "latest_diff": state.get("latest_diff"),
                                  "offset_now": state["offset"]})
             state_path.write_text(json.dumps(
-                {k: state[k] for k in
-                 ("offset", "committed_offset", "beat", "latest_diff", "interval",
-                  "review_offset", "last_task_review", "material_since_review")
-                 if k in state}
+                {k: state[k] for k in PERSISTED_STATE_KEYS if k in state}
             ), encoding="utf-8")
             if args.once:
                 break

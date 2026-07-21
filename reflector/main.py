@@ -86,6 +86,11 @@ def grade_pending(cc: Path) -> int:
             # copy from) and "undelivered" rows above are graded without
             # ever having been judged, so both stay without a "rule" field.
             "rule": row["suggestion"].get("rule"),
+            # Failure-mode attribution: same carry as "rule" above, same
+            # scope — only graded (accepted/rebutted/ignored) rows have a
+            # "suggestion" dict to copy from; missed/undelivered never gain
+            # this field.
+            "failure_mode": row["suggestion"].get("failure_mode"),
             **({"malformed": grade["malformed"]} if "malformed" in grade else {}),
         })
         appended_ids.add(row["id"])

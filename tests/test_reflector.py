@@ -841,7 +841,10 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
     both the explicit-rebuttal and model-judged paths — so every grade
     traces back to the heuristic that caused it. "missed"/"undelivered"
     outcomes never had a suggestion dict to copy from, so they stay without
-    a "rule" field entirely (not even null)."""
+    a "rule" field entirely (not even null).
+
+    Task 1: "failure_mode" rides along the same two paths and the same
+    missed/undelivered exclusion — mirrored fixtures below."""
 
     def setUp(self):
         self.td = tempfile.TemporaryDirectory()
@@ -856,12 +859,13 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
         os.environ.pop("CRITIC_CMD", None)
         self.td.cleanup()
 
-    def _write_suggestion(self, rule):
+    def _write_suggestion(self, rule, failure_mode=None):
         (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
             "id": "s1", "ts": _iso(NOW - 400), "verdict": "SUGGESTION",
             "heuristics_version": 1,
             "suggestion": {"file": "a.py", "line": 3, "severity": "high",
-                          "issue": "bug", "rationale": "r", "rule": rule},
+                          "issue": "bug", "rationale": "r", "rule": rule,
+                          "failure_mode": failure_mode},
         }) + "\n", encoding="utf-8")
         (self.cc / "delivered.json").write_text(
             json.dumps({"s1": {"context": NOW - 300}}), encoding="utf-8")
@@ -869,7 +873,7 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
     def test_explicit_rebuttal_path_copies_rule(self):
         import reflector.main as main_mod
 
-        self._write_suggestion(rule=2)
+        self._write_suggestion(rule=2, failure_mode="claim-drift")
         (self.cc / "observations.ndjsonl").write_text(json.dumps({
             "ts": _iso(NOW - 250), "type": "reasoning",
             "payload": {"text": "COUNCIL-REBUTTAL: not applicable here"}},
@@ -880,11 +884,12 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "rebutted")
         self.assertEqual(outcomes[0]["rule"], 2)
+        self.assertEqual(outcomes[0]["failure_mode"], "claim-drift")
 
     def test_model_judged_path_copies_null_rule(self):
         import reflector.main as main_mod
 
-        self._write_suggestion(rule=None)
+        self._write_suggestion(rule=None, failure_mode=None)
         stub = _make_stub(Path(self.td.name), ACCEPTED_GRADE_STUB)
         os.environ["CRITIC_CMD"] = str(stub)
         main_mod.grade_pending(self.cc)
@@ -894,6 +899,8 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
         self.assertEqual(outcomes[0]["outcome"], "accepted")
         self.assertIn("rule", outcomes[0])
         self.assertIsNone(outcomes[0]["rule"])
+        self.assertIn("failure_mode", outcomes[0])
+        self.assertIsNone(outcomes[0]["failure_mode"])
 
     def test_undelivered_outcome_has_no_rule_field(self):
         import reflector.main as main_mod
@@ -902,7 +909,8 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
             "id": "s1", "ts": _iso(NOW - 1000), "verdict": "SUGGESTION",
             "heuristics_version": 1,
             "suggestion": {"file": "a.py", "line": 3, "severity": "high",
-                          "issue": "bug", "rationale": "r", "rule": 2},
+                          "issue": "bug", "rationale": "r", "rule": 2,
+                          "failure_mode": "claim-drift"},
         }) + "\n", encoding="utf-8")
         main_mod.grade_pending(self.cc)
 
@@ -910,6 +918,7 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "undelivered")
         self.assertNotIn("rule", outcomes[0])
+        self.assertNotIn("failure_mode", outcomes[0])
 
 
 class TestMissedGrading(unittest.TestCase):

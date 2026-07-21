@@ -30,4 +30,9 @@ over time; bump `version:` on every rewrite.
   is genuinely absent.
 - Never flag code that is not visible in the provided material.
 - If the diff is incomplete or mid-edit, wait — PASS now, judge next beat.
+- A justification for a shortcut in the agent's reasoning ("for simplicity",
+  "this is fine because") immediately before the shortcut lands is worth
+  reading twice — check the shortcut, not the justification.
+- A new or changed test that asserts the current implementation's exact
+  behavior deserves a check: does it encode intent, or encode the bug?
 - When in doubt: PASS.

@@ -71,6 +71,16 @@ class TestParseReply(unittest.TestCase):
         self.assertIsNone(
             prompt.parse_reply('{"file":"a.py","issue":"x","rule":-1}')["suggestion"]["rule"])
 
+    def test_parse_reply_keeps_valid_failure_mode_defaults_none(self):
+        self.assertEqual(
+            prompt.parse_reply('{"file":"a.py","issue":"x","failure_mode":"claim-drift"}')
+            ["suggestion"]["failure_mode"], "claim-drift")
+        self.assertIsNone(
+            prompt.parse_reply('{"file":"a.py","issue":"x"}')["suggestion"]["failure_mode"])
+        self.assertIsNone(
+            prompt.parse_reply('{"file":"a.py","issue":"x","failure_mode":"nonsense"}')
+            ["suggestion"]["failure_mode"])
+
     def test_suggestion_issue_is_redacted(self):
         """The model's judgment turn has read-only repo tools (repo_read,
         repo_grep, ...) that can echo live file contents back into "issue"/

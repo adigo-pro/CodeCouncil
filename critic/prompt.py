@@ -27,6 +27,17 @@ MAX_RATIONALE_CHARS = 600
 
 PASS = "PASS"
 
+# The documented failure family for the coding agent under review (see
+# "Who you are reviewing" in critic/persona.md) — a suggestion's
+# "failure_mode" names which pattern the critic saw. Kept only when it's
+# one of these exact strings; anything else (missing, unrecognized string,
+# wrong type) is None so legacy replies without "failure_mode" parse fine —
+# same guard style as "rule" below.
+FAILURE_MODES = frozenset({
+    "claim-drift", "self-test-bias", "rationalization", "scope-trim",
+    "assumption", "error-suppression", "secret", "plan-inconsistency", "other",
+})
+
 
 def _cap(text: str, limit: int) -> str:
     """Truncate with the same '… [N chars total]' marker used elsewhere in
@@ -339,6 +350,10 @@ def parse_reply(raw: str) -> dict[str, Any]:
                         # anything else (missing, string, 0, negative) is
                         # None so legacy replies without "rule" parse fine.
                         "rule": rule if isinstance(rule, int) and not isinstance(rule, bool) and rule > 0 else None,
+                        # which documented failure pattern (persona.md) motivated
+                        # this finding — kept only when it's a recognized member
+                        # of FAILURE_MODES, else None (legacy replies fine).
+                        "failure_mode": obj.get("failure_mode") if obj.get("failure_mode") in FAILURE_MODES else None,
                     },
                 }
         except json.JSONDecodeError:

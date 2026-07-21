@@ -1,5 +1,7 @@
 """Critic tests: reply parsing, prompt building, and the loop with a stubbed agent."""
 
+import contextlib
+import io
 import json
 import os
 import stat
@@ -13,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from critic import prompt
 from critic.main import TurnScheduler, heartbeat, load_state, verdict_history
+from critic.render import render_verdict
 
 
 class TestParseReply(unittest.TestCase):
@@ -354,6 +357,57 @@ class TestAskWithRetry(unittest.TestCase):
         finally:
             os.environ.pop("CRITIC_CMD", None)
         self.assertEqual(v["verdict"], "ERROR")
+
+
+class TestMalformedVisibility(unittest.TestCase):
+    """Task 5: a malformed reply must not silently degrade into an ordinary
+    PASS — render_verdict has to shout about it."""
+
+    def test_render_verdict_warns_on_malformed(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            render_verdict(1, "2026-01-01T00:00:00", {
+                "verdict": "PASS", "malformed": "gibberish reply from the model" * 10,
+            })
+        text = out.getvalue()
+        self.assertIn("⚠", text)
+        self.assertIn("malformed", text)
+        self.assertIn("gibberish reply from the model"[:80], text)
+
+    def test_render_verdict_clean_pass_has_no_warning(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            render_verdict(1, "2026-01-01T00:00:00", {"verdict": "PASS"})
+        self.assertNotIn("⚠", out.getvalue())
+
+    def test_garbage_stub_produces_malformed_record_and_console_warning(self):
+        """End-to-end through judge_batch: a stubbed model that only ever
+        replies with garbage must (a) land a 'malformed' record in
+        suggestions.ndjsonl and (b) print the visible warning."""
+        from critic.main import judge_batch
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td)
+            suggestions = cc / "suggestions.ndjsonl"
+            heuristics = cc / "heuristics.md"
+            stub = cc / "stub.sh"
+            stub.write_text("#!/bin/sh\necho 'not json and not PASS, just noise'\n")
+            stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+            os.environ["CRITIC_CMD"] = str(stub)
+            try:
+                ctx = {"heuristics_path": heuristics, "suggestions_file": suggestions,
+                       "persona": "", "project": "", "repo": cc, "verify": False,
+                       "beat": 1, "ts": "2026-01-01T00:00:00"}
+                events = [{"type": "diff", "session": None,
+                           "payload": {"diff": "+x", "stat": "", "untracked": []}}]
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    judge_batch(events, ctx)
+            finally:
+                os.environ.pop("CRITIC_CMD", None)
+            rows = [json.loads(l) for l in suggestions.read_text().splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertIn("malformed", rows[0])
+            self.assertIn("⚠", out.getvalue())
 
 
 class TestTaskReview(unittest.TestCase):

@@ -42,6 +42,7 @@ export interface Verdict {
   severity: string | null;
   reason: string | null;
   error: string | null;
+  malformed?: boolean;
 }
 
 export interface ActivityEvent {
@@ -74,6 +75,7 @@ export interface Council {
     accepted: number;
     acceptanceRate: number | null;
     heuristicsVersion: number;
+    malformedRecent: number;
   };
   curve: CurvePoint[];
   reviews: Review[];

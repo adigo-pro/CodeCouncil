@@ -46,6 +46,14 @@ export function Header({ data, connected }: { data: Council | null; connected: b
               </span>
             </>
           )}
+          {data && data.stats.malformedRecent > 0 && (
+            <span
+              className="hidden items-center gap-2 rounded-full bg-warn/10 px-3 py-1.5 font-mono text-xs text-warn sm:inline-flex"
+              title="The model's reply couldn't be parsed and was treated as PASS — check for provider/format drift"
+            >
+              ⚠ {data.stats.malformedRecent} malformed {data.stats.malformedRecent === 1 ? "reply" : "replies"}
+            </span>
+          )}
           {data && (
             <span
               className={`hidden items-center gap-2 rounded-full px-3 py-1.5 font-mono text-xs sm:inline-flex ${

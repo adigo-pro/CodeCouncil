@@ -13,6 +13,9 @@ def _c(code: str, text: str) -> str:
 
 def render_verdict(beat: int, ts: str, verdict: dict) -> None:
     clock = ts.split("T")[1][:8] if "T" in ts else ts
+    if "malformed" in verdict:
+        raw = verdict["malformed"][:80]
+        print(_c("1;33", f"⚠ beat {beat} · {clock} · malformed reply — treated as PASS; raw: {raw}"))
     if verdict["verdict"] == "PASS":
         note = " (malformed reply)" if "malformed" in verdict else ""
         reason = f" — {verdict['reason']}" if verdict.get("reason") else ""

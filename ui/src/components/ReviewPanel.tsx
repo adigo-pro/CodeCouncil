@@ -52,13 +52,15 @@ function VerdictStrip({ verdicts }: { verdicts: Verdict[] }) {
       {recent.map((v) => (
         <span
           key={v.id}
-          title={`beat ${v.beat} · ${v.verdict}${v.reason ? `: ${v.reason}` : ""}${v.error ? ` — ${v.error}` : ""}`}
+          title={`beat ${v.beat} · ${v.verdict}${v.reason ? `: ${v.reason}` : ""}${v.error ? ` — ${v.error}` : ""}${v.malformed ? " — malformed reply, treated as PASS" : ""}`}
           className={
-            v.verdict === "PASS"
-              ? "h-2 w-2 rounded-full border border-foreground/25"
-              : v.verdict === "SUGGESTION"
-                ? "h-2 w-2 rounded-full bg-foreground"
-                : "h-2 w-2 rounded-full bg-bad/60"
+            v.malformed
+              ? "h-2 w-2 rounded-full bg-warn/40 ring-2 ring-warn"
+              : v.verdict === "PASS"
+                ? "h-2 w-2 rounded-full border border-foreground/25"
+                : v.verdict === "SUGGESTION"
+                  ? "h-2 w-2 rounded-full bg-foreground"
+                  : "h-2 w-2 rounded-full bg-bad/60"
           }
         />
       ))}

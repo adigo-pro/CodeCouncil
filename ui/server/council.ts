@@ -261,8 +261,9 @@ export function aggregate(repo: string) {
     .reverse();
 
   // Verdict strip: every critic beat, PASS and all.
-  const verdicts = suggestions.slice(-120).map((s, k) => ({
-    seq: suggestions.length - Math.min(120, suggestions.length) + k,
+  const recentSuggestions = suggestions.slice(-120);
+  const verdicts = recentSuggestions.map((s, k) => ({
+    seq: suggestions.length - recentSuggestions.length + k,
     id: s.id,
     ts: s.ts,
     beat: s.beat,
@@ -272,7 +273,9 @@ export function aggregate(repo: string) {
     severity: s.suggestion?.severity ?? null,
     reason: s.reason ? truncate(s.reason, 160) : null,
     error: s.error ? truncate(s.error, 120) : null,
+    malformed: !!s.malformed,
   }));
+  const malformedRecent = recentSuggestions.filter((s) => !!s.malformed).length;
 
   // seq is the event's index in the append-only file — a stable identity the
   // client uses to reveal newly-arrived events one at a time.
@@ -325,6 +328,7 @@ export function aggregate(repo: string) {
       accepted,
       acceptanceRate: graded.length ? accepted / graded.length : null,
       heuristicsVersion: heuristicsVersion(heuristicsText),
+      malformedRecent,
     },
     curve: buildCurve(suggestions, outcomes),
     reviews,

@@ -22,7 +22,7 @@ from core.store import read_tail_rows, wait_for
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
 
-from . import agent, prompt, verify
+from . import agent, prompt, receipt, verify
 from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
@@ -312,6 +312,18 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
     record["ts"] = now_iso()
     with suggestions_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    # The human-facing artifact (Task 10): claims vs mechanically verified
+    # facts vs findings raised this session. Never let a receipt failure lose
+    # a review that already landed durably above.
+    try:
+        tests_fact = f"MECHANICAL FACT — {prompt.mechanical_fact(events, tests_run_sticky)}"
+        receipt_path = receipt.write_receipt(
+            suggestions_file.parent, {**ctx, "since_epoch": since_epoch}, events, record,
+            tests_fact)
+        print(f"critic: receipt written to {receipt_path}")
+    except Exception as e:
+        print(f"critic: receipt failed ({e})")
 
 
 class TurnScheduler:

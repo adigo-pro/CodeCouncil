@@ -39,6 +39,28 @@ function councilApi(): Plugin {
           res.end("no prompt recorded for this verdict");
         }
       });
+      // human-facing session receipt (Task 10), by file name
+      server.middlewares.use("/api/receipt", (req, res) => {
+        let name = (req.url ?? "").replace(/^\//, "").split("?")[0];
+        try {
+          name = decodeURIComponent(name);
+        } catch {
+          /* malformed percent-encoding — fall through to validation below */
+        }
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        if (!name || name.includes("/") || name.includes("..")) {
+          res.statusCode = 400;
+          res.end("bad name");
+          return;
+        }
+        const file = path.join(WATCHED_REPO, ".codecouncil", "receipts", name);
+        try {
+          res.end(fs.readFileSync(file, "utf-8"));
+        } catch {
+          res.statusCode = 404;
+          res.end("no receipt found with that name");
+        }
+      });
     },
   };
 }

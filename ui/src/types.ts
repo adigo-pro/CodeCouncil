@@ -81,6 +81,7 @@ export interface Council {
   reviews: Review[];
   verdicts: Verdict[];
   activity: ActivityEvent[];
+  receipts: { name: string; mtime: string }[];
   heuristics: {
     version: number;
     rules: string[];

@@ -295,6 +295,22 @@ export function aggregate(repo: string) {
     /* no history yet */
   }
 
+  // Session receipts (Task 10): the human-facing artifact from a task
+  // review. Newest 10, by mtime.
+  let receipts: { name: string; mtime: string }[] = [];
+  try {
+    const receiptsDir = path.join(cc, "receipts");
+    receipts = fs
+      .readdirSync(receiptsDir)
+      .filter((f) => f.endsWith(".md"))
+      .map((name) => ({ name, mtimeMs: fs.statSync(path.join(receiptsDir, name)).mtimeMs }))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, 10)
+      .map((r) => ({ name: r.name, mtime: new Date(r.mtimeMs).toISOString() }));
+  } catch {
+    /* no receipts yet */
+  }
+
   const graded = outcomes.filter((o) => GRADED.has(o.outcome));
   const accepted = graded.filter((o) => o.outcome === "accepted").length;
   const lastObs = observations.length ? observations[observations.length - 1].ts : null;
@@ -334,6 +350,7 @@ export function aggregate(repo: string) {
     reviews,
     verdicts,
     activity,
+    receipts,
     heuristics: {
       version: heuristicsVersion(heuristicsText),
       rules: heuristicsRules(heuristicsText),

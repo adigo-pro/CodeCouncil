@@ -125,6 +125,20 @@ def tests_run(events: list[dict]) -> str | None:
     return None
 
 
+def mechanical_fact(events: list[dict], tests_run_sticky: str | None = None) -> str:
+    """The three-state test-execution fact for a task review window: a real
+    tests_run() hit this window, a sticky (possibly cross-session) run within
+    its staleness window, or nothing at all. Shared with critic/receipt.py so
+    the human-facing receipt states exactly what the model was told."""
+    ran = tests_run(events)
+    if ran:
+        return f"tests run in this window ({ran})"
+    if tests_run_sticky:
+        return (f"no test command in this window, but one ran at "
+               f"{tests_run_sticky} earlier (possibly another session)")
+    return "NO test command was executed"
+
+
 def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: str,
                       project: str = "", tests_run_sticky: str | None = None) -> str:
     """The 'agent says it's done' review: claims vs what the diff supports.
@@ -137,7 +151,6 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
     """
     claims = [e for e in events if e["type"] == "reasoning"][-12:]
     commits = [e for e in events if e["type"] == "commit"]
-    ran = tests_run(events)
 
     parts = []
     if project:
@@ -148,14 +161,7 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
     parts.append("THE AGENT'S STATEMENTS DURING THE TASK (its claims live here):")
     parts += [f"- {e['payload']['text']}" for e in claims] or ["(none captured)"]
     parts.append("")
-    if ran:
-        fact = f"tests run in this window ({ran})"
-    elif tests_run_sticky:
-        fact = (f"no test command in this window, but one ran at "
-               f"{tests_run_sticky} earlier (possibly another session)")
-    else:
-        fact = "NO test command was executed"
-    parts.append(f"MECHANICAL FACT — {fact}")
+    parts.append(f"MECHANICAL FACT — {mechanical_fact(events, tests_run_sticky)}")
     parts.append("")
     if commits:
         parts.append("COMMITS THIS TASK:")

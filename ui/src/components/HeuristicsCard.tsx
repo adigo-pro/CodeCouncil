@@ -84,6 +84,31 @@ export function HeuristicsCard({ data }: { data: Council | null }) {
           </span>
         </div>
       )}
+
+      {data && data.receipts.length > 0 && (
+        <div className="mt-4 border-t border-border pt-4">
+          <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+            Session receipts
+          </p>
+          <ul className="mt-3 space-y-1.5">
+            {data.receipts.map((r) => (
+              <li key={r.name}>
+                <a
+                  href={`/api/receipt/${encodeURIComponent(r.name)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-[11px] text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground"
+                >
+                  {r.name}
+                </a>
+                <span className="ml-2 font-mono text-[11px] text-muted-foreground/70">
+                  {ago(r.mtime, data.now)} ago
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

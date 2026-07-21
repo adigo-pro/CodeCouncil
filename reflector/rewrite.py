@@ -45,6 +45,28 @@ def should_rewrite(outcomes: list[dict], n_graded_at_last_rewrite: int, force: b
     return force or graded - n_graded_at_last_rewrite >= min_new
 
 
+def _rule_stat_lines(outcomes: list[dict], version: int) -> list[str]:
+    """Per-rule stat lines for the CURRENT version only — the surgical view
+    ("R3: 0/2 accepted → drop") a whole-file STATS summary can't give.
+
+    Derived from reflector.report.build_rule_rows: this call only has
+    outcomes (no suggestions.ndjsonl — build_prompt stays a pure function of
+    its three args), so the "suggestions" side of that aggregation is empty
+    and its "suggested" count comes back 0; here "suggested" is instead the
+    total graded under that rule (accepted+rebutted+ignored) — the only
+    count this function's inputs can actually support."""
+    from .report import build_rule_rows  # same-loop import; lazy to avoid any cycle risk
+
+    rows = [r for r in build_rule_rows([], outcomes) if r["version"] == version]
+    lines = []
+    for r in rows:
+        rule_label = f"R{r['rule']}" if r["rule"] is not None else "R?"
+        suggested = r["accepted"] + r["rebutted"] + r["ignored"]
+        lines.append(f"{rule_label}: {suggested} suggested, {r['accepted']} accepted, "
+                     f"{r['rebutted']} rebutted, {r['ignored']} ignored")
+    return lines
+
+
 def build_prompt(current: str, version: int, outcomes: list[dict]) -> str:
     lines = []
     for o in outcomes:
@@ -53,14 +75,21 @@ def build_prompt(current: str, version: int, outcomes: list[dict]) -> str:
         lines.append(f"- [{o['outcome'].upper()}] {o.get('issue', '?')}"
                      + (f" — {o['evidence']}" if o.get("evidence") else ""))
     counts = {g: sum(1 for o in outcomes if o.get("outcome") == g) for g in GRADED}
+    rule_lines = _rule_stat_lines(outcomes, version)
+    rule_block = (
+        "\n\nPER-RULE STATS FOR THE CURRENT VERSION:\n" + "\n".join(rule_lines)
+        + "\nPrefer dropping or sharpening rules with rebuttals/ignores; "
+          "preserve rules with accepts."
+    ) if rule_lines else ""
     return (
         "TASK: REWRITE HEURISTICS\n\n"
         f"CURRENT FILE (version {version}):\n{current.strip()}\n\n"
         f"GRADED OUTCOMES OF SUGGESTIONS MADE UNDER THESE HEURISTICS:\n"
         + ("\n".join(lines) or "(none)")
         + f"\n\nSTATS: accepted={counts['accepted']} rebutted={counts['rebutted']} "
-        f"ignored={counts['ignored']}\n\n"
-        f"Produce version {version + 1} per your REWRITE protocol: output only the "
+        f"ignored={counts['ignored']}"
+        + rule_block
+        + f"\n\nProduce version {version + 1} per your REWRITE protocol: output only the "
         f"complete new file, first line exactly 'version: {version + 1}', max {MAX_LINES} lines."
     )
 

@@ -78,6 +78,14 @@ def grade_pending(cc: Path) -> int:
             "issue": row["suggestion"]["issue"],
             "heuristics_version": row.get("heuristics_version", 0),
             "file_touched": touched,
+            # Rule attribution: which heuristic (R1, R2, …) the critic cited
+            # as motivating this suggestion, copied straight from the
+            # suggestion row so every grade traces back to a rule. Only
+            # graded (accepted/rebutted/ignored) rows carry it — "missed"
+            # outcomes originate from a PASS row (no "suggestion" dict to
+            # copy from) and "undelivered" rows above are graded without
+            # ever having been judged, so both stay without a "rule" field.
+            "rule": row["suggestion"].get("rule"),
             **({"malformed": grade["malformed"]} if "malformed" in grade else {}),
         })
         appended_ids.add(row["id"])

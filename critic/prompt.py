@@ -40,6 +40,31 @@ def heuristics_version(heuristics: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def numbered_heuristics(text: str) -> str:
+    """Render each top-level `- ` bullet as `R1.`, `R2.`, … in bullet order,
+    so a suggestion's `"rule": <n>` can point back at the exact heuristic
+    that motivated it. Continuation lines (2-space indented) and any other
+    line (notably the `version: N` header) pass through untouched.
+
+    Numbering is POSITIONAL per version: R3 means "the 3rd top-level bullet
+    in THIS version's heuristics text". That's the only scope grades ever
+    compare within — a rewrite bumps the version, and outcomes are grouped
+    per (heuristics_version, rule), never across versions — so stability
+    within a version is all that's required. Tracking a rule's identity
+    across a rewrite (did R3 in v2 become R2 in v3?) is deliberately out of
+    scope here; nothing downstream needs it yet (YAGNI).
+    """
+    out = []
+    n = 0
+    for line in text.split("\n"):
+        if line.startswith("- "):
+            n += 1
+            out.append(f"R{n}. {line[2:]}")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def _render_knowledge(knowledge: str) -> list[str]:
     """The REPO KNOWLEDGE section — facts distilled from past rebuttals
     (core.knowledge, reflector/main.py's distill step) — rendered right after
@@ -76,7 +101,8 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
     parts = []
     if project:
         parts += [project.strip(), ""]
-    parts += [f"HEURISTICS (v{heuristics_version(heuristics)}):", heuristics.strip(), ""]
+    parts += [f"HEURISTICS (v{heuristics_version(heuristics)}):",
+             numbered_heuristics(heuristics.strip()), ""]
     parts += _render_knowledge(knowledge)
 
     parts.append("CODING AGENT'S RECENT REASONING:")
@@ -215,7 +241,8 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
     parts = []
     if project:
         parts += [project.strip(), ""]
-    parts += [f"HEURISTICS (v{heuristics_version(heuristics)}):", heuristics.strip(), ""]
+    parts += [f"HEURISTICS (v{heuristics_version(heuristics)}):",
+             numbered_heuristics(heuristics.strip()), ""]
     parts += _render_knowledge(knowledge)
     parts.append("TASK REVIEW — the coding agent has just declared this work finished.")
     parts.append("")
@@ -280,6 +307,7 @@ def parse_reply(raw: str) -> dict[str, Any]:
         try:
             obj = json.loads(text[start : end + 1])
             if isinstance(obj, dict) and obj.get("file") and obj.get("issue"):
+                rule = obj.get("rule")
                 return {
                     "verdict": "SUGGESTION",
                     "suggestion": {
@@ -288,6 +316,11 @@ def parse_reply(raw: str) -> dict[str, Any]:
                         "severity": obj.get("severity", "medium"),
                         "issue": obj["issue"],
                         "rationale": obj.get("rationale", ""),
+                        # "the heuristic (R1, R2, …) that most motivated this
+                        # finding" — kept only when it's a positive int;
+                        # anything else (missing, string, 0, negative) is
+                        # None so legacy replies without "rule" parse fine.
+                        "rule": rule if isinstance(rule, int) and not isinstance(rule, bool) and rule > 0 else None,
                     },
                 }
         except json.JSONDecodeError:

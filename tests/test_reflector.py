@@ -14,7 +14,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from reflector import judge, rewrite
-from reflector.report import build_rows, consistent
+from reflector.report import build_rows, build_rule_rows, consistent
 
 NOW = time.time()
 
@@ -23,11 +23,11 @@ def _iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def sugg(sid="s1", ts=None, version=1):
+def sugg(sid="s1", ts=None, version=1, rule=None):
     return {"id": sid, "ts": _iso(NOW - 400 if ts is None else ts), "verdict": "SUGGESTION",
             "heuristics_version": version,
             "suggestion": {"file": "a.py", "line": 3, "severity": "high",
-                           "issue": "bug", "rationale": "r"}}
+                           "issue": "bug", "rationale": "r", "rule": rule}}
 
 
 class TestGradePendingBoundedReads(unittest.TestCase):
@@ -145,6 +145,18 @@ class TestRewriteGuardrails(unittest.TestCase):
         self.assertIsNotNone(rewrite.validate("version: 2\n" + "- r\n" * 50, 2))
         self.assertIsNone(rewrite.validate("version: 2\n- keep flagging intent mismatches", 2))
 
+    def test_rewrite_prompt_includes_per_rule_stats(self):
+        current = "version: 3\n- rule one\n- rule two\n- rule three"
+        outcomes = [
+            {"outcome": "accepted", "issue": "x", "heuristics_version": 3, "rule": 3},
+            {"outcome": "rebutted", "issue": "y", "heuristics_version": 3, "rule": 3},
+        ]
+        text = rewrite.build_prompt(current, 3, outcomes)
+        self.assertIn("R3: ", text)
+        self.assertIn("2 suggested, 1 accepted, 1 rebutted", text)
+        self.assertIn("Prefer dropping or sharpening rules with rebuttals/ignores; "
+                      "preserve rules with accepts.", text)
+
     def test_rewrite_record_diffs_and_headline(self):
         old = "version: 1\n- keep this rule\n- drop this rule\n"
         new = "version: 2\n- keep this rule\n- brand new rule\n  with continuation\n"
@@ -240,6 +252,22 @@ class TestReport(unittest.TestCase):
                                         "heuristics_version": 3}])
         self.assertIsNone(rows[0]["acceptance"])
         self.assertEqual(rows[0]["missed"], 1)
+
+    def test_build_rule_rows_aggregates_per_version_rule(self):
+        suggestions = [sugg("a", version=1, rule=3), sugg("b", version=1, rule=3),
+                      sugg("c", version=1, rule=None)]
+        outcomes = [
+            {"suggestion_id": "a", "outcome": "accepted", "heuristics_version": 1, "rule": 3},
+            {"suggestion_id": "b", "outcome": "rebutted", "heuristics_version": 1, "rule": 3},
+            {"suggestion_id": "c", "outcome": "ignored", "heuristics_version": 1, "rule": None},
+        ]
+        rows = build_rule_rows(suggestions, outcomes)
+        r3 = next(r for r in rows if r["version"] == 1 and r["rule"] == 3)
+        self.assertEqual((r3["suggested"], r3["accepted"], r3["rebutted"], r3["ignored"]),
+                         (2, 1, 1, 0))
+        r_none = next(r for r in rows if r["version"] == 1 and r["rule"] is None)
+        self.assertEqual((r_none["suggested"], r_none["ignored"]), (1, 1))
+        self.assertEqual(rows, sorted(rows, key=lambda r: (r["version"], (r["rule"] is None, r["rule"]))))
 
 
 def _write_case(cases_dir: Path, name: str, expected: str, marker: str,
@@ -711,6 +739,82 @@ class TestGradePendingDistillsKnowledge(unittest.TestCase):
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0]["outcome"], "rebutted")
         self.assertFalse((self.cc / "knowledge.md").exists())
+
+
+class TestOutcomeRowsCarryRule(unittest.TestCase):
+    """Task 6: outcome rows copy "rule" from the suggestion being graded, on
+    both the explicit-rebuttal and model-judged paths — so every grade
+    traces back to the heuristic that caused it. "missed"/"undelivered"
+    outcomes never had a suggestion dict to copy from, so they stay without
+    a "rule" field entirely (not even null)."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name) / ".codecouncil"
+        self.cc.mkdir()
+        self.harvested_dir = Path(self.td.name) / "cases-harvested"
+        self.patcher = mock.patch("reflector.harvest.HARVESTED_DIR", self.harvested_dir)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def _write_suggestion(self, rule):
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
+            "id": "s1", "ts": _iso(NOW - 400), "verdict": "SUGGESTION",
+            "heuristics_version": 1,
+            "suggestion": {"file": "a.py", "line": 3, "severity": "high",
+                          "issue": "bug", "rationale": "r", "rule": rule},
+        }) + "\n", encoding="utf-8")
+        (self.cc / "delivered.json").write_text(
+            json.dumps({"s1": {"context": NOW - 300}}), encoding="utf-8")
+
+    def test_explicit_rebuttal_path_copies_rule(self):
+        import reflector.main as main_mod
+
+        self._write_suggestion(rule=2)
+        (self.cc / "observations.ndjsonl").write_text(json.dumps({
+            "ts": _iso(NOW - 250), "type": "reasoning",
+            "payload": {"text": "COUNCIL-REBUTTAL: not applicable here"}},
+        ) + "\n", encoding="utf-8")
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "rebutted")
+        self.assertEqual(outcomes[0]["rule"], 2)
+
+    def test_model_judged_path_copies_null_rule(self):
+        import reflector.main as main_mod
+
+        self._write_suggestion(rule=None)
+        stub = _make_stub(Path(self.td.name), ACCEPTED_GRADE_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "accepted")
+        self.assertIn("rule", outcomes[0])
+        self.assertIsNone(outcomes[0]["rule"])
+
+    def test_undelivered_outcome_has_no_rule_field(self):
+        import reflector.main as main_mod
+
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
+            "id": "s1", "ts": _iso(NOW - 1000), "verdict": "SUGGESTION",
+            "heuristics_version": 1,
+            "suggestion": {"file": "a.py", "line": 3, "severity": "high",
+                          "issue": "bug", "rationale": "r", "rule": 2},
+        }) + "\n", encoding="utf-8")
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "undelivered")
+        self.assertNotIn("rule", outcomes[0])
 
 
 class TestMissedGrading(unittest.TestCase):

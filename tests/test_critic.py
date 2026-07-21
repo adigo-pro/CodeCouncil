@@ -59,6 +59,18 @@ class TestParseReply(unittest.TestCase):
         v = prompt.parse_reply('{"severity": "high"}')
         self.assertEqual(v["verdict"], "PASS")
 
+    def test_parse_reply_keeps_valid_rule_defaults_null(self):
+        self.assertEqual(
+            prompt.parse_reply('{"file":"a.py","issue":"x","rule":3}')["suggestion"]["rule"], 3)
+        self.assertIsNone(
+            prompt.parse_reply('{"file":"a.py","issue":"x"}')["suggestion"]["rule"])
+        self.assertIsNone(
+            prompt.parse_reply('{"file":"a.py","issue":"x","rule":"nope"}')["suggestion"]["rule"])
+        self.assertIsNone(
+            prompt.parse_reply('{"file":"a.py","issue":"x","rule":0}')["suggestion"]["rule"])
+        self.assertIsNone(
+            prompt.parse_reply('{"file":"a.py","issue":"x","rule":-1}')["suggestion"]["rule"])
+
 
 class TestPrompt(unittest.TestCase):
     def _events(self):
@@ -104,6 +116,23 @@ class TestPrompt(unittest.TestCase):
 
     def test_version_default_zero(self):
         self.assertEqual(prompt.heuristics_version("no header"), 0)
+
+    def test_numbered_heuristics_renders_stable_indices(self):
+        out = prompt.numbered_heuristics("version: 3\n- first rule\n  cont\n- second")
+        self.assertIn("R1. first rule", out)
+        self.assertIn("R2. second", out)
+        self.assertIn("cont", out)
+        self.assertIn("version: 3", out)
+
+    def test_build_prompt_numbers_heuristics_bullets(self):
+        text = prompt.build_prompt(self._events(), None, "version: 1\n- first rule\n- second rule")
+        self.assertIn("R1. first rule", text)
+        self.assertIn("R2. second rule", text)
+
+    def test_build_task_review_numbers_heuristics_bullets(self):
+        text = prompt.build_task_review(self._events(), None, "version: 1\n- first rule\n- second rule")
+        self.assertIn("R1. first rule", text)
+        self.assertIn("R2. second rule", text)
 
     def test_verdict_history_rendered_with_instruction(self):
         history = [{"outcome": "rebutted", "file": "s.json", "line": None, "issue": "wrong dir"},

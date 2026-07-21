@@ -202,8 +202,17 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
             parts += [f"- {s}" for s in c["payload"].get("subjects", [])]
             parts.append(c["payload"].get("diff", "")[:6_000])
         parts.append("")
+    # touched-file contents (Task 11) render after the diff below, but as in
+    # build_prompt their size is reserved here — before the diff gets its
+    # budget — so a large touched-files section shrinks the diff's room
+    # rather than stacking unbudgeted on top of a full MAX_DIFF_CHARS diff.
+    touched_render = _render_touched_contents(
+        (latest_diff or {}).get("payload", {}).get("touched_contents", {}))
+    touched_len = sum(len(p) + 1 for p in touched_render)
+
     diff_budget = min(MAX_DIFF_CHARS,
-                      max(MIN_DIFF_CHARS, PROMPT_BUDGET_CHARS - sum(len(p) + 1 for p in parts)))
+                      max(MIN_DIFF_CHARS,
+                          PROMPT_BUDGET_CHARS - sum(len(p) + 1 for p in parts) - touched_len))
     parts.append("FINAL UNCOMMITTED DIFF:")
     if latest_diff and latest_diff["payload"].get("diff"):
         parts.append(latest_diff["payload"]["diff"][:diff_budget])
@@ -211,7 +220,7 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
         parts.append("(clean)")
     parts.append("")
 
-    parts += _render_touched_contents((latest_diff or {}).get("payload", {}).get("touched_contents", {}))
+    parts += touched_render
 
     parts.append(
         "Identify the agent's completion claims. Is any important claim UNSUPPORTED "

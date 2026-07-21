@@ -191,6 +191,23 @@ class TestPrompt(unittest.TestCase):
         self.assertIn("CURRENT CONTENTS OF CHANGED FILES:", text)
         self.assertIn("--- a.py ---", text)
 
+    def test_task_review_touched_contents_capped_and_diff_still_gets_floor(self):
+        # Mirrors test_touched_contents_capped_and_diff_still_gets_floor for
+        # build_task_review: a huge diff AND large touched_contents together
+        # must not stack unbudgeted — the diff still keeps its MIN_DIFF_CHARS
+        # floor and the touched section stays capped at TOUCHED_PROMPT_CHARS.
+        events = [{"type": "reasoning", "payload": {"kind": "text", "text": "All done."}}]
+        diff = {"type": "diff", "payload": {
+            "diff": "d" * 30_000,
+            "touched_contents": {"a.py": "a" * 10_000},
+        }}
+        text = prompt.build_task_review(events, diff, "version: 1")
+        self.assertLess(text.count("a"), prompt.TOUCHED_PROMPT_CHARS + 100)
+        self.assertGreaterEqual(text.count("d"), prompt.MIN_DIFF_CHARS)
+        self.assertLess(len(text), prompt.PROMPT_BUDGET_CHARS + prompt.MIN_DIFF_CHARS
+                        + prompt.TOUCHED_PROMPT_CHARS + 2_000)
+        self.assertIn("… [truncated]", text)
+
 
 class TestHeartbeatWithStub(unittest.TestCase):
     def setUp(self):

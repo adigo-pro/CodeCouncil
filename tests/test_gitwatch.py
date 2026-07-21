@@ -16,6 +16,9 @@ class TestUntrackedContents(unittest.TestCase):
         self.td = tempfile.TemporaryDirectory()
         self.repo = Path(self.td.name)
         subprocess.run(["git", "-C", str(self.repo), "init", "-q", "-b", "main"], check=True)
+        # CI runners have no global git identity; commits need a local one
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.email", "t@t"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.name", "t"], check=True)
 
     def tearDown(self):
         self.td.cleanup()
@@ -129,6 +132,9 @@ class TestTouchedContents(unittest.TestCase):
         self.td = tempfile.TemporaryDirectory()
         self.repo = Path(self.td.name)
         subprocess.run(["git", "-C", str(self.repo), "init", "-q", "-b", "main"], check=True)
+        # CI runners have no global git identity; commits need a local one
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.email", "t@t"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.name", "t"], check=True)
 
     def tearDown(self):
         self.td.cleanup()

@@ -144,6 +144,53 @@ class TestPrompt(unittest.TestCase):
         self.assertIn("… [truncated]", text)
         self.assertIn("x" * 100, text)  # reasoning survived; diff took the cut
 
+    def test_touched_contents_rendered(self):
+        diff = {"type": "diff", "payload": {
+            "diff": "+y = 2", "untracked": [],
+            "touched_contents": {"a.py": "x = 1\ny = 2\n"},
+        }}
+        text = prompt.build_prompt(self._events(), diff, "version: 1")
+        self.assertIn("CURRENT CONTENTS OF CHANGED FILES:", text)
+        self.assertIn("--- a.py ---", text)
+        self.assertIn("x = 1", text)
+
+    def test_touched_contents_absent_when_no_touched(self):
+        diff = {"type": "diff", "payload": {"diff": "+y = 2", "untracked": []}}
+        text = prompt.build_prompt(self._events(), diff, "version: 1")
+        self.assertNotIn("CURRENT CONTENTS OF CHANGED FILES:", text)
+
+    def test_touched_contents_come_after_new_files(self):
+        diff = {"type": "diff", "payload": {
+            "diff": "", "untracked": ["new.py"],
+            "untracked_contents": {"new.py": "def g(): pass"},
+            "touched_contents": {"a.py": "x = 1\n"},
+        }}
+        text = prompt.build_prompt(self._events(), diff, "version: 1")
+        self.assertLess(text.index("NEW FILES"), text.index("CURRENT CONTENTS OF CHANGED FILES"))
+
+    def test_touched_contents_capped_and_diff_still_gets_floor(self):
+        events = [{"type": "reasoning", "payload": {"kind": "text", "text": "x" * 1500}}
+                  for _ in range(8)]
+        diff = {"type": "diff", "payload": {
+            "diff": "d" * 30_000, "untracked": [],
+            "touched_contents": {"a.py": "a" * 10_000},
+        }}
+        text = prompt.build_prompt(events, diff, "version: 1")
+        # touched section capped well under its raw 10k size
+        self.assertLess(text.count("a"), prompt.TOUCHED_PROMPT_CHARS + 100)
+        # diff still present, still hit its own truncation marker, floor respected
+        self.assertGreaterEqual(text.count("d"), prompt.MIN_DIFF_CHARS)
+        self.assertIn("… [truncated]", text)
+
+    def test_touched_contents_rendered_in_task_review(self):
+        events = [{"type": "reasoning", "payload": {"kind": "text", "text": "All done."}}]
+        diff = {"type": "diff", "payload": {
+            "diff": "+y = 2", "touched_contents": {"a.py": "x = 1\ny = 2\n"},
+        }}
+        text = prompt.build_task_review(events, diff, "version: 1")
+        self.assertIn("CURRENT CONTENTS OF CHANGED FILES:", text)
+        self.assertIn("--- a.py ---", text)
+
 
 class TestHeartbeatWithStub(unittest.TestCase):
     def setUp(self):

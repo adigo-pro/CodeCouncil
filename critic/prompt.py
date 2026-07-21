@@ -11,8 +11,28 @@ MAX_TOOL_EVENTS = 15
 MAX_DIFF_CHARS = 12_000
 PROMPT_BUDGET_CHARS = 16_000
 MIN_DIFF_CHARS = 1_000
+TOUCHED_PROMPT_CHARS = 5_000
 
 PASS = "PASS"
+
+
+def _render_touched_contents(touched_contents: dict[str, str]) -> list[str]:
+    """Render diff-touched files' current contents (Task 11) so the critic
+    judges hunks against the whole file, not just the -U8 excerpt — the top
+    false-positive source is flagging something the rest of the file already
+    handles. Capped at TOUCHED_PROMPT_CHARS as a fixed prompt-level ceiling
+    (files are already individually capped upstream in observer/gitwatch.py);
+    this is the "acceptable simplification" from the design brief in place of
+    dynamically shrinking this section under budget pressure."""
+    if not touched_contents:
+        return []
+    body = []
+    for path, text in sorted(touched_contents.items()):
+        body += [f"--- {path} ---", text.rstrip()]
+    block = "\n".join(body)
+    if len(block) > TOUCHED_PROMPT_CHARS:
+        block = block[:TOUCHED_PROMPT_CHARS] + "\n… [truncated]"
+    return ["CURRENT CONTENTS OF CHANGED FILES:", block, ""]
 
 
 def heuristics_version(heuristics: str) -> int:
@@ -52,9 +72,20 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
         parts.append(f"(+{omitted} earlier events this batch omitted)")
     parts.append("")
 
+    # touched-file contents (Task 11) render after the diff/NEW FILES sections
+    # below, but their size is reserved here — before the diff gets its
+    # budget — so a large touched-files section shrinks the diff's room
+    # rather than blowing the overall prompt budget. touched_contents is
+    # fixed-capped (TOUCHED_PROMPT_CHARS) rather than dynamically trimmed;
+    # the diff still gets whatever's left, down to its own floor.
+    touched_render = _render_touched_contents(
+        (latest_diff or {}).get("payload", {}).get("touched_contents", {}))
+    touched_len = sum(len(p) + 1 for p in touched_render)
+
     # diff gets whatever budget the other sections left, floor MIN_DIFF_CHARS
     diff_budget = min(MAX_DIFF_CHARS,
-                      max(MIN_DIFF_CHARS, PROMPT_BUDGET_CHARS - sum(len(p) + 1 for p in parts)))
+                      max(MIN_DIFF_CHARS,
+                          PROMPT_BUDGET_CHARS - sum(len(p) + 1 for p in parts) - touched_len))
     parts.append("CURRENT GIT DIFF:")
     if latest_diff and (latest_diff["payload"].get("diff") or latest_diff["payload"].get("untracked")):
         diff = latest_diff["payload"].get("diff", "")
@@ -74,6 +105,8 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
         for path, text in sorted(contents.items()):
             parts += [f"--- {path} ---", text.rstrip()]
         parts.append("")
+
+    parts += touched_render
 
     commits = [e for e in events if e["type"] == "commit"]
     if commits:
@@ -177,6 +210,9 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
     else:
         parts.append("(clean)")
     parts.append("")
+
+    parts += _render_touched_contents((latest_diff or {}).get("payload", {}).get("touched_contents", {}))
+
     parts.append(
         "Identify the agent's completion claims. Is any important claim UNSUPPORTED "
         "by the diffs above — something stated as done, handled, or tested that the "

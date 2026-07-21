@@ -11,6 +11,8 @@ from core.redact import redact
 DIFF_MAX_CHARS = 50_000
 NEW_FILE_MAX_CHARS = 4_000
 NEW_FILES_TOTAL_CHARS = 20_000
+TOUCHED_FILE_MAX_CHARS = 6_000
+TOUCHED_TOTAL_CHARS = 24_000
 EXCLUDED_PREFIXES = (".codecouncil/", ".claude/", ".git/")
 
 
@@ -48,6 +50,54 @@ def _read_untracked(repo: Path, paths: list[str]) -> dict[str, str]:
     return out
 
 
+def _touched_paths(diff: str) -> list[str]:
+    """Paths modified by the diff, parsed from `+++ b/<path>` headers. Skips
+    deletions (target is /dev/null). Parsed from the raw diff, before
+    redaction/truncation, so files late in a very large diff still get
+    detected even though their hunks may end up cut from the rendered diff."""
+    paths: list[str] = []
+    for line in diff.splitlines():
+        if not line.startswith("+++ "):
+            continue
+        target = line[4:]
+        if target.startswith("b/"):
+            target = target[2:]
+        if target != "/dev/null" and target not in paths:
+            paths.append(target)
+    return paths
+
+
+def _read_touched(repo: Path, paths: list[str], exclude: set[str]) -> dict[str, str]:
+    """Current (post-edit) contents of diff-touched files, capped, so the critic
+    judges hunks against the whole file rather than an -U8 excerpt — the top
+    false-positive source is flagging something the surrounding code already
+    handles. Mirrors _read_untracked's caps/exclusion/redaction pattern.
+
+    `exclude` is untracked_contents' keys: untracked files can't actually
+    appear in `git diff` output (diff compares against HEAD, and an untracked
+    file has no HEAD blob to diff against), so this can never trigger in
+    practice — it's defense-in-depth against that invariant changing, not a
+    functional filter today.
+    """
+    out: dict[str, str] = {}
+    total = 0
+    for p in paths:
+        if p in exclude or p.startswith(EXCLUDED_PREFIXES) or total >= TOUCHED_TOTAL_CHARS:
+            continue
+        try:
+            data = (repo / p).read_bytes()[: TOUCHED_FILE_MAX_CHARS * 2]
+        except OSError:
+            continue
+        if b"\0" in data:
+            continue  # binary
+        text = redact(data.decode("utf-8", errors="replace"))
+        if len(text) > TOUCHED_FILE_MAX_CHARS:
+            text = text[:TOUCHED_FILE_MAX_CHARS] + "\n… [truncated]"
+        out[p] = text
+        total += len(text)
+    return out
+
+
 def capture(repo: Path) -> dict:
     """Snapshot uncommitted work. Falls back gracefully in a repo with no commits."""
     # -U8: enough surrounding source that the critic judges hunks in context
@@ -56,6 +106,8 @@ def capture(repo: Path) -> dict:
     untracked = [
         p for p in _git(repo, "ls-files", "--others", "--exclude-standard").splitlines() if p
     ]
+    untracked_contents = _read_untracked(repo, untracked)
+    touched_contents = _read_touched(repo, _touched_paths(diff), set(untracked_contents))
     diff = redact(diff)
     if len(diff) > DIFF_MAX_CHARS:
         diff = diff[:DIFF_MAX_CHARS] + f"\n… [diff truncated, {len(diff)} chars total]"
@@ -63,7 +115,8 @@ def capture(repo: Path) -> dict:
         "diff": diff,
         "stat": stat.strip(),
         "untracked": untracked,
-        "untracked_contents": _read_untracked(repo, untracked),
+        "untracked_contents": untracked_contents,
+        "touched_contents": touched_contents,
     }
 
 
@@ -90,6 +143,16 @@ def fingerprint(snapshot: dict) -> str:
     h.update(snapshot["diff"].encode("utf-8", errors="replace"))
     h.update("\0".join(snapshot["untracked"]).encode("utf-8", errors="replace"))
     for path, text in sorted(snapshot.get("untracked_contents", {}).items()):
+        h.update(path.encode("utf-8", errors="replace"))
+        h.update(text.encode("utf-8", errors="replace"))
+    # touched_contents mirrors files the diff already touched, so its contents
+    # move in lockstep with snapshot["diff"] (already hashed above) — a file's
+    # touched_contents can't change without its diff hunk changing too, so
+    # hashing it here adds no extra fingerprint churn / no extra diff events.
+    # Included anyway for consistency with untracked_contents and as
+    # defense-in-depth (e.g. against future caps/redaction changes that could
+    # shift touched_contents independent of the rendered diff text).
+    for path, text in sorted(snapshot.get("touched_contents", {}).items()):
         h.update(path.encode("utf-8", errors="replace"))
         h.update(text.encode("utf-8", errors="replace"))
     return h.hexdigest()

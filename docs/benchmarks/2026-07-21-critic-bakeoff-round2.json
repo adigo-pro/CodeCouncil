@@ -1,0 +1,261 @@
+{
+ "cases": [
+  "clean-rename",
+  "clean-slugify",
+  "clean-truncate",
+  "docstring-trap",
+  "latent-config",
+  "latent-drift",
+  "planted-divide"
+ ],
+ "models": {
+  "nvidia-nim/mistralai/mistral-large": {
+   "score": null,
+   "note": "PONG failed \u2014 skipped"
+  },
+  "nvidia-nim/meta/llama-4-maverick-17b-128e-instruct": {
+   "score": null,
+   "note": "PONG failed \u2014 skipped"
+  },
+  "nvidia-nim/mistralai/codestral-22b-instruct-v0.1": {
+   "score": null,
+   "note": "PONG failed \u2014 skipped"
+  },
+  "openrouter/openai/gpt-5-mini": {
+   "score": 0.714,
+   "correct": 5,
+   "malformed": 0,
+   "errors": 0,
+   "mean_s": 10.5,
+   "max_s": 16.5,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "SUGGESTION",
+     "ok": false,
+     "s": 15.9
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 6.5
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "SUGGESTION",
+     "ok": false,
+     "s": 10.1
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 9.9
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 7.6
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 16.5
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 7.2
+    }
+   ]
+  },
+  "openrouter/openai/gpt-oss-120b": {
+   "score": 0.714,
+   "correct": 5,
+   "malformed": 1,
+   "errors": 0,
+   "mean_s": 12.5,
+   "max_s": 42.3,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "SUGGESTION",
+     "ok": false,
+     "s": 42.3
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 5.3
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 23.4
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 3.8
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 1.6
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 6.9
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 4.2
+    }
+   ]
+  },
+  "openrouter/moonshotai/kimi-k2.6": {
+   "score": 0.714,
+   "correct": 5,
+   "malformed": 2,
+   "errors": 0,
+   "mean_s": 31.9,
+   "max_s": 62.1,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 10.0
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 36.1
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "SUGGESTION",
+     "ok": false,
+     "s": 39.0
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 44.4
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 62.1
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 11.2
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 20.6
+    }
+   ]
+  },
+  "openrouter/qwen/qwen3.5-122b-a10b": {
+   "score": 0.571,
+   "correct": 4,
+   "malformed": 0,
+   "errors": 0,
+   "mean_s": 6.4,
+   "max_s": 9.9,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 4.3
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 4.4
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "SUGGESTION",
+     "ok": false,
+     "s": 8.4
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 6.6
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 8.5
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 9.9
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 2.6
+    }
+   ]
+  }
+ }
+}

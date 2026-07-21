@@ -26,8 +26,9 @@ def _iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def suggestion(sid="s1", severity="high", ts=None, file="a.py", line=3, session=None):
-    return {
+def suggestion(sid="s1", severity="high", ts=None, file="a.py", line=3, session=None,
+              council=None, verification=None):
+    row = {
         "id": sid,
         "ts": _iso(NOW if ts is None else ts),
         "beat": 1,
@@ -36,6 +37,11 @@ def suggestion(sid="s1", severity="high", ts=None, file="a.py", line=3, session=
         "suggestion": {"file": file, "line": line, "severity": severity,
                        "issue": "bug here", "rationale": "because"},
     }
+    if council is not None:
+        row["council"] = council
+    if verification is not None:
+        row["verification"] = verification
+    return row
 
 
 def post_tool_use(cwd="/tmp", session_id=None):
@@ -343,6 +349,83 @@ class TestSessionScopedDelivery(unittest.TestCase):
 
     def test_tagged_row_delivered_when_event_lacks_session_id_block(self):
         rows = [suggestion(session="sess-A")]
+        out = decide(stop_event(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+
+class TestCouncilProberOnlyGate(unittest.TestCase):
+    """Task 3: a finding whose council.agreement is "prober-only" came from
+    the recall-prober alone — the precision anchor PASSed it. Per the
+    measured false-positive profile such findings must reach the coding
+    agent ONLY when a repro has actually verified them. "both"/"primary-only"
+    rows (and rows with no "council" key at all) are unaffected."""
+
+    # -- context channel (PostToolUse) --
+
+    def test_prober_only_verified_delivers_context(self):
+        rows = [suggestion(council={"agreement": "prober-only"},
+                           verification={"status": "verified"})]
+        out = decide(post_tool_use(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    def test_prober_only_inconclusive_silent_context(self):
+        rows = [suggestion(council={"agreement": "prober-only"},
+                           verification={"status": "inconclusive"})]
+        out = decide(post_tool_use(), rows, {}, NOW)
+        self.assertIsNone(out)
+
+    def test_prober_only_no_verification_key_silent_context(self):
+        rows = [suggestion(council={"agreement": "prober-only"})]
+        out = decide(post_tool_use(), rows, {}, NOW)
+        self.assertIsNone(out)
+
+    def test_agreement_both_delivers_without_verification_context(self):
+        rows = [suggestion(council={"agreement": "both"})]
+        out = decide(post_tool_use(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    def test_agreement_primary_only_delivers_without_verification_context(self):
+        rows = [suggestion(council={"agreement": "primary-only"})]
+        out = decide(post_tool_use(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    def test_no_council_key_unchanged_context(self):
+        rows = [suggestion()]
+        out = decide(post_tool_use(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    # -- block channel (Stop) --
+
+    def test_prober_only_verified_delivers_block(self):
+        rows = [suggestion(council={"agreement": "prober-only"},
+                           verification={"status": "verified"})]
+        out = decide(stop_event(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+        self.assertEqual(out["decision"], "block")
+
+    def test_prober_only_inconclusive_silent_block(self):
+        rows = [suggestion(council={"agreement": "prober-only"},
+                           verification={"status": "inconclusive"})]
+        out = decide(stop_event(), rows, {}, NOW)
+        self.assertIsNone(out)
+
+    def test_prober_only_no_verification_key_silent_block(self):
+        rows = [suggestion(council={"agreement": "prober-only"})]
+        out = decide(stop_event(), rows, {}, NOW)
+        self.assertIsNone(out)
+
+    def test_agreement_both_delivers_without_verification_block(self):
+        rows = [suggestion(council={"agreement": "both"})]
+        out = decide(stop_event(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    def test_agreement_primary_only_delivers_without_verification_block(self):
+        rows = [suggestion(council={"agreement": "primary-only"})]
+        out = decide(stop_event(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    def test_no_council_key_unchanged_block(self):
+        rows = [suggestion()]
         out = decide(stop_event(), rows, {}, NOW)
         self.assertIsNotNone(out)
 

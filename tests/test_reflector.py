@@ -949,6 +949,98 @@ class TestOutcomeRowsCarryRule(HarvestIsolatedTestCase):
         self.assertNotIn("failure_mode", outcomes[0])
 
 
+class TestOutcomeRowsCarryCouncilAgreement(HarvestIsolatedTestCase):
+    """Task 3: outcome rows copy "council_agreement" from the suggestion's
+    council.agreement, on both the explicit-rebuttal and model-judged paths
+    — so acceptance-per-agreement-class can be computed later. Unlike
+    "rule"/"failure_mode" (which always carry a key, even null), this key is
+    included ONLY when the suggestion actually has a "council" dict — a
+    suggestion with no council key (single-model flow, today's default)
+    must produce an outcome row with no "council_agreement" key at all.
+    Never present on missed/undelivered rows either."""
+
+    def setUp(self):
+        super().setUp()
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name) / ".codecouncil"
+        self.cc.mkdir()
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def _write_suggestion(self, council=None):
+        row = {
+            "id": "s1", "ts": _iso(NOW - 400), "verdict": "SUGGESTION",
+            "heuristics_version": 1,
+            "suggestion": {"file": "a.py", "line": 3, "severity": "high",
+                          "issue": "bug", "rationale": "r"},
+        }
+        if council is not None:
+            row["council"] = council
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+        (self.cc / "delivered.json").write_text(
+            json.dumps({"s1": {"context": NOW - 300}}), encoding="utf-8")
+
+    def test_explicit_rebuttal_path_copies_council_agreement(self):
+        import reflector.main as main_mod
+
+        self._write_suggestion(council={"agreement": "prober-only", "prober_verdict": "SUGGESTION"})
+        (self.cc / "observations.ndjsonl").write_text(json.dumps({
+            "ts": _iso(NOW - 250), "type": "reasoning",
+            "payload": {"text": "COUNCIL-REBUTTAL: not applicable here"}},
+        ) + "\n", encoding="utf-8")
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "rebutted")
+        self.assertEqual(outcomes[0]["council_agreement"], "prober-only")
+
+    def test_model_judged_path_copies_council_agreement(self):
+        import reflector.main as main_mod
+
+        self._write_suggestion(council={"agreement": "both", "prober_verdict": "SUGGESTION"})
+        stub = _make_stub(Path(self.td.name), ACCEPTED_GRADE_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "accepted")
+        self.assertEqual(outcomes[0]["council_agreement"], "both")
+
+    def test_no_council_key_omits_council_agreement_field(self):
+        import reflector.main as main_mod
+
+        self._write_suggestion(council=None)
+        stub = _make_stub(Path(self.td.name), ACCEPTED_GRADE_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "accepted")
+        self.assertNotIn("council_agreement", outcomes[0])
+
+    def test_undelivered_outcome_has_no_council_agreement_field(self):
+        import reflector.main as main_mod
+
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
+            "id": "s1", "ts": _iso(NOW - 1000), "verdict": "SUGGESTION",
+            "heuristics_version": 1,
+            "suggestion": {"file": "a.py", "line": 3, "severity": "high",
+                          "issue": "bug", "rationale": "r"},
+            "council": {"agreement": "prober-only", "prober_verdict": "SUGGESTION"},
+        }) + "\n", encoding="utf-8")
+        main_mod.grade_pending(self.cc)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outcomes[0]["outcome"], "undelivered")
+        self.assertNotIn("council_agreement", outcomes[0])
+
+
 class TestMissedGrading(HarvestIsolatedTestCase):
     """Task 3: grade_pending must also detect PASS verdicts later contradicted
     by a fix commit (reflector.misses), grade them 'missed' with no model

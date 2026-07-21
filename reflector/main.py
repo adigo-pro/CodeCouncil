@@ -91,6 +91,16 @@ def grade_pending(cc: Path) -> int:
             # "suggestion" dict to copy from; missed/undelivered never gain
             # this field.
             "failure_mode": row["suggestion"].get("failure_mode"),
+            # Council-agreement attribution: which council mode class
+            # (both/primary-only/prober-only) produced this suggestion,
+            # copied straight from the suggestion row so acceptance-per-
+            # agreement-class can be computed later. Unlike "rule"/
+            # "failure_mode" above, this key is included only when the
+            # suggestion actually carries a "council" dict — most
+            # suggestions (single-model flow) have none, and grafting a
+            # None-valued key onto every one of them would be noise.
+            **({"council_agreement": row["council"]["agreement"]}
+               if "council" in row and "agreement" in (row.get("council") or {}) else {}),
             **({"malformed": grade["malformed"]} if "malformed" in grade else {}),
         })
         appended_ids.add(row["id"])

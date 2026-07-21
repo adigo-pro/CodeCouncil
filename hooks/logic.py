@@ -59,6 +59,12 @@ def _pending(suggestions: list[dict], ledger: dict, channel: str,
             and not ledger_mod.delivered(ledger, row["id"], channel)
             # findings the critic itself refuted during verification never ship
             and (row.get("verification") or {}).get("status") != "refuted"
+            # the anchor's veto is overridden only by execution proof: a
+            # prober-only finding (precision anchor PASSed, only the
+            # recall-prober caught it) ships only when a repro actually
+            # verified it. Absent "council" key -> unchanged behavior.
+            and ((row.get("council") or {}).get("agreement") != "prober-only"
+                 or (row.get("verification") or {}).get("status") == "verified")
             and _session_ok(row, hook_session_id)
         ):
             out.append(row)

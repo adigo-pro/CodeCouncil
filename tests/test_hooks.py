@@ -24,23 +24,30 @@ def _iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def suggestion(sid="s1", severity="high", ts=None, file="a.py", line=3):
+def suggestion(sid="s1", severity="high", ts=None, file="a.py", line=3, session=None):
     return {
         "id": sid,
         "ts": _iso(NOW if ts is None else ts),
         "beat": 1,
         "verdict": "SUGGESTION",
+        "session": session,
         "suggestion": {"file": file, "line": line, "severity": severity,
                        "issue": "bug here", "rationale": "because"},
     }
 
 
-def post_tool_use(cwd="/tmp"):
-    return {"hook_event_name": "PostToolUse", "cwd": cwd, "tool_name": "Edit"}
+def post_tool_use(cwd="/tmp", session_id=None):
+    ev = {"hook_event_name": "PostToolUse", "cwd": cwd, "tool_name": "Edit"}
+    if session_id is not None:
+        ev["session_id"] = session_id
+    return ev
 
 
-def stop_event(cwd="/tmp", active=False):
-    return {"hook_event_name": "Stop", "cwd": cwd, "stop_hook_active": active}
+def stop_event(cwd="/tmp", active=False, session_id=None):
+    ev = {"hook_event_name": "Stop", "cwd": cwd, "stop_hook_active": active}
+    if session_id is not None:
+        ev["session_id"] = session_id
+    return ev
 
 
 class TestFailOpen(unittest.TestCase):
@@ -160,6 +167,55 @@ class TestDecideStop(unittest.TestCase):
         ledger = {}
         decide(post_tool_use(), rows, ledger, NOW)
         self.assertIsNotNone(decide(stop_event(), rows, ledger, NOW))
+
+
+class TestSessionScopedDelivery(unittest.TestCase):
+    """Task 2: a finding tagged with the session that produced it must not
+    leak into an unrelated session's context/block channel."""
+
+    # -- PostToolUse / context channel --
+
+    def test_matching_session_delivered_context(self):
+        rows = [suggestion(session="sess-A")]
+        out = decide(post_tool_use(session_id="sess-A"), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    def test_mismatched_session_skipped_context(self):
+        rows = [suggestion(session="sess-A")]
+        out = decide(post_tool_use(session_id="sess-B"), rows, {}, NOW)
+        self.assertIsNone(out)
+
+    def test_repo_wide_delivered_regardless_of_session_context(self):
+        rows = [suggestion()]  # no session tag: e.g. a task review
+        out = decide(post_tool_use(session_id="sess-B"), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    def test_tagged_row_delivered_when_event_lacks_session_id_context(self):
+        rows = [suggestion(session="sess-A")]
+        out = decide(post_tool_use(), rows, {}, NOW)  # hook event has no session_id
+        self.assertIsNotNone(out)
+
+    # -- Stop / block channel --
+
+    def test_matching_session_delivered_block(self):
+        rows = [suggestion(session="sess-A")]
+        out = decide(stop_event(session_id="sess-A"), rows, {}, NOW)
+        self.assertEqual(out["decision"], "block")
+
+    def test_mismatched_session_skipped_block(self):
+        rows = [suggestion(session="sess-A")]
+        out = decide(stop_event(session_id="sess-B"), rows, {}, NOW)
+        self.assertIsNone(out)
+
+    def test_repo_wide_delivered_regardless_of_session_block(self):
+        rows = [suggestion()]
+        out = decide(stop_event(session_id="sess-B"), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+    def test_tagged_row_delivered_when_event_lacks_session_id_block(self):
+        rows = [suggestion(session="sess-A")]
+        out = decide(stop_event(), rows, {}, NOW)
+        self.assertIsNotNone(out)
 
 
 class TestInstall(unittest.TestCase):

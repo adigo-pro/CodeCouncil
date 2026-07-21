@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import Counter
 from pathlib import Path
 
 from core.store import read_rows, read_tail_rows, wait_for
@@ -110,6 +111,15 @@ def normalize_file(repo: Path | None, file: str) -> str:
     return file
 
 
+def majority_session(events: list[dict]) -> str | None:
+    """The dominant session id behind a judged batch, so a finding tags back to
+    the session whose work produced it (diff/commit events carry no session)."""
+    sessions = [e.get("session") for e in events if e.get("session")]
+    if not sessions:
+        return None
+    return Counter(sessions).most_common(1)[0][0]
+
+
 def judge_batch(events: list[dict], ctx: dict) -> None:
     """One model judgment over a batch. Runs on the scheduler's worker thread;
     sole writer of the suggestions file."""
@@ -123,6 +133,7 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         "id": uuid.uuid4().hex[:12],
         "ts": ts,
         "beat": beat,
+        "session": majority_session(events),
         "heuristics_version": prompt.heuristics_version(heuristics),
         "n_events": len(events),
         "prompt_chars": len(text),

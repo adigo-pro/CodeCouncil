@@ -32,8 +32,22 @@ def _age_ok(row: dict, now: float) -> bool:
     return 0 <= now - ts <= TTL_SECONDS
 
 
+def _session_ok(row: dict, hook_session_id: str | None) -> bool:
+    """A suggestion tagged with its source session must not leak into an
+    unrelated session (dogfood-observed bug: reviewer session got implementer
+    findings). No tag -> repo-wide (task reviews). A hook event missing
+    session_id delivers anyway: never silently drop a finding over a missing
+    field."""
+    row_session = row.get("session")
+    if not row_session:
+        return True
+    if not hook_session_id:
+        return True
+    return row_session == hook_session_id
+
+
 def _pending(suggestions: list[dict], ledger: dict, channel: str,
-             severities: set[str], now: float) -> list[dict]:
+             severities: set[str], now: float, hook_session_id: str | None) -> list[dict]:
     out = []
     for row in suggestions:
         s = row.get("suggestion") or {}
@@ -45,6 +59,7 @@ def _pending(suggestions: list[dict], ledger: dict, channel: str,
             and not ledger_mod.delivered(ledger, row["id"], channel)
             # findings the critic itself refuted during verification never ship
             and (row.get("verification") or {}).get("status") != "refuted"
+            and _session_ok(row, hook_session_id)
         ):
             out.append(row)
     return out
@@ -65,11 +80,12 @@ def _describe(row: dict) -> str:
 def decide(event: dict, suggestions: list[dict], ledger: dict, now: float) -> dict | None:
     """Returns hook output JSON (or None for silence). May mark the ledger."""
     hook = event.get("hook_event_name")
+    hook_session_id = event.get("session_id")
 
     # session start delivers like an edit does: findings that landed between
     # sessions reach the next session immediately instead of expiring
     if hook in ("PostToolUse", "UserPromptSubmit"):
-        pending = _pending(suggestions, ledger, "context", CONTEXT_SEVERITIES, now)
+        pending = _pending(suggestions, ledger, "context", CONTEXT_SEVERITIES, now, hook_session_id)
         if not pending:
             return None
         shown = pending[:MAX_CONTEXT_ITEMS]
@@ -91,7 +107,7 @@ def decide(event: dict, suggestions: list[dict], ledger: dict, now: float) -> di
     if hook == "Stop":
         if event.get("stop_hook_active"):
             return None
-        pending = _pending(suggestions, ledger, "block", BLOCK_SEVERITIES, now)
+        pending = _pending(suggestions, ledger, "block", BLOCK_SEVERITIES, now, hook_session_id)
         if not pending:
             return None
         row = pending[0]  # one interruption at a time; the rest wait for the next Stop

@@ -376,6 +376,66 @@ class TestSchedulerAsync(unittest.TestCase):
 
 
 
+class TestSessionTagging(unittest.TestCase):
+    """Task 2: findings tag back to the session that produced them, so hooks
+    can scope delivery instead of broadcasting every finding to every session."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name)
+        self.obs = self.cc / "observations.ndjsonl"
+        self.suggestions = self.cc / "suggestions.ndjsonl"
+        self.heuristics = self.cc / "heuristics.md"
+        self.stub = self.cc / "stub.sh"
+        self.ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
+                    "persona": "", "project": "", "repo": self.cc, "verify": False}
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def _set_stub(self, reply: str):
+        self.stub.write_text(f"#!/bin/sh\necho '{reply}'\n")
+        self.stub.chmod(self.stub.stat().st_mode | stat.S_IEXEC)
+        os.environ["CRITIC_CMD"] = str(self.stub)
+
+    def _rows(self):
+        return [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+
+    def test_majority_session_tags_record(self):
+        from critic.main import judge_batch
+        self._set_stub("PASS")
+        events = [
+            {"type": "reasoning", "session": "sess-A", "payload": {"kind": "text", "text": "a"}},
+            {"type": "tool_call", "session": "sess-A", "payload": {"tool": "Edit", "input": {"file_path": "x.py"}}},
+            {"type": "tool_call", "session": "sess-B", "payload": {"tool": "Edit", "input": {"file_path": "y.py"}}},
+            {"type": "diff", "session": None, "payload": {"diff": "+x", "stat": "", "untracked": []}},
+        ]
+        judge_batch(events, {**self.ctx, "beat": 1, "ts": "t"})
+        self.assertEqual(self._rows()[0]["session"], "sess-A")
+
+    def test_no_session_events_tags_none(self):
+        from critic.main import judge_batch
+        self._set_stub("PASS")
+        events = [{"type": "diff", "session": None,
+                   "payload": {"diff": "+x", "stat": "", "untracked": []}}]
+        judge_batch(events, {**self.ctx, "beat": 1, "ts": "t"})
+        row = self._rows()[0]
+        self.assertIn("session", row)
+        self.assertIsNone(row["session"])
+
+    def test_task_review_has_no_session_tag(self):
+        from critic.main import task_review
+        self._set_stub("PASS")
+        self.obs.write_text(json.dumps({
+            "ts": "2026-01-01T00:00:00+00:00", "beat": 1, "type": "reasoning",
+            "session": "sess-A", "payload": {"kind": "text", "text": "done"}}) + "\n")
+        since = 0.0
+        task_review(self.obs, {**self.ctx, "beat": 1, "ts": "t"}, since_epoch=since)
+        row = self._rows()[0]
+        self.assertNotIn("session", row)
+
+
 class TestPromptAuditCap(unittest.TestCase):
     def test_save_prompt_prunes_beyond_cap(self):
         from critic import main as cmain

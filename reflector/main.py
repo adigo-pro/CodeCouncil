@@ -76,7 +76,11 @@ def grade_pending(cc: Path) -> int:
         })
         print(f"reflector: {row['id']} → {grade['outcome']}"
               + (f" ({grade['evidence']})" if grade.get("evidence") else ""))
-        case_name = harvest.maybe_harvest(cc, {**row, "file_touched": touched}, grade["outcome"])
+        try:
+            case_name = harvest.maybe_harvest(cc, {**row, "file_touched": touched}, grade["outcome"])
+        except Exception as e:  # daemons never die: harvesting is best-effort, never fatal
+            print(f"reflector: harvest failed for {row['id']} ({e}) — continuing")
+            case_name = None
         if case_name:
             print(f"reflector: harvested eval case {case_name}")
 

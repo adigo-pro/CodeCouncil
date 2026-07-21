@@ -590,6 +590,25 @@ class TestGradePendingHarvestsCases(unittest.TestCase):
         self.assertTrue(case_path.exists())
         self.assertEqual(json.loads(case_path.read_text())["expected"], "pass")
 
+    def test_harvest_failure_does_not_kill_grade_pending(self):
+        """Daemons never die on unexpected errors — a broken harvest.maybe_harvest
+        (e.g. an OSError writing evals/cases-harvested/) must not take down
+        grade_pending; the outcome row it already appended must survive."""
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), ACCEPTED_GRADE_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        with mock.patch("reflector.main.harvest.maybe_harvest",
+                        side_effect=OSError("disk full")):
+            n = main_mod.grade_pending(self.cc)
+        self.assertEqual(n, 1)
+
+        outcomes = [json.loads(l) for l in
+                   (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0]["outcome"], "accepted")
+        self.assertFalse((self.harvested_dir / "harvest-s1.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

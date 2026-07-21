@@ -52,6 +52,54 @@ class TestParseLine(unittest.TestCase):
         self.assertLess(len(event.payload["text"]), 1600)
         self.assertIn("5000 chars total", event.payload["text"])
 
+    def test_reasoning_secret_is_redacted(self):
+        secret = "nvapi-" + "a" * 30
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "sessionId": "s",
+                "message": {"content": [
+                    {"type": "thinking", "thinking": f"the key is {secret}, using it now"},
+                ]},
+            }
+        )
+        (event,) = transcript.parse_line(line, 1)
+        self.assertIn("«REDACTED:nvidia-key»", event.payload["text"])
+        self.assertNotIn(secret, event.payload["text"])
+
+    def test_bash_command_secret_is_redacted(self):
+        secret = "abcdefghijklmnopqrstuvwxyz012345"
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "sessionId": "s",
+                "message": {"content": [
+                    {"type": "tool_use", "name": "Bash",
+                     "input": {"command": f"export PASSWORD={secret} && deploy.sh"}},
+                ]},
+            }
+        )
+        (event,) = transcript.parse_line(line, 1)
+        command = event.payload["input"]["command"]
+        self.assertIn("«REDACTED:assignment»", command)
+        self.assertNotIn(secret, command)
+
+    def test_file_path_with_secret_looking_name_survives_untouched(self):
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "sessionId": "s",
+                "message": {"content": [
+                    {"type": "tool_use", "name": "Edit",
+                     "input": {"file_path": "/repo/secrets/PASSWORD_abcdefghijklmnopqrstuvwxyz.py",
+                              "old_string": "a", "new_string": "b"}},
+                ]},
+            }
+        )
+        (event,) = transcript.parse_line(line, 1)
+        self.assertEqual(event.payload["input"]["file_path"],
+                         "/repo/secrets/PASSWORD_abcdefghijklmnopqrstuvwxyz.py")
+
 
 class TestTailing(unittest.TestCase):
     def test_incremental_offsets_and_partial_lines(self):

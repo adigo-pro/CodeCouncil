@@ -4,12 +4,14 @@ import json
 import sys
 import tempfile
 import unittest
+from dataclasses import asdict
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from evals.run import load_cases
+from observer import transcript
 from reflector import harvest
 
 
@@ -123,6 +125,34 @@ class TestMaybeHarvest(unittest.TestCase):
         self.assertIsNone(harvest.maybe_harvest(self.cc, row, "accepted"))
         self.assertFalse(self.harvested_dir.exists() and
                          any(self.harvested_dir.glob("*.json")))
+
+    def test_harvested_case_carries_redaction_not_the_secret(self):
+        """Redaction happens upstream in observer.transcript.parse_line, before
+        an event ever reaches case-material — a harvested case built from a
+        real transcript line containing a secret must show the marker, never
+        the raw value. This is what makes evals/cases-harvested/ (git-tracked)
+        safe to version."""
+        secret = "nvapi-" + "b" * 30
+        line = json.dumps({
+            "type": "assistant", "sessionId": "s",
+            "message": {"content": [
+                {"type": "thinking", "thinking": f"using key {secret} to call the API"},
+            ]},
+        })
+        (event,) = transcript.parse_line(line, beat=1)
+        events = [asdict(event)]
+        self.assertNotIn(secret, json.dumps(events))  # sanity: already redacted going in
+        _write_material(self.cc, "s1", events=events)
+
+        row = _suggestion_row("s1", verification={"status": "verified"})
+        name = harvest.maybe_harvest(self.cc, row, "accepted")
+        self.assertEqual(name, "harvest-s1")
+
+        case_text = (self.harvested_dir / "harvest-s1.json").read_text()
+        self.assertNotIn(secret, case_text)
+        case = json.loads(case_text)
+        reasoning_text = case["events"][0]["payload"]["text"]
+        self.assertIn("«REDACTED:nvidia-key»", reasoning_text)
 
     def test_dedupe_by_file_and_issue_content_hash(self):
         _write_material(self.cc, "s1", events=[{"type": "diff", "payload": {"diff": "+x"}}])

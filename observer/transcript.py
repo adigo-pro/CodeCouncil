@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from core.redact import redact
+
 from .events import DIFF, REASONING, TOOL_CALL, Event  # noqa: F401  (re-export convenience)
 
 REASONING_MAX_CHARS = 1500
@@ -86,7 +88,7 @@ def _salient_tool_input(name: str, inp: dict[str, Any]) -> dict[str, Any]:
     if "file_path" in inp:
         out["file_path"] = inp["file_path"]
     if "command" in inp:
-        out["command"] = _truncate(str(inp["command"]), COMMAND_MAX_CHARS)
+        out["command"] = _truncate(redact(str(inp["command"])), COMMAND_MAX_CHARS)
     if name == "Edit":
         out["old_len"] = len(inp.get("old_string", ""))
         out["new_len"] = len(inp.get("new_string", ""))
@@ -117,7 +119,8 @@ def parse_line(raw: str, beat: int) -> list[Event]:
                         beat=beat,
                         type=REASONING,
                         session=session,
-                        payload={"kind": btype, "text": _truncate(text.strip(), REASONING_MAX_CHARS)},
+                        payload={"kind": btype,
+                                "text": _truncate(redact(text.strip()), REASONING_MAX_CHARS)},
                     )
                 )
         elif btype == "tool_use":

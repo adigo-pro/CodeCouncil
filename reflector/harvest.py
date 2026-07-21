@@ -4,10 +4,13 @@ from real signal instead of staying frozen at the 7 hand-made cases forever.
 Closes the loop: outcomes -> new cases -> gate future rewrites.
 
 Case material (critic.main.save_case_material) is captured from the same
-observation events the critic already redacts secrets out of at capture time
-(observer.gitwatch redacts before anything lands in observations.ndjsonl) —
-so everything harvested here is already redacted. evals/cases-harvested/ is
-therefore safe to version and must NOT be gitignored.
+observation events the critic judges from. Every text-bearing event field —
+diff content and untracked file contents (observer.gitwatch), reasoning text
+and tool_call commands (observer.transcript) — is passed through
+core.redact.redact() at observer capture time, before it ever lands in
+observations.ndjsonl. So everything harvested here is already redacted.
+evals/cases-harvested/ is therefore safe to version and must NOT be
+gitignored.
 """
 
 from __future__ import annotations

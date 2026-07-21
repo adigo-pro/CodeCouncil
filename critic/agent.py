@@ -13,7 +13,8 @@ never-committed credentials file outside any watched repo):
                   bundled NVIDIA provider extension); defaults to pi's own default model,
                   unless NVIDIA_API_KEY is available (then Nemotron 3 Super)
   NVIDIA_API_KEY  enables the bundled NVIDIA-hosted Nemotron provider
-  CRITIC_CMD      test stub: run as `$CRITIC_CMD <prompt-file>`, stdout = reply
+  CRITIC_CMD      test stub: run as `$CRITIC_CMD <prompt-file> <resolved-model-or-empty>`,
+                  stdout = reply (existing single-arg stubs ignore the second argv)
 """
 
 from __future__ import annotations
@@ -69,21 +70,33 @@ def _run(cmd: list[str], timeout: int, cwd: str | None = None,
 
 
 def ask(prompt: str, system: str | None = None, tools: str | None = None,
-        cwd: str | None = None) -> str:
+        cwd: str | None = None, model: str | None = None) -> str:
     """Run one agent turn and return its raw reply text.
 
     tools: comma-separated pi tool allowlist (e.g. "read,bash"); None = no tools.
     cwd: working directory for the turn — where tool-enabled turns may run code.
+    model: explicit "provider/model" override, taking precedence over the
+        COUNCIL_MODEL/NVIDIA-default resolution below. This is how a worker
+        thread (e.g. council mode's judge_batch, running off the main thread)
+        selects a model per call without mutating os.environ, which would
+        race the main thread. None = existing resolution unchanged.
     """
     override = os.environ.get("CRITIC_CMD")
     if override:
+        env = _local_env()
+        resolved_model = model or env.get("COUNCIL_MODEL") or (
+            DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None
+        ) or ""
         with tempfile.NamedTemporaryFile(
             "w", suffix=".txt", delete=False, encoding="utf-8"
         ) as f:
             f.write(prompt)
             prompt_file = f.name
         try:
-            res = _run([override, prompt_file], timeout=60)
+            # Second argv is the resolved model (may be ""), so multi-model
+            # tests can stub per-model replies; existing single-arg stubs
+            # (`#!/bin/sh\necho ...`) ignore extra argv — zero breakage.
+            res = _run([override, prompt_file, resolved_model], timeout=60)
             if res.returncode != 0:
                 raise AgentError(f"stub failed: {res.stderr.strip()}")
             return res.stdout.strip()
@@ -104,9 +117,11 @@ def ask(prompt: str, system: str | None = None, tools: str | None = None,
     cmd += ["--tools", tools] if tools else ["--no-tools"]
     if system:
         cmd += ["--system-prompt", system]
-    model = env.get("COUNCIL_MODEL") or (DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None)
-    if model:
-        cmd += ["--model", model]
+    resolved_model = model or env.get("COUNCIL_MODEL") or (
+        DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None
+    )
+    if resolved_model:
+        cmd += ["--model", resolved_model]
     cmd.append(prompt)
 
     res = _run(cmd, timeout=TURN_TIMEOUT, cwd=cwd, env=env)

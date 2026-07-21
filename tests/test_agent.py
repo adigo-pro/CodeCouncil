@@ -103,6 +103,115 @@ class TestAskCommandConstruction(unittest.TestCase):
             self.assertIn(str(agent.NVIDIA_EXTENSION), extension_flags)
             self.assertIn(str(agent.REPO_TOOLS_EXTENSION), extension_flags)
 
+    def test_ask_model_param_overrides_council_model_env(self):
+        """Task 1: explicit model= wins over COUNCIL_MODEL — this is how the
+        council selects a prober from a worker thread without mutating
+        os.environ (which would race the main thread)."""
+        with tempfile.TemporaryDirectory() as td:
+            argv_file = Path(td) / "argv.txt"
+            stub = Path(td) / "pi_stub.sh"
+            stub.write_text(
+                "#!/bin/sh\n"
+                f'printf \'%s\\n\' "$@" > "{argv_file}"\n'
+                "echo ok\n"
+            )
+            stub.chmod(stub.stat().st_mode | 0o755)
+
+            with mock.patch.object(agent, "LOCAL_ENV_FILE", Path("/nonexistent/env")):
+                with mock.patch.dict(os.environ, {"PI_BIN": str(stub),
+                                                    "COUNCIL_MODEL": "openai/gpt-4o"},
+                                      clear=False):
+                    agent.ask("investigate this", model="openrouter/openai/gpt-5-mini")
+
+            argv = argv_file.read_text().splitlines()
+            self.assertIn("--model", argv)
+            model_idx = argv.index("--model")
+            self.assertEqual(argv[model_idx + 1], "openrouter/openai/gpt-5-mini")
+            # exactly one --model flag — the param, not the env var
+            self.assertEqual(argv.count("--model"), 1)
+
+    def test_ask_model_none_keeps_council_model_resolution(self):
+        """model=None (the default) must not disturb the existing
+        COUNCIL_MODEL/NVIDIA-default resolution."""
+        with tempfile.TemporaryDirectory() as td:
+            argv_file = Path(td) / "argv.txt"
+            stub = Path(td) / "pi_stub.sh"
+            stub.write_text(
+                "#!/bin/sh\n"
+                f'printf \'%s\\n\' "$@" > "{argv_file}"\n'
+                "echo ok\n"
+            )
+            stub.chmod(stub.stat().st_mode | 0o755)
+
+            with mock.patch.object(agent, "LOCAL_ENV_FILE", Path("/nonexistent/env")):
+                with mock.patch.dict(os.environ, {"PI_BIN": str(stub),
+                                                    "COUNCIL_MODEL": "openai/gpt-4o"},
+                                      clear=False):
+                    agent.ask("investigate this")
+
+            argv = argv_file.read_text().splitlines()
+            self.assertIn("--model", argv)
+            model_idx = argv.index("--model")
+            self.assertEqual(argv[model_idx + 1], "openai/gpt-4o")
+
+
+class TestAskStubModelArgv(unittest.TestCase):
+    """Task 1: the CRITIC_CMD stub invocation gains the resolved model as a
+    second argv so multi-model tests (council mode) can answer per-model.
+    Existing single-arg stubs (`#!/bin/sh\\necho ...`) ignore extra argv, so
+    this is zero-breakage for them."""
+
+    def setUp(self):
+        self._saved_critic_cmd = os.environ.pop("CRITIC_CMD", None)
+        self._saved_council_model = os.environ.pop("COUNCIL_MODEL", None)
+
+    def tearDown(self):
+        if self._saved_critic_cmd is not None:
+            os.environ["CRITIC_CMD"] = self._saved_critic_cmd
+        else:
+            os.environ.pop("CRITIC_CMD", None)
+        if self._saved_council_model is not None:
+            os.environ["COUNCIL_MODEL"] = self._saved_council_model
+        else:
+            os.environ.pop("COUNCIL_MODEL", None)
+
+    def test_stub_receives_explicit_model_as_second_argv(self):
+        with tempfile.TemporaryDirectory() as td:
+            stub = Path(td) / "stub.sh"
+            stub.write_text("#!/bin/sh\necho \"got:$2\"\n")
+            stub.chmod(stub.stat().st_mode | 0o755)
+            os.environ["CRITIC_CMD"] = str(stub)
+
+            reply = agent.ask("hello", model="openrouter/openai/gpt-5-mini")
+
+            self.assertEqual(reply, "got:openrouter/openai/gpt-5-mini")
+
+    def test_stub_receives_council_model_env_as_second_argv_when_no_param(self):
+        with tempfile.TemporaryDirectory() as td:
+            stub = Path(td) / "stub.sh"
+            stub.write_text("#!/bin/sh\necho \"got:$2\"\n")
+            stub.chmod(stub.stat().st_mode | 0o755)
+            os.environ["CRITIC_CMD"] = str(stub)
+            os.environ["COUNCIL_MODEL"] = "openai/gpt-4o"
+
+            reply = agent.ask("hello")
+
+            self.assertEqual(reply, "got:openai/gpt-4o")
+
+    def test_stub_receives_empty_second_argv_when_no_model_resolved(self):
+        with tempfile.TemporaryDirectory() as td:
+            stub = Path(td) / "stub.sh"
+            stub.write_text("#!/bin/sh\necho \"got:[$2]\"\n")
+            stub.chmod(stub.stat().st_mode | 0o755)
+            os.environ["CRITIC_CMD"] = str(stub)
+
+            with mock.patch.object(agent, "LOCAL_ENV_FILE", Path("/nonexistent/env")):
+                with mock.patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop("NVIDIA_API_KEY", None)
+                    reply = agent.ask("hello")
+
+            self.assertEqual(reply, "got:[]")
+
 
 if __name__ == "__main__":
     unittest.main()

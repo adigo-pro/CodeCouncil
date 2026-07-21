@@ -1,6 +1,8 @@
 """Reflector tests: eligibility, grading parse, rewrite guardrails, report math."""
 
 import json
+import os
+import stat
 import sys
 import tempfile
 import time
@@ -230,6 +232,231 @@ class TestReport(unittest.TestCase):
                                          "heuristics_version": 1}])
         self.assertIsNone(rows[0]["acceptance"])
         self.assertEqual(rows[0]["undelivered"], 1)
+
+
+def _write_case(cases_dir: Path, name: str, expected: str, marker: str,
+                expect_files: list[str] | None = None) -> None:
+    cases_dir.mkdir(parents=True, exist_ok=True)
+    (cases_dir / f"{name}.json").write_text(json.dumps({
+        "name": name, "expected": expected, "expect_files": expect_files or [],
+        "events": [{"type": "reasoning", "payload": {"text": marker}}],
+        "latest_diff": None,
+    }), encoding="utf-8")
+
+
+def _make_stub(td: Path, script: str) -> Path:
+    stub = td / "stub.py"
+    stub.write_text(script)
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    return stub
+
+
+# Distinguishes calls by the marker build_prompt embeds — "HEURISTICS (vN):"
+# comes from the heuristics text's own version header, so v1 = current, v2 =
+# candidate without any extra plumbing.
+ALWAYS_PASS_STUB = """#!/usr/bin/env python3
+print("PASS")
+"""
+
+CANDIDATE_WORSE_STUB = """#!/usr/bin/env python3
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+if "HEURISTICS (v2)" in text:
+    print('{"file": "a.py", "line": 1, "issue": "wrong", "severity": "medium"}')
+else:
+    print("PASS")
+"""
+
+
+class TestGateCandidate(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cases_dir = Path(self.td.name) / "cases"
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def test_candidate_scores_lower_gate_fails(self):
+        _write_case(self.cases_dir, "c1", "pass", "nothing risky")
+        stub = _make_stub(Path(self.td.name), CANDIDATE_WORSE_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+            ok, note = rewrite.gate_candidate("version: 2\n- candidate rule\n",
+                                              "version: 1\n- current rule\n")
+        self.assertFalse(ok)
+        self.assertIn("candidate 0.00", note)
+        self.assertIn("current 1.00", note)
+
+    def test_equal_scores_gate_passes(self):
+        _write_case(self.cases_dir, "c1", "pass", "nothing risky")
+        stub = _make_stub(Path(self.td.name), ALWAYS_PASS_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+            ok, note = rewrite.gate_candidate("version: 2\n- candidate rule\n",
+                                              "version: 1\n- current rule\n")
+        self.assertTrue(ok)
+        self.assertIn("candidate 1.00", note)
+        self.assertIn("current 1.00", note)
+
+    def test_no_cases_dir_ungated(self):
+        # self.cases_dir is never created — load_cases() sees an empty glob.
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+            ok, note = rewrite.gate_candidate("version: 2\n- x\n", "version: 1\n- y\n")
+        self.assertTrue(ok)
+        self.assertEqual(note, "no eval cases — ungated")
+
+
+# The rewrite-prompt call and the two eval-scoring passes (candidate v2,
+# current v1) are told apart purely by markers already present in the real
+# prompts, so one stub script handles all three call shapes.
+REWRITE_GATE_FAIL_STUB = """#!/usr/bin/env python3
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+if "TASK: REWRITE HEURISTICS" in text:
+    print("version: 2")
+    print("- new rule")
+elif "HEURISTICS (v2)" in text:
+    print('{"file": "a.py", "line": 1, "issue": "wrong", "severity": "medium"}')
+else:
+    print("PASS")
+"""
+
+REWRITE_GATE_PASS_STUB = """#!/usr/bin/env python3
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+if "TASK: REWRITE HEURISTICS" in text:
+    print("version: 2")
+    print("- new rule")
+elif "HEURISTICS (v1)" in text:
+    print('{"file": "a.py", "line": 1, "issue": "wrong", "severity": "medium"}')
+else:
+    print("PASS")
+"""
+
+
+class TestMaybeRewriteGateIntegration(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name) / ".codecouncil"
+        self.cc.mkdir()
+        self.heuristics = self.cc / "heuristics.md"
+        self.heuristics.write_text("version: 1\n- old rule\n")
+        outcomes = self.cc / "outcomes.ndjsonl"
+        with outcomes.open("w") as f:
+            for outcome in ("accepted", "ignored", "rebutted"):
+                f.write(json.dumps({"suggestion_id": outcome, "outcome": outcome,
+                                    "issue": "x", "heuristics_version": 1}) + "\n")
+        self.cases_dir = Path(self.td.name) / "cases"
+        _write_case(self.cases_dir, "c1", "pass", "nothing risky")
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def test_gate_fail_rejects_and_leaves_heuristics_untouched(self):
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), REWRITE_GATE_FAIL_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+            main_mod.maybe_rewrite(self.cc, {}, force=False)
+
+        self.assertEqual(self.heuristics.read_text(), "version: 1\n- old rule\n")
+        reflections = [json.loads(l) for l in
+                       (self.cc / "reflections.ndjsonl").read_text().splitlines()]
+        self.assertEqual(len(reflections), 1)
+        self.assertEqual(reflections[0]["event"], "rewrite_rejected")
+        self.assertEqual(reflections[0]["from_version"], 1)
+        self.assertIn("candidate 0.00", reflections[0]["note"])
+        self.assertFalse((self.cc / "heuristics-history").exists())
+
+    def test_gate_pass_applies_and_records_gate_note(self):
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), REWRITE_GATE_PASS_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+            main_mod.maybe_rewrite(self.cc, {}, force=False)
+
+        self.assertEqual(self.heuristics.read_text(), "version: 2\n- new rule\n")
+        reflections = [json.loads(l) for l in
+                       (self.cc / "reflections.ndjsonl").read_text().splitlines()]
+        self.assertEqual(len(reflections), 1)
+        self.assertEqual(reflections[0]["from_version"], 1)
+        self.assertEqual(reflections[0]["to_version"], 2)
+        self.assertIn("candidate 1.00", reflections[0]["gate"])
+
+
+def _outcome(sid: str, outcome: str, version: int) -> dict:
+    return {"suggestion_id": sid, "outcome": outcome, "issue": "x", "heuristics_version": version}
+
+
+class TestMaybeRollback(unittest.TestCase):
+    """v1 (archived) had 100% acceptance; v2 (current) underperforms at ~33%
+    with >= MIN_NEW_OUTCOMES graded — auto-revert should kick in exactly
+    once, restoring v1's rules under a new version number (v3)."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name) / ".codecouncil"
+        self.cc.mkdir()
+        self.heuristics = self.cc / "heuristics.md"
+        self.heuristics.write_text("version: 2\n- v2 rule\n")
+        history = self.cc / "heuristics-history"
+        history.mkdir()
+        (history / "v1.md").write_text("version: 1\n- v1 rule\n")
+        (self.cc / "suggestions.ndjsonl").write_text("")
+        self.outcomes = [
+            _outcome("a", "accepted", 1), _outcome("b", "accepted", 1),
+            _outcome("c", "accepted", 2), _outcome("d", "ignored", 2), _outcome("e", "ignored", 2),
+        ]
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_reverts_once_then_no_ops(self):
+        import reflector.main as main_mod
+
+        state: dict = {}
+        main_mod.maybe_rollback(self.cc, state, self.outcomes)
+
+        self.assertEqual(self.heuristics.read_text(), "version: 3\n- v1 rule\n")
+        self.assertEqual((self.cc / "heuristics-history" / "v2.md").read_text(),
+                         "version: 2\n- v2 rule\n")
+        reflections = [json.loads(l) for l in
+                       (self.cc / "reflections.ndjsonl").read_text().splitlines()]
+        self.assertEqual(len(reflections), 1)
+        self.assertEqual(reflections[0]["event"], "rollback")
+        self.assertEqual(reflections[0]["from_version"], 2)
+        self.assertEqual(reflections[0]["restored_version_content_of"], 1)
+        self.assertTrue(state["rolled_back_from_2"])
+
+        # Second call: current version moved to 3, for which there's no
+        # graded data at all, so this is a natural no-op too.
+        before = self.heuristics.read_text()
+        main_mod.maybe_rollback(self.cc, state, self.outcomes)
+        self.assertEqual(self.heuristics.read_text(), before)
+        self.assertEqual(len(
+            (self.cc / "reflections.ndjsonl").read_text().splitlines()), 1)
+
+    def test_revert_once_guard_blocks_even_when_conditions_still_qualify(self):
+        import reflector.main as main_mod
+
+        state = {"rolled_back_from_2": True}
+        main_mod.maybe_rollback(self.cc, state, self.outcomes)
+        self.assertEqual(self.heuristics.read_text(), "version: 2\n- v2 rule\n")
+        self.assertFalse((self.cc / "reflections.ndjsonl").exists())
+
+    def test_missing_archive_is_a_noop(self):
+        import reflector.main as main_mod
+
+        (self.cc / "heuristics-history" / "v1.md").unlink()
+        state: dict = {}
+        main_mod.maybe_rollback(self.cc, state, self.outcomes)
+        self.assertEqual(self.heuristics.read_text(), "version: 2\n- v2 rule\n")
+        self.assertFalse((self.cc / "reflections.ndjsonl").exists())
+        self.assertEqual(state, {})
 
 
 if __name__ == "__main__":

@@ -80,6 +80,22 @@ def validate(new_text: str, expected_version: int) -> str | None:
     return None
 
 
+def gate_candidate(candidate_text: str, current_text: str) -> tuple[bool, str]:
+    """Score a rewrite candidate against the current heuristics on the frozen
+    eval cases before it's allowed to land — format-valid isn't good enough,
+    it has to not be a regression. Same cases, same stub, one model call per
+    case per side. No eval cases at all => ungated (pass through)."""
+    from evals.run import load_cases, score_heuristics  # lazy: keep import graph clean
+
+    cases = load_cases()
+    if not cases:
+        return True, "no eval cases — ungated"
+    candidate = score_heuristics(candidate_text, cases)
+    current = score_heuristics(current_text, cases)
+    note = f"candidate {candidate['score']:.2f} vs current {current['score']:.2f}"
+    return candidate["score"] >= current["score"], note
+
+
 def apply(heuristics_path: Path, new_text: str, old_text: str, old_version: int) -> Path:
     """Archive the old version, then atomically swap in the new file."""
     history = heuristics_path.parent / "heuristics-history"

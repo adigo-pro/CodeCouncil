@@ -22,7 +22,7 @@ from critic.prompt import heuristics_version
 from hooks import ledger as ledger_mod
 from observer.events import now_iso
 
-from . import judge, rewrite
+from . import judge, report, rewrite
 
 PERSONA = Path(__file__).parent / "persona.md"
 
@@ -98,13 +98,76 @@ def maybe_rewrite(cc: Path, state: dict, force: bool,
     if err:
         print(f"reflector: rewrite rejected ({err}); keeping v{version}")
         return
+    gate_ok, gate_note = rewrite.gate_candidate(new_text, current)
+    if not gate_ok:
+        print(f"reflector: rewrite rejected by eval gate ({gate_note}); keeping v{version}")
+        append_ndjson(cc / "reflections.ndjsonl", {
+            "ts": now_iso(), "event": "rewrite_rejected",
+            "from_version": version, "note": gate_note,
+        })
+        return
     archive = rewrite.apply(heuristics_path, new_text, current, version)
     state["n_graded_at_last_rewrite"] = sum(
         1 for o in outcomes if o.get("outcome") in rewrite.GRADED
     )
-    append_ndjson(cc / "reflections.ndjsonl",
-                  {"ts": now_iso(), **rewrite.rewrite_record(current, new_text, version, outcomes)})
-    print(f"reflector: heuristics v{version} → v{version + 1} (archived {archive.name})")
+    record = rewrite.rewrite_record(current, new_text, version, outcomes)
+    append_ndjson(cc / "reflections.ndjsonl", {"ts": now_iso(), "gate": gate_note, **record})
+    print(f"reflector: heuristics v{version} → v{version + 1} "
+          f"(archived {archive.name}, gate: {gate_note})")
+
+
+def maybe_rollback(cc: Path, state: dict, outcomes: list[dict]) -> None:
+    """Auto-revert: if the current heuristics version is measurably worse in
+    the wild than the version it replaced, restore the old rules (as a new,
+    higher version number — version numbers never go backwards) and archive
+    the underperformer. Compares in-the-wild acceptance (reflector.report),
+    never the frozen-eval score the rewrite gate uses — different signals."""
+    heuristics_path = cc / "heuristics.md"
+    if not heuristics_path.exists():
+        return
+    current_text = heuristics_path.read_text(encoding="utf-8")
+    current_version = heuristics_version(current_text)
+    guard_key = f"rolled_back_from_{current_version}"
+    if state.get(guard_key):
+        return
+
+    prev_version = current_version - 1
+    history = cc / "heuristics-history"
+    if not history.is_dir():
+        return
+    archive_files = sorted(history.glob(f"v{prev_version}.md"))
+    if not archive_files:
+        return
+    prev_archive = archive_files[-1]
+
+    suggestions = read_ndjson(cc / "suggestions.ndjsonl")
+    rows = {r["version"]: r for r in report.build_rows(suggestions, outcomes)}
+    current_row, prev_row = rows.get(current_version), rows.get(prev_version)
+    if current_row is None or prev_row is None:
+        return
+    graded_current = current_row["accepted"] + current_row["rebutted"] + current_row["ignored"]
+    if graded_current < rewrite.MIN_NEW_OUTCOMES:
+        return
+    if current_row["acceptance"] is None or prev_row["acceptance"] is None:
+        return
+    if not (current_row["acceptance"] < prev_row["acceptance"]):
+        return
+
+    restored = prev_archive.read_text(encoding="utf-8").strip().splitlines()
+    new_version = current_version + 1
+    restored[0] = f"version: {new_version}"
+    new_text = "\n".join(restored)
+
+    archive = rewrite.apply(heuristics_path, new_text, current_text, current_version)
+    append_ndjson(cc / "reflections.ndjsonl", {
+        "ts": now_iso(), "event": "rollback",
+        "from_version": current_version, "restored_version_content_of": prev_version,
+        "note": f"v{current_version} acceptance {current_row['acceptance']:.0%} < "
+                f"v{prev_version} acceptance {prev_row['acceptance']:.0%}",
+    })
+    state[guard_key] = True
+    print(f"reflector: auto-rollback v{current_version} → v{new_version} "
+          f"(restoring rules of v{prev_version}, archived {archive.name})")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -136,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
             n = grade_pending(cc)
             if n == 0:
                 print(f"reflector: nothing to grade")
+            maybe_rollback(cc, state, read_ndjson(cc / "outcomes.ndjsonl"))
             maybe_rewrite(cc, state, args.force_rewrite,
                           rewrite_after=args.rewrite_after)
             state_path.write_text(json.dumps(state), encoding="utf-8")

@@ -112,4 +112,6 @@ n-counts shown). Nothing is mocked; empty states explain what unlocks them.
 python3 -m unittest discover -s tests
 ```
 
+CI runs the same suite on every push and pull request (see `.github/workflows/ci.yml`).
+
 Design notes: `docs/specs/2026-07-18-observer-design.md`.

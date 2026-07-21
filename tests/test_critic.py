@@ -434,6 +434,83 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertIn(self.cc / "outcomes.ndjsonl", calls)
 
 
+def _iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch).isoformat()
+
+
+NOW = datetime.now().timestamp()
+
+
+class TestReviewedFiles(unittest.TestCase):
+    """Task 1: every verdict row records which files it covered (from
+    latest_diff), and every non-ERROR verdict — PASS included — gets its
+    case material saved so a missed PASS can later become an eval case."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name)
+        self.obs = self.cc / "observations.ndjsonl"
+        self.suggestions = self.cc / "suggestions.ndjsonl"
+        self.heuristics = self.cc / "heuristics.md"
+        self.stub = self.cc / "stub.sh"
+        self.ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
+                    "persona": "", "project": "",
+                    "repo": self.cc, "verify": False}
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def _set_stub(self, reply: str):
+        self.stub.write_text(f"#!/bin/sh\necho '{reply}'\n")
+        self.stub.chmod(self.stub.stat().st_mode | stat.S_IEXEC)
+        os.environ["CRITIC_CMD"] = str(self.stub)
+
+    def _write_obs(self, events):
+        with self.obs.open("a") as f:
+            for e in events:
+                f.write(json.dumps(e) + "\n")
+
+    def _beat(self, state, scheduler):
+        status = heartbeat(self.obs, state, scheduler, self.ctx)
+        if scheduler.thread:
+            scheduler.thread.join()
+        return status
+
+    def test_every_verdict_records_reviewed_files(self):
+        # stub replies PASS; diff event carries touched_contents + untracked
+        self._set_stub("PASS")
+        self._write_obs([
+            {"ts": _iso(NOW), "beat": 1, "type": "diff", "session": "s", "payload": {
+                "diff": "--- a/a.py\n+++ b/a.py\n+x=1\n",
+                "untracked": ["new.py"],
+                "touched_contents": {"a.py": "x=1"}}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        self._beat(state, TurnScheduler())
+        row = json.loads(self.suggestions.read_text().splitlines()[-1])
+        self.assertEqual(row["reviewed_files"], ["a.py", "new.py"])
+
+    def test_pass_verdict_saves_case_material(self):
+        # same beat as above; PASS row id must have case-material JSON on disk
+        self._set_stub("PASS")
+        self._write_obs([
+            {"ts": _iso(NOW), "beat": 1, "type": "diff", "session": "s", "payload": {
+                "diff": "--- a/a.py\n+++ b/a.py\n+x=1\n",
+                "untracked": ["new.py"],
+                "touched_contents": {"a.py": "x=1"}}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        self._beat(state, TurnScheduler())
+        row = json.loads(self.suggestions.read_text().splitlines()[-1])
+        self.assertEqual(row["verdict"], "PASS")
+        material = self.cc / "case-material" / f"{row['id']}.json"
+        self.assertTrue(material.exists())
+        data = json.loads(material.read_text())
+        self.assertIn("events", data)
+        self.assertIn("latest_diff", data)
+
+
 class TestNormalizeFile(unittest.TestCase):
     def test_staging_and_absolute_paths_map_back(self):
         from critic.main import normalize_file
@@ -999,7 +1076,9 @@ class TestJudgeBatchCaseMaterial(unittest.TestCase):
         self.assertEqual(material["events"], events)
         self.assertEqual(material["latest_diff"], ctx["latest_diff"])
 
-    def test_pass_verdict_writes_no_case_material(self):
+    def test_pass_verdict_also_writes_case_material(self):
+        """Task 1: PASS verdicts get case material too — a missed PASS needs
+        its packet to become an eval case later (reflector harvest)."""
         from critic.main import judge_batch
 
         self._set_stub("PASS")
@@ -1009,7 +1088,10 @@ class TestJudgeBatchCaseMaterial(unittest.TestCase):
         events = [{"type": "diff", "session": None,
                    "payload": {"diff": "+ok", "stat": "", "untracked": []}}]
         judge_batch(events, ctx)
-        self.assertFalse((self.cc / "case-material").exists())
+        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        verdict_id = rows[0]["id"]
+        material_path = self.cc / "case-material" / f"{verdict_id}.json"
+        self.assertTrue(material_path.exists())
 
 
 class TestReceiptContent(unittest.TestCase):

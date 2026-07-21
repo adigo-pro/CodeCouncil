@@ -21,6 +21,13 @@ from pathlib import Path
 from core.store import read_tail_rows, wait_for
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
+# Loop-boundary note: this is observer-side, but CLAUDE.md carves out an
+# exception for small shared utilities across loops (alongside core.store,
+# observer.events, observer.transcript, critic.agent). _touched_paths is a
+# 6-line pure function (no I/O) parsing "+++ b/<path>" diff headers; reusing
+# it here keeps reviewed_files' diff-path parsing identical to the Observer's
+# own touched_contents derivation instead of drifting from a second copy.
+from observer.gitwatch import _touched_paths
 
 from . import agent, prompt, receipt, verify
 from .render import render_error, render_quiet, render_status, render_verdict
@@ -160,6 +167,23 @@ def majority_session(events: list[dict]) -> str | None:
     return Counter(sessions).most_common(1)[0][0]
 
 
+def reviewed_files(latest_diff: dict | None) -> list[str]:
+    """Repo-relative paths a verdict actually covered: the sorted union of
+    touched_contents keys, untracked paths, and paths parsed from the raw
+    diff's `+++ b/<path>` headers. The third source matters on its own:
+    touched_contents (observer/gitwatch.py's _read_touched) caps by total
+    chars and excluded prefixes, so a file can be in the diff yet missing
+    from touched_contents — re-parsing the diff recovers it. Empty when
+    there's no diff to review yet."""
+    if not latest_diff:
+        return []
+    payload = latest_diff.get("payload", {}) or {}
+    paths = set(payload.get("touched_contents", {}) or {})
+    paths.update(payload.get("untracked", []) or [])
+    paths.update(_touched_paths(payload.get("diff", "") or ""))
+    return sorted(paths)
+
+
 def judge_batch(events: list[dict], ctx: dict) -> None:
     """One model judgment over a batch. Runs on the scheduler's worker thread;
     sole writer of the suggestions file."""
@@ -178,17 +202,21 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         "heuristics_version": prompt.heuristics_version(heuristics),
         "n_events": len(events),
         "prompt_chars": len(text),
+        "reviewed_files": reviewed_files(ctx.get("latest_diff")),
     }
     save_prompt(suggestions_file.parent / "prompts", record["id"], text)
     record.update(ask_with_retry(text, ctx))
     if record["verdict"] == "ERROR":
         render_error(beat, ts, record.get("error", "?"))
     else:
+        # Case material now saved for every non-ERROR verdict (PASS included)
+        # — the Reflector can only harvest a missed PASS into an eval case
+        # if the PASS's judgment packet was kept, not just SUGGESTIONs.
+        save_case_material(suggestions_file.parent, record["id"], events,
+                          ctx.get("latest_diff"))
         if record["verdict"] == "SUGGESTION":
             record["suggestion"]["file"] = normalize_file(
                 ctx.get("repo"), record["suggestion"].get("file", ""))
-            save_case_material(suggestions_file.parent, record["id"], events,
-                              ctx.get("latest_diff"))
         if record["verdict"] == "SUGGESTION" and ctx.get("verify", True):
             try:
                 record["verification"] = verify.verify_finding(

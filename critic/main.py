@@ -254,20 +254,29 @@ def recent_events(obs_file: Path, since_epoch: float) -> list[dict]:
 TESTS_RUN_STICKY_MAX_AGE_S = 24 * 3600
 
 
+def _ts_epoch(ts: str) -> float | None:
+    """Parse an ISO timestamp to epoch seconds, or None if unparseable."""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(ts).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 def sticky_tests_run(tests_run_at: dict | None, now_epoch: float,
                      max_age_s: float = TESTS_RUN_STICKY_MAX_AGE_S) -> str | None:
-    """The most recent test-command timestamp seen anywhere this session
-    (state["tests_run_at"], keyed by session — see heartbeat()), bounded to
-    max_age_s so a stale run from days ago never masks a truly untested
-    change. A single value across sessions: task reviews carry no session
-    tag (see task_review), so this can't be scoped to one."""
-    from datetime import datetime
+    """The most recent test-command timestamp seen anywhere the critic has
+    been watching (state["tests_run_at"], keyed by session — see
+    heartbeat()), bounded to max_age_s so a stale run from days ago never
+    masks a truly untested change. A single value across sessions: task
+    reviews carry no session tag (see task_review), so this can't be scoped
+    to one — a test run in a different session can suppress the hard-negative
+    fact for a review that isn't about that session's work."""
     best: str | None = None
     best_epoch = float("-inf")
     for ts in (tests_run_at or {}).values():
-        try:
-            t = datetime.fromisoformat(ts).timestamp()
-        except (TypeError, ValueError):
+        t = _ts_epoch(ts)
+        if t is None:
             continue
         if now_epoch - t <= max_age_s and t > best_epoch:
             best, best_epoch = ts, t
@@ -415,9 +424,17 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
     # Sticky tests-run fact (Task 9): a test command is credited to its
     # session as soon as it's seen, independent of the scheduler gate below —
     # a task review beats later can outlive this event's short review window.
+    # Sessionless events (e.g. session None) are skipped: nothing to credit,
+    # and it would otherwise land as a JSON "null" key on persist.
     for e in events:
-        if e.get("type") == "tool_call" and prompt.tests_run([e]):
-            state.setdefault("tests_run_at", {})[e.get("session")] = e.get("ts", ts)
+        if e.get("type") == "tool_call" and e.get("session") and prompt.tests_run([e]):
+            state.setdefault("tests_run_at", {})[e["session"]] = e.get("ts", ts)
+    if state.get("tests_run_at"):
+        # Prune stale entries at record time so the dict can't grow
+        # unbounded over weeks of daemon uptime.
+        now = time.time()
+        state["tests_run_at"] = {s: t for s, t in state["tests_run_at"].items()
+                                  if (_ts_epoch(t) or float("-inf")) >= now - TESTS_RUN_STICKY_MAX_AGE_S}
 
     ctx = {**ctx, "beat": beat, "ts": ts, "latest_diff": state.get("latest_diff"),
            "offset_now": state["offset"],

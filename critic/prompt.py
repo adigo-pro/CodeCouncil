@@ -130,9 +130,10 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
     """The 'agent says it's done' review: claims vs what the diff supports.
 
     tests_run_sticky: the most recent test-command timestamp seen anywhere
-    this session (bounded to a staleness window), even if outside this
-    review's event window — see critic/main.py's tests_run_at state. Without
-    it, a test run just outside the window reads as "no tests were run".
+    the critic has been watching (bounded to a staleness window), even if
+    outside this review's event window or from a different session — see
+    critic/main.py's tests_run_at state. Without it, a test run just outside
+    the window reads as "no tests were run".
     """
     claims = [e for e in events if e["type"] == "reasoning"][-12:]
     commits = [e for e in events if e["type"] == "commit"]
@@ -151,7 +152,7 @@ def build_task_review(events: list[dict], latest_diff: dict | None, heuristics: 
         fact = f"tests run in this window ({ran})"
     elif tests_run_sticky:
         fact = (f"no test command in this window, but one ran at "
-               f"{tests_run_sticky} earlier this session")
+               f"{tests_run_sticky} earlier (possibly another session)")
     else:
         fact = "NO test command was executed"
     parts.append(f"MECHANICAL FACT — {fact}")

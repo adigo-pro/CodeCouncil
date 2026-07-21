@@ -292,14 +292,15 @@ class TestHeartbeatWithStub(unittest.TestCase):
         """Task 9: a test command is credited to its session in state even
         when the beat carries no diff/commit (so it never dispatches to the
         scheduler) — the sticky fact must survive independent of the gate."""
+        from datetime import datetime, timezone
+        fresh_ts = datetime.now(timezone.utc).isoformat()
         self._write_obs([
-            {"ts": "2026-01-01T00:00:00+00:00", "beat": 1, "type": "tool_call",
-             "session": "sess-A",
+            {"ts": fresh_ts, "beat": 1, "type": "tool_call", "session": "sess-A",
              "payload": {"tool": "Bash", "input": {"command": "python3 -m unittest discover"}}},
         ])
         state = load_state(self.cc / "nope.json")
         self._beat(state, TurnScheduler())
-        self.assertEqual(state["tests_run_at"].get("sess-A"), "2026-01-01T00:00:00+00:00")
+        self.assertEqual(state["tests_run_at"].get("sess-A"), fresh_ts)
 
     def test_heartbeat_ignores_non_test_commands(self):
         self._write_obs([
@@ -310,6 +311,35 @@ class TestHeartbeatWithStub(unittest.TestCase):
         state = load_state(self.cc / "nope.json")
         self._beat(state, TurnScheduler())
         self.assertNotIn("tests_run_at", state)
+
+    def test_heartbeat_skips_sessionless_test_command(self):
+        """A test command with no session (session: None) must not be
+        credited — there is no session to credit it to, and it would
+        otherwise land as a JSON "null" key on persist."""
+        from datetime import datetime, timezone
+        self._write_obs([
+            {"ts": datetime.now(timezone.utc).isoformat(), "beat": 1, "type": "tool_call",
+             "session": None,
+             "payload": {"tool": "Bash", "input": {"command": "python3 -m unittest discover"}}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        self._beat(state, TurnScheduler())
+        self.assertNotIn("tests_run_at", state)
+
+    def test_heartbeat_prunes_stale_tests_run_at_entries(self):
+        """tests_run_at entries older than the 24h staleness window are
+        dropped at record time so the dict can't grow unbounded."""
+        from datetime import datetime, timedelta, timezone
+        stale_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        state = load_state(self.cc / "nope.json")
+        state["tests_run_at"] = {"sess-old": stale_ts}
+        self._write_obs([
+            {"ts": "2026-01-01T00:00:00+00:00", "beat": 1, "type": "tool_call",
+             "session": "sess-new",
+             "payload": {"tool": "Bash", "input": {"command": "git status"}}},
+        ])
+        self._beat(state, TurnScheduler())
+        self.assertNotIn("sess-old", state["tests_run_at"])
 
     def test_verdict_history_joins_outcomes(self):
         self.suggestions.write_text(json.dumps({
@@ -455,13 +485,15 @@ class TestTaskReview(unittest.TestCase):
 
     def test_build_task_review_sticky_middle_state(self):
         """Task 9: no test command in the review window, but one ran earlier
-        this session — the false 'no tests were run' flag this fixes."""
+        (possibly a different session — tests_run_sticky is a cross-session
+        max, not scoped to the reviewed session) — the false 'no tests were
+        run' flag this fixes."""
         events = [{"type": "reasoning", "payload": {"kind": "text", "text": "All done."}}]
         text = prompt.build_task_review(events, None, "version: 2",
                                         tests_run_sticky="2026-01-01T00:00:00+00:00")
         self.assertIn(
             "no test command in this window, but one ran at "
-            "2026-01-01T00:00:00+00:00 earlier this session", text)
+            "2026-01-01T00:00:00+00:00 earlier (possibly another session)", text)
         self.assertNotIn("NO test command was executed", text)
 
     def test_build_task_review_hard_no_tests_state_without_sticky(self):

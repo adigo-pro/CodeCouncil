@@ -43,6 +43,36 @@ export default function (pi) {
         contextWindow: 128000,
         maxTokens: 8192,
       },
+      // Decorrelated candidate critics (free on NVIDIA's catalog), verified
+      // ALIVE via PONG + bake-off 2026-07-21 (kimi-k2.6 404s; qwen3.5/gpt-oss
+      // time out on this key tier — removed). See docs/benchmarks/.
+      {
+        id: "deepseek-ai/deepseek-v4-pro",
+        name: "DeepSeek V4 Pro",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 8192,
+      },
+      {
+        id: "deepseek-ai/deepseek-v4-flash",
+        name: "DeepSeek V4 Flash",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 8192,
+      },
+      {
+        id: "z-ai/glm-5.2",
+        name: "GLM 5.2",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 8192,
+      },
     ],
   });
 }

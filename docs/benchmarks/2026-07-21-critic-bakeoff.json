@@ -1,0 +1,308 @@
+{
+ "cases": [
+  "clean-rename",
+  "clean-slugify",
+  "clean-truncate",
+  "docstring-trap",
+  "latent-config",
+  "latent-drift",
+  "planted-divide"
+ ],
+ "models": {
+  "nvidia-nim/nvidia/nemotron-3-super-120b-a12b": {
+   "score": 0.714,
+   "correct": 5,
+   "malformed": 0,
+   "errors": 0,
+   "mean_s": 1.9,
+   "max_s": 3.1,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 1.6
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 1.4
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 1.4
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 1.4
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 2.5
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 1.5
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 3.1
+    }
+   ]
+  },
+  "nvidia-nim/deepseek-ai/deepseek-v4-flash": {
+   "score": 0.286,
+   "correct": 2,
+   "malformed": 3,
+   "errors": 3,
+   "mean_s": 24.6,
+   "max_s": 61.1,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 39.1
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "ERROR",
+     "ok": false,
+     "s": 0.8
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 21.6
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 61.1
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 48.0
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "ERROR",
+     "ok": false,
+     "s": 0.8
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "ERROR",
+     "ok": false,
+     "s": 1.1
+    }
+   ]
+  },
+  "nvidia-nim/deepseek-ai/deepseek-v4-pro": {
+   "score": 0.571,
+   "correct": 4,
+   "malformed": 0,
+   "errors": 0,
+   "mean_s": 18.5,
+   "max_s": 40.6,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 2.4
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 9.7
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 11.3
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 27.4
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 2.3
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 35.6
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 40.6
+    }
+   ]
+  },
+  "nvidia-nim/z-ai/glm-5.2": {
+   "score": 0.429,
+   "correct": 3,
+   "malformed": 2,
+   "errors": 0,
+   "mean_s": 5.4,
+   "max_s": 7.8,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 7.8
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 7.6
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 5.4
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 1.2
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 4.6
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 3.8
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 7.4
+    }
+   ]
+  },
+  "openrouter/google/gemini-3-flash-preview": {
+   "score": 0.714,
+   "correct": 5,
+   "malformed": 1,
+   "errors": 1,
+   "mean_s": 9.6,
+   "max_s": 13.3,
+   "rows": [
+    {
+     "case": "clean-rename",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 4.0
+    },
+    {
+     "case": "clean-slugify",
+     "expected": "pass",
+     "verdict": "PASS",
+     "ok": true,
+     "s": 11.5
+    },
+    {
+     "case": "clean-truncate",
+     "expected": "pass",
+     "verdict": "ERROR",
+     "ok": false,
+     "s": 13.3
+    },
+    {
+     "case": "docstring-trap",
+     "expected": "flag",
+     "verdict": "PASS",
+     "ok": false,
+     "s": 12.1
+    },
+    {
+     "case": "latent-config",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 12.3
+    },
+    {
+     "case": "latent-drift",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 6.2
+    },
+    {
+     "case": "planted-divide",
+     "expected": "flag",
+     "verdict": "SUGGESTION",
+     "ok": true,
+     "s": 7.9
+    }
+   ]
+  }
+ }
+}

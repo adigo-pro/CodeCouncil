@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -294,6 +295,22 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertEqual(h, [{"outcome": "rebutted", "file": "a.py", "line": 1, "issue": "i1"}])
         self.assertEqual(verdict_history(self.suggestions, self.cc / "missing.ndjsonl")[0]["outcome"],
                          "pending")
+
+    def test_verdict_history_reads_via_bounded_tail(self):
+        """suggestions.ndjsonl / outcomes.ndjsonl grow unbounded over a
+        session; verdict_history only needs the last few rows, so it must
+        read both via read_tail_rows rather than a whole-file read."""
+        import critic.main as main_mod
+        calls = []
+
+        def fake_tail(path, *a, **k):
+            calls.append(path)
+            return []
+
+        with mock.patch.object(main_mod, "read_tail_rows", fake_tail):
+            main_mod.verdict_history(self.suggestions, self.cc / "outcomes.ndjsonl")
+        self.assertIn(self.suggestions, calls)
+        self.assertIn(self.cc / "outcomes.ndjsonl", calls)
 
 
 class TestNormalizeFile(unittest.TestCase):

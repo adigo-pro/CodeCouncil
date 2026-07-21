@@ -7,6 +7,7 @@ import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -25,6 +26,38 @@ def sugg(sid="s1", ts=None, version=1):
             "heuristics_version": version,
             "suggestion": {"file": "a.py", "line": 3, "severity": "high",
                            "issue": "bug", "rationale": "r"}}
+
+
+class TestGradePendingBoundedReads(unittest.TestCase):
+    """suggestions.ndjsonl grows unbounded over a session; grade_pending only
+    needs recent rows to find newly-gradeable suggestions, so it must read it
+    via read_tail_rows. outcomes.ndjsonl's graded_ids dedup set must stay a
+    full read_rows — losing an old graded id would re-grade an old suggestion."""
+
+    def test_suggestions_bounded_outcomes_unbounded(self):
+        import reflector.main as main_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td)
+            tail_calls = []
+            rows_calls = []
+            orig_tail, orig_rows = main_mod.read_tail_rows, main_mod.read_ndjson
+
+            def tracking_tail(path, *a, **k):
+                tail_calls.append(path)
+                return orig_tail(path, *a, **k)
+
+            def tracking_rows(path, *a, **k):
+                rows_calls.append(path)
+                return orig_rows(path, *a, **k)
+
+            with mock.patch.object(main_mod, "read_tail_rows", tracking_tail), \
+                 mock.patch.object(main_mod, "read_ndjson", tracking_rows):
+                main_mod.grade_pending(cc)
+
+            self.assertIn(cc / "suggestions.ndjsonl", tail_calls)
+            self.assertIn(cc / "outcomes.ndjsonl", rows_calls)
+            self.assertNotIn(cc / "suggestions.ndjsonl", rows_calls)
 
 
 class TestPending(unittest.TestCase):

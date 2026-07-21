@@ -18,7 +18,7 @@ import uuid
 from collections import Counter
 from pathlib import Path
 
-from core.store import read_rows, read_tail_rows, wait_for
+from core.store import read_tail_rows, wait_for
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
 
@@ -59,10 +59,14 @@ def project_context(repo: Path) -> str:
 
 
 def verdict_history(suggestions_file: Path, outcomes_file: Path, limit: int = 5) -> list[dict]:
-    """The critic's own recent suggestions joined with how each was received."""
-    grades = {o.get("suggestion_id"): o.get("outcome") for o in read_rows(outcomes_file)}
+    """The critic's own recent suggestions joined with how each was received.
+
+    Both files grow unbounded over a session but only the tail is ever
+    needed here (last `limit` suggestions), so both reads are bounded.
+    """
+    grades = {o.get("suggestion_id"): o.get("outcome") for o in read_tail_rows(outcomes_file)}
     history = []
-    for r in read_rows(suggestions_file):
+    for r in read_tail_rows(suggestions_file):
         if r.get("verdict") != "SUGGESTION":
             continue
         s = r["suggestion"]

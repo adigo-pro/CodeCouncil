@@ -1,5 +1,6 @@
 """Hook tests: fail-open wrapper behavior, pure decision logic, install merge."""
 
+import contextlib
 import json
 import subprocess
 import sys
@@ -8,6 +9,7 @@ import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -93,6 +95,117 @@ class TestFailOpen(unittest.TestCase):
             # second run: ledger persisted, nothing delivered again
             res2 = self._run(json.dumps(post_tool_use(cwd=td)))
             self.assertEqual(res2.stdout, "")
+
+
+class TestPeerHookLocking(unittest.TestCase):
+    """PostToolUse hooks run as fresh subprocesses per event, potentially from
+    concurrent Claude Code sessions on the same repo. The load->decide->save
+    span on delivered.json must be wrapped in an exclusive flock so two
+    interleaved hook processes can't double-deliver or lose a delivery mark."""
+
+    def test_locked_holds_a_real_exclusive_os_lock(self):
+        import fcntl
+
+        from hooks.peer_hook import _locked
+
+        with tempfile.TemporaryDirectory() as td:
+            lock_path = Path(td) / "delivered.lock"
+            with _locked(lock_path):
+                self.assertTrue(lock_path.exists())
+                # a second, independent file handle on the same path must not
+                # be able to grab the lock while we're holding it
+                fh2 = open(lock_path, "a+")
+                try:
+                    with self.assertRaises(OSError):
+                        fcntl.flock(fh2.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    fh2.close()
+            # once the context exits, the lock must be released
+            fh3 = open(lock_path, "a+")
+            try:
+                fcntl.flock(fh3.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # must not raise
+                fcntl.flock(fh3.fileno(), fcntl.LOCK_UN)
+            finally:
+                fh3.close()
+
+    def test_locked_fails_open_when_lock_path_unusable(self):
+        """If acquiring the lock fails for any reason (e.g. the sidecar's
+        parent can't be created), _locked must still yield rather than raise."""
+        from hooks.peer_hook import _locked
+
+        with tempfile.TemporaryDirectory() as td:
+            blocker = Path(td) / "blocker"
+            blocker.write_text("not a directory")
+            unusable_lock = blocker / "sub" / "delivered.lock"
+            entered = False
+            with _locked(unusable_lock):
+                entered = True
+            self.assertTrue(entered)
+
+    def test_lock_wraps_the_entire_load_decide_save_span(self):
+        """The lock must cover load, decide, and save as one span — locking
+        only part of it would still let two subprocesses interleave."""
+        import hooks.peer_hook as peer_hook
+
+        events = []
+
+        @contextlib.contextmanager
+        def fake_lock(path):
+            events.append(("acquire", path))
+            yield
+            events.append(("release", path))
+
+        orig_load, orig_save = ledger_mod.load, ledger_mod.save
+
+        def tracking_load(path):
+            events.append(("load",))
+            return orig_load(path)
+
+        def tracking_save(path, ledger):
+            events.append(("save",))
+            return orig_save(path, ledger)
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text(json.dumps(suggestion()) + "\n")
+            with mock.patch.object(peer_hook, "_locked", fake_lock), \
+                 mock.patch.object(ledger_mod, "load", tracking_load), \
+                 mock.patch.object(ledger_mod, "save", tracking_save):
+                peer_hook.run(json.dumps(post_tool_use(cwd=td)))
+
+            self.assertEqual(events, [
+                ("acquire", cc / "delivered.lock"),
+                ("load",),
+                ("save",),
+                ("release", cc / "delivered.lock"),
+            ])
+
+    def test_two_interleaved_hook_processes_deliver_exactly_once(self):
+        """Two concurrent hook subprocesses racing on the same suggestion must
+        result in exactly one delivery, not zero or two."""
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text(json.dumps(suggestion()) + "\n")
+
+            def run_hook():
+                return subprocess.run(
+                    [sys.executable, str(PEER_HOOK)],
+                    input=json.dumps(post_tool_use(cwd=td)),
+                    capture_output=True, text=True, timeout=30,
+                )
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                f1 = pool.submit(run_hook)
+                f2 = pool.submit(run_hook)
+                results = [f1.result(), f2.result()]
+
+            delivered = [r for r in results if r.stdout.strip()]
+            self.assertEqual(len(delivered), 1)
+            ledger = ledger_mod.load(cc / "delivered.json")
+            self.assertTrue(ledger_mod.delivered(ledger, "s1", "context"))
 
 
 class TestDecideContext(unittest.TestCase):

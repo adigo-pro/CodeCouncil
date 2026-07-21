@@ -11,6 +11,7 @@ must never be able to break a developer's session.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import time
@@ -18,9 +19,48 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.store import read_rows as read_suggestions
+from core.store import read_tail_rows as read_suggestions
 from hooks import ledger as ledger_mod
 from hooks.logic import decide
+
+
+@contextlib.contextmanager
+def _locked(lock_path: Path):
+    """Exclusive lock around a load->decide->save span on delivered.json.
+
+    PostToolUse hooks run as fresh subprocesses per event, and multiple
+    concurrent Claude Code sessions on the same repo can fire them at once;
+    without this, two processes can interleave and double-deliver or lose a
+    delivery mark. Must stay fail-open: any error acquiring or using the lock
+    (no fcntl on this platform, the sidecar can't be created, ...) falls back
+    to proceeding without it rather than raising.
+    """
+    fh = None
+    try:
+        import fcntl
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(lock_path, "a+")
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        if fh is not None:
+            try:
+                fh.close()
+            except OSError:
+                pass
+        fh = None
+    try:
+        yield
+    finally:
+        if fh is not None:
+            try:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                fh.close()
+            except OSError:
+                pass
 
 
 def run(stdin_text: str) -> str | None:
@@ -39,11 +79,13 @@ def run(stdin_text: str) -> str | None:
     if not suggestions_file.exists():
         return None
     ledger_path = cc / "delivered.json"
-    ledger = ledger_mod.load(ledger_path)
-    output = decide(event, read_suggestions(suggestions_file), ledger, time.time())
-    if output is None:
-        return None
-    ledger_mod.save(ledger_path, ledger)  # persist only when something was delivered
+    lock_path = cc / "delivered.lock"
+    with _locked(lock_path):
+        ledger = ledger_mod.load(ledger_path)
+        output = decide(event, read_suggestions(suggestions_file), ledger, time.time())
+        if output is None:
+            return None
+        ledger_mod.save(ledger_path, ledger)  # persist only when something was delivered
     return json.dumps(output)
 
 

@@ -32,9 +32,12 @@ def _ask(prompt: str) -> str:
 
 
 def grade_pending(cc: Path) -> int:
-    suggestions = read_ndjson(cc / "suggestions.ndjsonl")
+    # bounded: only the recent tail can hold newly-gradeable suggestions
+    suggestions = read_tail_rows(cc / "suggestions.ndjsonl")
     delivered = ledger_mod.load(cc / "delivered.json")
     outcomes_path = cc / "outcomes.ndjsonl"
+    # unbounded: graded_ids is a dedup set — losing old ids would re-grade
+    # old suggestions, so this one must see the whole file
     graded_ids = {o["suggestion_id"] for o in read_ndjson(outcomes_path)}
     # only recent observations matter here (evidence windows reach back minutes)
     observations = read_tail_rows(cc / "observations.ndjsonl")

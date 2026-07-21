@@ -64,6 +64,57 @@ console.log(JSON.stringify(cases.map((p) => ({{ input: p, ...jailPath(root, p) }
                 str(resolved).startswith(str(root.resolve()) + os.sep)
             )
 
+    def test_symlink_escaping_root_rejected(self):
+        # The exact vector the original Critical centered on: a symlink
+        # *inside* the jail whose target lives outside it. realpathSync
+        # follows the link, so the containment check must catch the
+        # resolved (post-symlink) path, not just the literal request path.
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            root = base / "root"
+            root.mkdir()
+            real_target = base / "real_target"
+            real_target.write_text("outside the jail, reached via symlink\n")
+            os.symlink(real_target, root / "link_out")
+
+            results = self._run_cases(root, ["link_out"])
+
+            self.assertFalse(results["link_out"]["ok"])
+            self.assertIn("outside", results["link_out"]["reason"])
+
+    def test_symlink_within_repo_resolves(self):
+        # An in-repo relative symlink (pointing back into the same
+        # directory via ../subdir/) must still resolve and be accepted —
+        # the jail rejects escapes, not symlinks per se.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "root"
+            (root / "subdir").mkdir(parents=True)
+            (root / "subdir" / "real.txt").write_text("in-repo target\n")
+            os.symlink(Path("../subdir/real.txt"), root / "subdir" / "link_in")
+
+            results = self._run_cases(root, ["subdir/link_in"])
+
+            self.assertTrue(results["subdir/link_in"]["ok"], results["subdir/link_in"])
+            resolved = Path(results["subdir/link_in"]["path"])
+            self.assertTrue(str(resolved).endswith(str(Path("subdir") / "real.txt")))
+
+    def test_directory_symlink_escaping_root_rejected(self):
+        # A symlinked *directory* inside the jail pointing outside it —
+        # walking through it (e.g. "dirlink/anything") must be rejected too,
+        # not just a direct symlink-to-file escape.
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            root = base / "root"
+            root.mkdir()
+            outside_dir = base / "outside_dir"
+            outside_dir.mkdir()
+            (outside_dir / "anything").write_text("outside, via a dir symlink\n")
+            os.symlink(outside_dir, root / "dirlink", target_is_directory=True)
+
+            results = self._run_cases(root, ["dirlink/anything"])
+
+            self.assertFalse(results["dirlink/anything"]["ok"])
+
     def test_escapes_and_workspace_paths_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)

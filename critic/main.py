@@ -132,6 +132,7 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     record = {
         "id": uuid.uuid4().hex[:12],
         "ts": ts,
+        "dispatched_ts": ts,
         "beat": beat,
         "session": majority_session(events),
         "heuristics_version": prompt.heuristics_version(heuristics),
@@ -154,6 +155,7 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
                 record["verification"] = {"status": "error", "note": str(e)[:200]}
         render_verdict(beat, ts, record)
 
+    record["ts"] = now_iso()
     with suggestions_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -209,6 +211,7 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
     record = {
         "id": uuid.uuid4().hex[:12],
         "ts": ctx["ts"],
+        "dispatched_ts": ctx["ts"],
         "beat": ctx["beat"],
         "review_kind": "task",
         "heuristics_version": prompt.heuristics_version(heuristics),
@@ -222,6 +225,7 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
         render_error(ctx["beat"], ctx["ts"], record.get("error", "?"))
     else:
         render_verdict(ctx["beat"], ctx["ts"], record)
+    record["ts"] = now_iso()
     with suggestions_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 

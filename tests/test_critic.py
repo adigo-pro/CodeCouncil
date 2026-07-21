@@ -211,6 +211,46 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["n_events"], 2)  # merged: held reasoning + new diff
 
+    def test_record_has_dispatched_ts_and_ts_at_write_time(self):
+        """Task 3: record["ts"] is stamped at write time, not dispatch time."""
+        from datetime import datetime
+        self._set_stub("PASS")
+        self._write_obs([
+            {"ts": "t", "beat": 1, "type": "diff", "session": None,
+             "payload": {"diff": "+code", "stat": "", "untracked": []}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        self._beat(state, TurnScheduler())
+        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        # Both fields present
+        self.assertIn("dispatched_ts", row)
+        self.assertIn("ts", row)
+        # ts >= dispatched_ts (model call + verification adds latency)
+        dispatched = datetime.fromisoformat(row["dispatched_ts"]).timestamp()
+        written = datetime.fromisoformat(row["ts"]).timestamp()
+        self.assertGreaterEqual(written, dispatched)
+
+    def test_ts_is_usable_by_age_ok(self):
+        """Task 3: record["ts"] at write time is usable by hooks/logic._age_ok."""
+        from datetime import datetime
+        from hooks import logic
+        import time
+        self._set_stub("PASS")
+        self._write_obs([
+            {"ts": "t", "beat": 1, "type": "diff", "session": None,
+             "payload": {"diff": "+code", "stat": "", "untracked": []}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        self._beat(state, TurnScheduler())
+        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        row = rows[0]
+        # The written ts should pass the age check (TTL is 600s)
+        now = time.time()
+        self.assertTrue(logic._age_ok(row, now),
+                        f"Age check failed for ts={row['ts']}, now={now}")
+
     def test_judge_every_beat_bypasses_gate(self):
         self._set_stub("PASS")
         self._write_obs([

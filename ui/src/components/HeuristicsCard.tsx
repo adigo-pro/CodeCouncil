@@ -59,8 +59,8 @@ export function HeuristicsCard({ data }: { data: Council | null }) {
             Rewrite history
           </p>
           <ul className="mt-3 space-y-2.5">
-            {h.rewrites.slice(0, 4).map((r) => (
-              <li key={`${r.from}-${r.to}`} className="text-[13px] leading-snug">
+            {h.rewrites.slice(0, 4).map((r, i) => (
+              <li key={`${r.from}-${r.to}-${r.ts}-${i}`} className="text-[13px] leading-snug">
                 <span className="font-mono text-xs text-muted-foreground">
                   v{r.from}→v{r.to} · {ago(r.ts, data?.now)} ago ·{" "}
                   {["accepted", "rebutted", "ignored"]

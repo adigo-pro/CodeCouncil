@@ -97,6 +97,22 @@ class TestFailOpen(unittest.TestCase):
             self.assertEqual(res2.stdout, "")
 
 
+    def test_end_to_end_receipt_announcement_via_subprocess(self):
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            (cc / "receipts").mkdir(parents=True)
+            (cc / "receipts" / "repo-20260101-000000.md").write_text("# receipt\n")
+            res = self._run(json.dumps(post_tool_use(cwd=td)))
+            self.assertEqual(res.returncode, 0)
+            out = json.loads(res.stdout)
+            ctx = out["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("CodeCouncil wrote a session receipt:", ctx)
+            self.assertIn("repo-20260101-000000.md", ctx)
+            # second run: ledger persisted, receipt not re-announced
+            res2 = self._run(json.dumps(post_tool_use(cwd=td)))
+            self.assertEqual(res2.stdout, "")
+
+
 class TestPeerHookLocking(unittest.TestCase):
     """PostToolUse hooks run as fresh subprocesses per event, potentially from
     concurrent Claude Code sessions on the same repo. The load->decide->save
@@ -328,6 +344,78 @@ class TestSessionScopedDelivery(unittest.TestCase):
     def test_tagged_row_delivered_when_event_lacks_session_id_block(self):
         rows = [suggestion(session="sess-A")]
         out = decide(stop_event(), rows, {}, NOW)
+        self.assertIsNotNone(out)
+
+
+class TestReceiptAnnouncement(unittest.TestCase):
+    """Task: surface the newest unannounced session receipt into the coding
+    agent's transcript. decide() takes filenames+paths as data (peer_hook.py
+    does the directory listing) so it stays pure and fs-free."""
+
+    def _receipt(self, name="sess-a-20260101-120000.md", path=None):
+        return {"name": name, "path": path or f"/tmp/.codecouncil/receipts/{name}"}
+
+    def test_receipt_announced_once_on_post_tool_use(self):
+        ledger = {}
+        out = decide(post_tool_use(), [], ledger, NOW, receipts=[self._receipt()])
+        self.assertIsNotNone(out)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("CodeCouncil wrote a session receipt:", ctx)
+        self.assertIn("sess-a-20260101-120000.md", ctx)
+        self.assertTrue(ledger_mod.receipt_announced(ledger, "sess-a-20260101-120000.md"))
+        # second call: same receipt must not be re-announced
+        out2 = decide(post_tool_use(), [], ledger, NOW, receipts=[self._receipt()])
+        self.assertIsNone(out2)
+
+    def test_receipt_appended_to_existing_findings_text(self):
+        rows = [suggestion()]
+        ledger = {}
+        out = decide(post_tool_use(), rows, ledger, NOW, receipts=[self._receipt()])
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("bug here", ctx)
+        self.assertIn("CodeCouncil wrote a session receipt:", ctx)
+
+    def test_no_receipts_unchanged_output(self):
+        rows = [suggestion()]
+        ledger = {}
+        out = decide(post_tool_use(), rows, ledger, NOW)  # default receipts=()
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("session receipt", ctx)
+
+    def test_newest_first_only_one_announced_per_event(self):
+        ledger = {}
+        receipts = [self._receipt("new.md"), self._receipt("old.md")]
+        out = decide(post_tool_use(), [], ledger, NOW, receipts=receipts)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("new.md", ctx)
+        self.assertNotIn("old.md", ctx)
+
+    def test_user_prompt_submit_announces_receipt(self):
+        ledger = {}
+        out = decide({"hook_event_name": "UserPromptSubmit", "cwd": "/x"}, [], ledger, NOW,
+                     receipts=[self._receipt()])
+        self.assertIsNotNone(out)
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+
+    def test_stop_does_not_announce_receipt(self):
+        # Investigation: Claude Code's Stop hook JSON only supports
+        # decision:"block"/reason — there is no additionalContext (or other
+        # non-blocking text) channel for Stop, so a receipt can't be surfaced
+        # there without also blocking the agent's completion. Receipts are
+        # therefore announced only on PostToolUse / UserPromptSubmit; an
+        # unannounced receipt just waits for the next one of those (session
+        # start already does the same thing for findings).
+        ledger = {}
+        out = decide(stop_event(), [], ledger, NOW, receipts=[self._receipt()])
+        self.assertIsNone(out)
+        self.assertFalse(ledger_mod.receipt_announced(ledger, "sess-a-20260101-120000.md"))
+
+    def test_decide_stays_pure_no_filesystem_access(self):
+        ledger = {}
+        with mock.patch("pathlib.Path.glob", side_effect=AssertionError("decide() touched fs")), \
+             mock.patch("pathlib.Path.iterdir", side_effect=AssertionError("decide() touched fs")), \
+             mock.patch("pathlib.Path.exists", side_effect=AssertionError("decide() touched fs")):
+            out = decide(post_tool_use(), [], ledger, NOW, receipts=[self._receipt()])
         self.assertIsNotNone(out)
 
 

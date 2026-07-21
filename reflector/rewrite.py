@@ -84,7 +84,14 @@ def gate_candidate(candidate_text: str, current_text: str) -> tuple[bool, str]:
     """Score a rewrite candidate against the current heuristics on the frozen
     eval cases before it's allowed to land — format-valid isn't good enough,
     it has to not be a regression. Same cases, same stub, one model call per
-    case per side. No eval cases at all => ungated (pass through)."""
+    case per side. No eval cases at all => ungated (pass through).
+
+    Cost note: this is 2×len(cases) real model calls per attempt (candidate
+    + current, one call per case each) — not cheap if the eval set grows
+    large. reflector.main.maybe_rewrite bounds how often that fan-out can
+    fire by backing off (state["n_graded_at_last_rewrite"]) after any
+    rejection here, so a rejected candidate doesn't get regenerated and
+    re-scored every reflector pass against the same stale outcomes."""
     from evals.run import load_cases, score_heuristics  # lazy: keep import graph clean
 
     cases = load_cases()

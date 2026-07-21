@@ -326,6 +326,9 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
         print(f"critic: receipt failed ({e})")
 
 
+MAX_BATCH_RETRIES = 3  # a batch failing this many dispatches in a row is dropped, not requeued forever
+
+
 class TurnScheduler:
     """At most one agent turn in flight; events accumulate (never drop) while
     busy or gated, and dispatch as one merged batch when possible."""
@@ -346,6 +349,13 @@ class TurnScheduler:
         # worker thread mutates it in _run()'s failure path (re-queueing a
         # batch whose judge_fn raised) — both must not race.
         self._lock = threading.Lock()
+        # Consecutive judge_fn failures since the last successful dispatch.
+        # A single scheduler-wide counter (not one per batch) is enough
+        # because dispatch is fully serialized — only one batch can ever be
+        # "the" failing one at a time — and it resets to 0 the moment any
+        # dispatch succeeds, so an old poisoned batch's failures never carry
+        # over to unfairly doom an unrelated later batch.
+        self._requeue_count = 0
 
     def busy(self) -> bool:
         return self.thread is not None and self.thread.is_alive()
@@ -387,10 +397,26 @@ class TurnScheduler:
             # still carries the diff/commit events that opened the gate the
             # first time. on_committed is skipped: this offset span did not
             # durably land.
+            self._requeue_count += 1
+            if self._requeue_count >= MAX_BATCH_RETRIES:
+                # A batch that fails MAX_BATCH_RETRIES dispatches in a row is
+                # poisoned, not unlucky — requeueing it again would spin
+                # forever (unbounded pending growth, the observation stream
+                # never advances). Drop it. committed_offset is deliberately
+                # left untouched (see submit()/on_committed above): on a
+                # daemon restart the dropped span will simply be replayed
+                # and re-judged once, which is the lesser evil next to
+                # letting a poison batch wedge the scheduler permanently.
+                print(f"critic: batch dropped after {MAX_BATCH_RETRIES} failed judgments "
+                      f"({e}) — events lost: {len(batch)}")
+                self._requeue_count = 0
+                return
             with self._lock:
                 self.pending = batch + self.pending
-            print(f"critic: batch judgment failed ({e}); re-queued {len(batch)} event(s)")
+            print(f"critic: batch judgment failed ({e}); re-queued {len(batch)} event(s) "
+                  f"(attempt {self._requeue_count}/{MAX_BATCH_RETRIES})")
             return
+        self._requeue_count = 0
         if self.on_committed is not None and offset_at_dispatch is not None:
             self.on_committed(offset_at_dispatch)
 

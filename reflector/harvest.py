@@ -23,6 +23,12 @@ from pathlib import Path
 # watched repo's .codecouncil/ dir) — harvested cases are versioned right
 # alongside the hand-made ones so evals.run.load_cases and the rewrite gate
 # see both. A module-level Path (not a function) so tests can monkeypatch it.
+#
+# Deliberately global, not per-watched-repo: every repo CodeCouncil watches
+# harvests into this one shared directory, so a finding graded in repo A
+# strengthens the eval gate (and therefore the heuristics) used while
+# watching repo B too. Cross-repo learning is the point, not an accident —
+# don't scope this path by repo.
 HARVESTED_DIR = Path(__file__).resolve().parents[1] / "evals" / "cases-harvested"
 
 MAX_HARVESTED = 40

@@ -76,17 +76,32 @@ def run(stdin_text: str) -> str | None:
                                     "session": event.get("session_id", "")}) + "\n")
         except OSError:
             pass
-    if not suggestions_file.exists():
+    receipts_dir = cc / "receipts"
+    if not suggestions_file.exists() and not receipts_dir.is_dir():
         return None
+    receipts = _list_receipts(receipts_dir)
     ledger_path = cc / "delivered.json"
     lock_path = cc / "delivered.lock"
     with _locked(lock_path):
         ledger = ledger_mod.load(ledger_path)
-        output = decide(event, read_suggestions(suggestions_file), ledger, time.time())
+        output = decide(event, read_suggestions(suggestions_file), ledger, time.time(),
+                        receipts=receipts)
         if output is None:
             return None
         ledger_mod.save(ledger_path, ledger)  # persist only when something was delivered
     return json.dumps(output)
+
+
+def _list_receipts(receipts_dir: Path) -> list[dict]:
+    """Receipt files (critic.receipt.write_receipt output), newest first —
+    the only fs access for receipt announcement; decide() stays pure."""
+    if not receipts_dir.is_dir():
+        return []
+    try:
+        files = sorted(receipts_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return []
+    return [{"name": p.name, "path": str(p)} for p in files]
 
 
 def main() -> int:

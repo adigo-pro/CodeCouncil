@@ -665,6 +665,91 @@ class TestSchedulerRequeueOnFailure(unittest.TestCase):
         self.assertEqual(committed, [20])
 
 
+class TestSchedulerPoisonBatchDrop(unittest.TestCase):
+    """A batch whose judge_fn keeps raising (a genuinely poisoned batch, not
+    a transient failure) must not be re-queued forever — that's unbounded
+    memory growth and an event stream that never advances. After
+    MAX_BATCH_RETRIES failed dispatches of the same batch, it's dropped with
+    a loud warning instead of re-queued again."""
+
+    def test_batch_dropped_after_max_retries_with_warning_and_committed_offset_untouched(self):
+        import io
+        from contextlib import redirect_stdout
+
+        from critic.main import MAX_BATCH_RETRIES, TurnScheduler
+
+        calls = []
+        committed = []
+
+        def always_fail(batch, ctx):
+            calls.append(list(batch))
+            raise RuntimeError("boom")
+
+        s = TurnScheduler(judge_fn=always_fail, judge_every_beat=True,
+                          on_committed=lambda off: committed.append(off))
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            status = s.submit([{"type": "diff", "id": "A"}], {"offset_now": 10})
+            self.assertEqual(status, "dispatched")
+            s.thread.join()
+            self.assertEqual(s.pending, [{"type": "diff", "id": "A"}])  # requeued (1/3)
+
+            for _ in range(MAX_BATCH_RETRIES - 2):
+                # redispatch the same requeued batch — nothing new merges in
+                status = s.submit([], {"offset_now": 10})
+                self.assertEqual(status, "dispatched")
+                s.thread.join()
+                # still under the limit: requeued, not dropped
+                self.assertEqual(s.pending, [{"type": "diff", "id": "A"}])
+
+            # final failing dispatch hits the limit and drops the batch
+            status = s.submit([], {"offset_now": 10})
+            self.assertEqual(status, "dispatched")
+            s.thread.join()
+
+        self.assertEqual(len(calls), MAX_BATCH_RETRIES)
+        self.assertEqual(s.pending, [])  # dropped, not requeued
+        self.assertEqual(committed, [])  # never advanced — a restart will replay this span once
+        self.assertIn("critic: batch dropped after", buf.getvalue())
+        self.assertIn("events lost: 1", buf.getvalue())
+
+    def test_retry_count_resets_after_a_successful_dispatch(self):
+        """Only one batch can be failing at a time given serialization, so a
+        single scheduler-wide counter is enough — but it must reset once a
+        batch actually succeeds, or a later unrelated failure would be
+        dropped too early."""
+        from critic.main import MAX_BATCH_RETRIES, TurnScheduler
+
+        outcomes = iter([Exception("boom"), Exception("boom"), None, Exception("boom")])
+
+        def flaky(batch, ctx):
+            outcome = next(outcomes)
+            if outcome is not None:
+                raise outcome
+
+        s = TurnScheduler(judge_fn=flaky, judge_every_beat=True)
+
+        s.submit([{"type": "diff"}], {})  # failure 1/3
+        s.thread.join()
+        self.assertEqual(s.pending, [{"type": "diff"}])
+        s.submit([], {})  # redispatch same batch: failure 2/3 — still under MAX_BATCH_RETRIES
+        s.thread.join()
+        self.assertEqual(s.pending, [{"type": "diff"}])
+
+        s.submit([], {})  # third dispatch succeeds -> resets the counter
+        s.thread.join()
+        self.assertEqual(s.pending, [])
+
+        # a fresh failure afterwards must count as attempt 1, not 4 — so it
+        # is requeued rather than dropped even though MAX_BATCH_RETRIES == 3
+        # failures have happened across the scheduler's lifetime.
+        s.submit([{"type": "diff"}], {})
+        s.thread.join()
+        self.assertEqual(s.pending, [{"type": "diff"}])
+        self.assertLess(1, MAX_BATCH_RETRIES)  # sanity: this is attempt 1 of the budget
+
+
 class TestSessionTagging(unittest.TestCase):
     """Task 2: findings tag back to the session that produced them, so hooks
     can scope delivery instead of broadcasting every finding to every session."""

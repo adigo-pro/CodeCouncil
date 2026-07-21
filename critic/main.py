@@ -34,11 +34,21 @@ from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
 
-# Read-only pi builtins for judgment turns (Task 4): the model may look before
-# it flags, but a judgment turn must never be able to mutate the developer's
-# repo — explicitly never "bash", never "edit"/"write". Verification turns
-# keep their separate, sandboxed tool set (critic/verify.py, staging dir only).
-JUDGE_TOOLS = "read,grep,find,ls"
+# Path-jailed, read-only tools for judgment turns (Task 4 + hardening): the
+# model may look before it flags, but a judgment turn must never be able to
+# mutate the developer's repo (never "bash", never "edit"/"write") NOR read
+# outside it. pi's *builtin* read/grep/find/ls resolve absolute and "~"
+# paths straight through regardless of cwd — the --tools allowlist only
+# gates which tool names are active, not which paths a tool may touch — so
+# offering them here with cwd=<watched repo> would let the model read
+# ~/.codecouncil/env (cleartext NVIDIA_API_KEY) or ~/.ssh/*. These four are
+# a separate, jailed implementation (critic/pi_extensions/repo_tools.mjs):
+# every path is realpath-resolved and checked against the repo root before
+# any filesystem access, with .git/.codecouncil excluded (the critic's own
+# workspace stays invisible, same discipline as verify.py's staging dir).
+# Verification turns keep their own, separately-sandboxed tool set
+# (critic/verify.py, throwaway staging directory, never the developer's repo).
+JUDGE_TOOLS = "repo_read,repo_grep,repo_find,repo_ls"
 
 
 def load_state(path: Path) -> dict:

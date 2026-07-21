@@ -561,10 +561,16 @@ class TestJudgeToolsPlumbing(unittest.TestCase):
 
     def test_constant_is_read_only(self):
         from critic.main import JUDGE_TOOLS
-        self.assertEqual(JUDGE_TOOLS, "read,grep,find,ls")
+        self.assertEqual(JUDGE_TOOLS, "repo_read,repo_grep,repo_find,repo_ls")
         self.assertNotIn("bash", JUDGE_TOOLS.split(","))
         self.assertNotIn("edit", JUDGE_TOOLS.split(","))
         self.assertNotIn("write", JUDGE_TOOLS.split(","))
+        # Distinct names from pi's builtins by construction — the allowlist
+        # can never accidentally select a path-unsafe builtin of the same
+        # short name (builtin "read" resolves absolute/~ paths; "repo_read"
+        # is jailed). See critic/pi_extensions/repo_tools.mjs.
+        for name in JUDGE_TOOLS.split(","):
+            self.assertNotIn(name, ("read", "grep", "find", "ls"))
 
     def test_judgment_turn_passes_repo_tools(self):
         from critic import main as main_mod

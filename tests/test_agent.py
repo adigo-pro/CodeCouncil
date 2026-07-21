@@ -84,15 +84,24 @@ class TestAskCommandConstruction(unittest.TestCase):
                 with mock.patch.dict(os.environ, {"PI_BIN": str(stub)}, clear=False):
                     os.environ.pop("COUNCIL_MODEL", None)
                     os.environ.pop("NVIDIA_API_KEY", None)
-                    agent.ask("investigate this", tools="read,grep,find,ls",
+                    agent.ask("investigate this", tools="repo_read,repo_grep,repo_find,repo_ls",
                               cwd=str(work_dir))
 
             argv = argv_file.read_text().splitlines()
             self.assertIn("--tools", argv)
             tools_idx = argv.index("--tools")
-            self.assertEqual(argv[tools_idx + 1], "read,grep,find,ls")
+            self.assertEqual(argv[tools_idx + 1], "repo_read,repo_grep,repo_find,repo_ls")
             self.assertNotIn("bash", argv[tools_idx + 1].split(","))
             self.assertEqual(pwd_file.read_text().strip(), str(work_dir.resolve()))
+
+            # Both extensions attached — the jailed repo_* tools alongside
+            # the (unrelated) NVIDIA provider extension. Order isn't asserted
+            # since agent.py's own attach order is an implementation detail;
+            # what matters is both paths are present as --extension values.
+            extension_flags = [argv[i + 1] for i, a in enumerate(argv) if a == "--extension"]
+            self.assertEqual(argv.count("--extension"), 2)
+            self.assertIn(str(agent.NVIDIA_EXTENSION), extension_flags)
+            self.assertIn(str(agent.REPO_TOOLS_EXTENSION), extension_flags)
 
 
 if __name__ == "__main__":

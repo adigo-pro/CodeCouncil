@@ -27,6 +27,13 @@ TURN_TIMEOUT = 180
 
 CRITIC_PERSONA = Path(__file__).parent / "persona.md"
 NVIDIA_EXTENSION = Path(__file__).parent / "pi_extensions" / "nvidia_provider.mjs"
+# repo_read/repo_grep/repo_find/repo_ls: path-jailed read-only tools for
+# judgment turns (Task 4). Always attached (harmless when tools unused) —
+# pi's *builtin* read/grep/find/ls resolve absolute/~ paths outside cwd, so
+# they cannot safely be offered to a turn that also has cwd=<watched repo>;
+# these jail every path to the repo root and exclude .git/.codecouncil. See
+# critic/pi_extensions/repo_tools.mjs for the jail implementation.
+REPO_TOOLS_EXTENSION = Path(__file__).parent / "pi_extensions" / "repo_tools.mjs"
 LOCAL_ENV_FILE = Path.home() / ".codecouncil" / "env"
 DEFAULT_NVIDIA_MODEL = "nvidia-nim/nvidia/nemotron-3-super-120b-a12b"
 
@@ -87,10 +94,13 @@ def ask(prompt: str, system: str | None = None, tools: str | None = None,
     cmd = [env.get("PI_BIN", "pi"), "-p", "--no-session",
            "--no-context-files", "--no-extensions", "--no-skills",
            "--no-prompt-templates", "--no-themes"]
-    # -ne above disables discovery of *installed* extensions; an explicit -e
-    # path still loads (registers the "nvidia" provider), harmless if unused
+    # -ne above disables discovery of *installed* extensions; explicit -e
+    # paths still load (register the "nvidia" provider / repo_* tools),
+    # harmless if unused by a given turn.
     if NVIDIA_EXTENSION.is_file():
         cmd += ["--extension", str(NVIDIA_EXTENSION)]
+    if REPO_TOOLS_EXTENSION.is_file():
+        cmd += ["--extension", str(REPO_TOOLS_EXTENSION)]
     cmd += ["--tools", tools] if tools else ["--no-tools"]
     if system:
         cmd += ["--system-prompt", system]

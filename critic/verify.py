@@ -54,6 +54,32 @@ REPRO_MAX_CHARS = 200
 
 VERIFY_TOOLS = "read,bash,write,ls"
 
+# The repro command is model-authored, built from a turn that read semi-
+# trusted file content (the flagged file itself), and is delivered to a
+# coding agent as something it will likely run verbatim in the real repo
+# (hooks/logic.py's "[suggested repro ...]" text). safe_repro() is a coarse
+# allowlist, not a sandbox: it only screens out the shapes that let one
+# command smuggle a second (pipes, substitution, redirection, chaining) and
+# restricts the first token to known-benign dev-tool invocations. Anything
+# it rejects is simply never delivered — see verify_finding below.
+REPRO_ALLOWED_PREFIXES = frozenset({
+    "python3", "python", "pytest", "node", "npm", "go", "cargo", "make",
+})
+REPRO_UNSAFE_SUBSTRINGS = ("|", ";", "&", "$(", "`", ">", "<", "&&", "\n")
+
+
+def safe_repro(cmd: str) -> bool:
+    """True only when `cmd` starts with an allowlisted dev-tool token AND
+    contains none of the shell metacharacters that could chain in a second
+    command."""
+    stripped = cmd.strip()
+    if not stripped:
+        return False
+    first_token = stripped.split()[0]
+    if first_token not in REPRO_ALLOWED_PREFIXES:
+        return False
+    return not any(bad in stripped for bad in REPRO_UNSAFE_SUBSTRINGS)
+
 
 def build_prompt(suggestion: dict, staged_path: str) -> str:
     loc = f"{suggestion['file']}:{suggestion['line']}" if suggestion.get("line") else suggestion["file"]
@@ -93,12 +119,16 @@ def parse(raw: str) -> dict:
     if matches:
         bracket_label, colon_label, note = matches[-1]
         status = (bracket_label or colon_label).upper()
-        result = {"status": STATUSES[status], "note": note.strip()[:300]}
+        result = {"status": STATUSES[status], "note": redact(note.strip())[:300]}
     else:
         result = {"status": "inconclusive", "note": f"unparseable verify reply: {raw[:200]}"}
-    repro_matches = _REPRO_RE.findall(stripped)
-    if repro_matches:
-        result["repro"] = _cap(redact(repro_matches[-1].strip()), REPRO_MAX_CHARS)
+    # A repro is only ever meaningful (and only ever delivered) for a
+    # confirmed finding — dropping it here for refuted/inconclusive replies
+    # means no dead repro key ever lands in those rows.
+    if result["status"] == "verified":
+        repro_matches = _REPRO_RE.findall(stripped)
+        if repro_matches:
+            result["repro"] = _cap(redact(repro_matches[-1].strip()), REPRO_MAX_CHARS)
     return result
 
 
@@ -122,4 +152,10 @@ def verify_finding(repo: Path, suggestion: dict, system: str | None = None) -> d
     result = parse(reply)
     if "repro" in result:
         result["repro"] = localize_repro(result["repro"], staging)
+        # The repro is model-authored from semi-trusted file content and is
+        # delivered to a coding agent as something worth running verbatim
+        # (hooks/logic.py) — an unsafe shape (pipes, substitution, chaining)
+        # is dropped here rather than shipped. The finding + note survive.
+        if not safe_repro(result["repro"]):
+            del result["repro"]
     return result

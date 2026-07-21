@@ -418,6 +418,21 @@ class TestProjectContextInvariants(unittest.TestCase):
         self.assertIn(f"… [{len(full)} chars total]", text)
         self.assertLess(text.count("x"), len(full))
 
+    def test_unreadable_claude_md_does_not_raise_and_omits_block(self):
+        # Daemons never die on a filesystem hiccup (CLAUDE.md.excerpt): an
+        # OSError reading CLAUDE.md (permission denied, race with a delete,
+        # ...) must not crash project_context, just skip the block.
+        (self.repo / "CLAUDE.md").write_text("Loop boundaries.", encoding="utf-8")
+        with mock.patch.object(Path, "read_text", side_effect=OSError("boom")):
+            text = project_context(self.repo)
+        self.assertNotIn("REPO INVARIANTS:", text)
+
+    def test_unreadable_readme_does_not_raise_and_omits_block(self):
+        (self.repo / "README.md").write_text("hello", encoding="utf-8")
+        with mock.patch.object(Path, "read_text", side_effect=OSError("boom")):
+            text = project_context(self.repo)
+        self.assertNotIn("README:", text)
+
 
 class TestHeartbeatWithStub(unittest.TestCase):
     def setUp(self):

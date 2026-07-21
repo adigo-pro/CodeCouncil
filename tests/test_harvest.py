@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from evals.run import load_cases
 from observer import transcript
 from reflector import harvest
+from tests.harvest_isolation import HarvestIsolatedTestCase
 
 
 def _suggestion_row(sid="s1", file="a.py", issue="off-by-one", verification=None,
@@ -35,16 +36,13 @@ def _write_material(cc: Path, sid: str, events=None, latest_diff=None) -> None:
     (d / f"{sid}.json").write_text(json.dumps(material), encoding="utf-8")
 
 
-class TestMaybeHarvest(unittest.TestCase):
+class TestMaybeHarvest(HarvestIsolatedTestCase):
     def setUp(self):
+        super().setUp()
         self.td = tempfile.TemporaryDirectory()
         self.cc = Path(self.td.name) / ".codecouncil"
-        self.harvested_dir = Path(self.td.name) / "cases-harvested"
-        self.patcher = mock.patch.object(harvest, "HARVESTED_DIR", self.harvested_dir)
-        self.patcher.start()
 
     def tearDown(self):
-        self.patcher.stop()
         self.td.cleanup()
 
     def test_accepted_verified_writes_flag_case(self):
@@ -71,13 +69,13 @@ class TestMaybeHarvest(unittest.TestCase):
     def test_accepted_verified_case_is_loadable_by_evals_run(self):
         # harvest.HARVESTED_DIR and evals.run.HARVESTED_CASES_DIR both name the
         # same real directory (evals/cases-harvested/) independently — in
-        # production they always agree; in this test both must be patched to
-        # the same temp dir to stay hermetic against the real repo's contents.
+        # production they always agree; HarvestIsolatedTestCase.setUp already
+        # points both at the same temp dir (self.harvested_dir) to stay
+        # hermetic against the real repo's contents.
         _write_material(self.cc, "s1", events=[{"type": "diff", "payload": {"diff": "+x"}}])
         row = _suggestion_row("s1", verification={"status": "verified"})
         harvest.maybe_harvest(self.cc, row, "accepted")
-        with mock.patch("evals.run.CASES_DIR", Path(self.td.name) / "no-hand-made"), \
-             mock.patch("evals.run.HARVESTED_CASES_DIR", self.harvested_dir):
+        with mock.patch("evals.run.CASES_DIR", Path(self.td.name) / "no-hand-made"):
             cases = load_cases()
         names = [c["name"] for c in cases]
         self.assertIn("harvest-s1", names)

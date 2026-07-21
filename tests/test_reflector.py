@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from reflector import judge, rewrite
 from reflector.report import build_mode_rows, build_rows, build_rule_rows, consistent
+from tests.harvest_isolation import HarvestIsolatedTestCase
 
 NOW = time.time()
 
@@ -31,7 +32,7 @@ def sugg(sid="s1", ts=None, version=1, rule=None, failure_mode=None):
                            "failure_mode": failure_mode}}
 
 
-class TestGradePendingBoundedReads(unittest.TestCase):
+class TestGradePendingBoundedReads(HarvestIsolatedTestCase):
     """suggestions.ndjsonl grows unbounded over a session; grade_pending only
     needs recent rows to find newly-gradeable suggestions, so it must read it
     via read_tail_rows. outcomes.ndjsonl's graded_ids dedup set must stay a
@@ -631,18 +632,16 @@ print('{"outcome": "accepted", "evidence": "diff added the guard"}')
 """
 
 
-class TestGradePendingHarvestsCases(unittest.TestCase):
+class TestGradePendingHarvestsCases(HarvestIsolatedTestCase):
     """Task 8: grade_pending must call reflector.harvest.maybe_harvest after
     appending each outcome row, so accepted/rebutted findings with case
     material grow the frozen eval set."""
 
     def setUp(self):
+        super().setUp()
         self.td = tempfile.TemporaryDirectory()
         self.cc = Path(self.td.name) / ".codecouncil"
         self.cc.mkdir()
-        self.harvested_dir = Path(self.td.name) / "cases-harvested"
-        self.patcher = mock.patch("reflector.harvest.HARVESTED_DIR", self.harvested_dir)
-        self.patcher.start()
 
         (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
             "id": "s1", "ts": _iso(NOW - 400), "verdict": "SUGGESTION",
@@ -661,7 +660,6 @@ class TestGradePendingHarvestsCases(unittest.TestCase):
         }), encoding="utf-8")
 
     def tearDown(self):
-        self.patcher.stop()
         os.environ.pop("CRITIC_CMD", None)
         self.td.cleanup()
 
@@ -735,12 +733,13 @@ else:
 """
 
 
-class TestGradePendingCreditsUntrackedFix(unittest.TestCase):
+class TestGradePendingCreditsUntrackedFix(HarvestIsolatedTestCase):
     """Fix 3: a real fix living entirely in an untracked file (never a tracked
     diff) must reach the grading model via evidence(), or it gets
     under-credited as 'ignored' — observed live."""
 
     def setUp(self):
+        super().setUp()
         self.td = tempfile.TemporaryDirectory()
         self.cc = Path(self.td.name) / ".codecouncil"
         self.cc.mkdir()
@@ -790,18 +789,16 @@ else:
 """
 
 
-class TestGradePendingDistillsKnowledge(unittest.TestCase):
+class TestGradePendingDistillsKnowledge(HarvestIsolatedTestCase):
     """Task 5: a rebutted grade — on either the explicit-marker path or the
     model-judged path — distills into .codecouncil/knowledge.md so the same
     rebuttal never has to recur."""
 
     def setUp(self):
+        super().setUp()
         self.td = tempfile.TemporaryDirectory()
         self.cc = Path(self.td.name) / ".codecouncil"
         self.cc.mkdir()
-        self.harvested_dir = Path(self.td.name) / "cases-harvested"
-        self.patcher = mock.patch("reflector.harvest.HARVESTED_DIR", self.harvested_dir)
-        self.patcher.start()
 
         (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
             "id": "s1", "ts": _iso(NOW - 400), "verdict": "SUGGESTION",
@@ -813,7 +810,6 @@ class TestGradePendingDistillsKnowledge(unittest.TestCase):
             json.dumps({"s1": {"context": NOW - 300}}), encoding="utf-8")
 
     def tearDown(self):
-        self.patcher.stop()
         os.environ.pop("CRITIC_CMD", None)
         self.td.cleanup()
 
@@ -871,7 +867,7 @@ class TestGradePendingDistillsKnowledge(unittest.TestCase):
         self.assertFalse((self.cc / "knowledge.md").exists())
 
 
-class TestOutcomeRowsCarryRule(unittest.TestCase):
+class TestOutcomeRowsCarryRule(HarvestIsolatedTestCase):
     """Task 6: outcome rows copy "rule" from the suggestion being graded, on
     both the explicit-rebuttal and model-judged paths — so every grade
     traces back to the heuristic that caused it. "missed"/"undelivered"
@@ -882,15 +878,12 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
     missed/undelivered exclusion — mirrored fixtures below."""
 
     def setUp(self):
+        super().setUp()
         self.td = tempfile.TemporaryDirectory()
         self.cc = Path(self.td.name) / ".codecouncil"
         self.cc.mkdir()
-        self.harvested_dir = Path(self.td.name) / "cases-harvested"
-        self.patcher = mock.patch("reflector.harvest.HARVESTED_DIR", self.harvested_dir)
-        self.patcher.start()
 
     def tearDown(self):
-        self.patcher.stop()
         os.environ.pop("CRITIC_CMD", None)
         self.td.cleanup()
 
@@ -956,18 +949,16 @@ class TestOutcomeRowsCarryRule(unittest.TestCase):
         self.assertNotIn("failure_mode", outcomes[0])
 
 
-class TestMissedGrading(unittest.TestCase):
+class TestMissedGrading(HarvestIsolatedTestCase):
     """Task 3: grade_pending must also detect PASS verdicts later contradicted
     by a fix commit (reflector.misses), grade them 'missed' with no model
     call, and harvest them as must-flag eval cases."""
 
     def setUp(self):
+        super().setUp()
         self.td = tempfile.TemporaryDirectory()
         self.cc = Path(self.td.name) / ".codecouncil"
         self.cc.mkdir()
-        self.harvested_dir = Path(self.td.name) / "cases-harvested"
-        self.patcher = mock.patch("reflector.harvest.HARVESTED_DIR", self.harvested_dir)
-        self.patcher.start()
 
         self.pass_ts = NOW - 3000
         (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
@@ -988,7 +979,6 @@ class TestMissedGrading(unittest.TestCase):
         }), encoding="utf-8")
 
     def tearDown(self):
-        self.patcher.stop()
         self.td.cleanup()
 
     def test_missed_pass_gets_graded_and_harvested(self):

@@ -76,8 +76,12 @@ def _describe(row: dict) -> str:
         text += f" [verified by repro: {v.get('note', '')}]"
         if v.get("repro"):
             # the receiving end is a coding AGENT, not a human — a runnable
-            # command it can execute itself beats another line of prose
-            text += f" [verify yourself: {v['repro']}]"
+            # command it can execute itself beats another line of prose. But
+            # the command is model-authored from semi-trusted file content
+            # (critic/verify.py) — phrase it as something to look at, not an
+            # imperative a coding agent will reflexively execute in the real
+            # repo.
+            text += f" [suggested repro (review before running): {v['repro']}]"
     return text
 
 

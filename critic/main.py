@@ -89,11 +89,14 @@ def project_context(repo: Path) -> str:
         pass
     readme = repo / "README.md"
     if readme.exists():
-        excerpt = " ".join(
-            l.strip() for l in readme.read_text(encoding="utf-8", errors="replace").splitlines()[:20]
-            if l.strip()
-        )
-        lines.append("README: " + excerpt[:600])
+        try:
+            excerpt = " ".join(
+                l.strip() for l in readme.read_text(encoding="utf-8", errors="replace").splitlines()[:20]
+                if l.strip()
+            )
+            lines.append("README: " + excerpt[:600])
+        except OSError:
+            pass
     # REPO INVARIANTS rides in EVERY prompt — this "project" string is passed
     # to both build_prompt and build_task_review (Task 3) unconditionally,
     # not gated behind is_plan_material — because invariant-aware criticism
@@ -103,10 +106,13 @@ def project_context(repo: Path) -> str:
     # plan document's own steps against this same block.
     claude_md = repo / "CLAUDE.md"
     if claude_md.exists():
-        text = claude_md.read_text(encoding="utf-8", errors="replace")
-        if len(text) > CLAUDE_MD_EXCERPT_CHARS:
-            text = text[:CLAUDE_MD_EXCERPT_CHARS] + f"… [{len(text)} chars total]"
-        lines.append("REPO INVARIANTS:\n" + text)
+        try:
+            text = claude_md.read_text(encoding="utf-8", errors="replace")
+            if len(text) > CLAUDE_MD_EXCERPT_CHARS:
+                text = text[:CLAUDE_MD_EXCERPT_CHARS] + f"… [{len(text)} chars total]"
+            lines.append("REPO INVARIANTS:\n" + text)
+        except OSError:
+            pass
     return "\n".join(lines)
 
 

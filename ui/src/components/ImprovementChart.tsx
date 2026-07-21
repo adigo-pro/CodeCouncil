@@ -166,7 +166,7 @@ function Breakdown({ c }: { c: CurvePoint }) {
 
 export function ImprovementChart({ data }: { data: Council | null }) {
   const curve = data?.curve ?? [];
-  const anyGraded = curve.some((c) => c.graded > 0);
+  const anyGraded = curve.some((c) => c.graded + c.missed > 0);
   const hasXcheck = curve.filter((c) => c.xcheck !== null).length > 1;
 
   return (
@@ -193,7 +193,7 @@ export function ImprovementChart({ data }: { data: Council | null }) {
 
       {anyGraded && (
         <div className="mt-6 space-y-2.5 border-t border-border pt-5">
-          {curve.filter((c) => c.graded + c.undelivered > 0).map((c) => (
+          {curve.filter((c) => c.graded + c.undelivered + c.missed > 0).map((c) => (
             <Breakdown key={c.version} c={c} />
           ))}
         </div>

@@ -1,21 +1,32 @@
 # CodeCouncil
 
 An AI peer programmer that watches your Claude Code session and, over time, gets
-measurably better at critiquing your work. Three loops:
+measurably better at critiquing your work. Four loops:
 
-1. **Observer** (done) — heartbeat daemon pairing the agent's *intent* (transcript
-   reasoning + tool calls) with what actually *changed* (git diff).
-2. **Critic** (done) — reads observations each beat, mostly says PASS, occasionally
-   flags one high-value issue. Judgment runs as a headless [pi](https://pi.dev)
+1. **Observer** — event-driven daemon pairing the agent's *intent* (transcript
+   reasoning + tool calls) with what actually *changed* (git diffs + commits).
+   Everything is **redacted at capture**: credentials in diffs, new files,
+   commands, reasoning, or commit messages become `«REDACTED:kind»` markers
+   before any text leaves your machine — and the marker itself is a finding.
+2. **Critic** — reads observations, mostly says PASS, occasionally flags one
+   verified high-value issue (findings are repro'd before delivery; refuted ones
+   never ship). Sees the full current contents of changed files, not just hunks.
+   When the agent declares work done, it runs a task review and writes a
+   **session receipt** — claims vs mechanically-verified facts — to
+   `.codecouncil/receipts/`. Judgment runs as a headless [pi](https://pi.dev)
    agent turn (`pi -p`) — any provider pi supports, including OpenAI-compatible
    endpoints and local models.
-3. **Hook injection** (done) — Claude Code hooks that deliver Critic suggestions
-   into the coding agent's own context: medium/high injected after edits
-   (PostToolUse), high blocks completion once (Stop) until fixed or rebutted.
-4. **Reflector** (done) — grades delivered suggestions against what actually
-   happened next (accepted / rebutted / ignored, model-judged from post-delivery
-   diffs + reasoning), then rewrites the Critic's heuristics from the grades.
-   The recursive self-improvement loop.
+3. **Hook injection** — Claude Code hooks deliver findings into the coding
+   agent's own context, scoped to the session whose work produced them:
+   medium/high injected after edits (PostToolUse), high blocks completion once
+   (Stop) until fixed or rebutted (`COUNCIL-REBUTTAL: <reason>` records an
+   honest disagreement). New receipts are announced into the transcript once.
+4. **Reflector** — grades delivered suggestions against what actually happened
+   next (accepted / rebutted / ignored), then rewrites the Critic's heuristics
+   from the grades. Rewrites are **eval-gated** (a candidate must match or beat
+   the current rules on frozen cases), **auto-rolled-back** on measured
+   regression, and the eval set **grows itself** from graded outcomes. The
+   recursive self-improvement loop — measured, reversible, honest.
 
 ## Quick start — one command
 
@@ -46,7 +57,7 @@ No dependencies — Python 3.10+ stdlib only.
 ## Run the Critic
 
 ```sh
-python3 -m critic /path/to/repo-being-coded-in    # 30s heartbeat, call only when new material
+python3 -m critic /path/to/repo-being-coded-in    # 10s beat, model call only when code changed
 python3 -m critic . --once                        # single beat
 ```
 
@@ -70,7 +81,7 @@ Output: every verdict (PASS and suggestions) appends to
 `.codecouncil/suggestions.ndjsonl` tagged with `beat` + `heuristics_version` —
 the metrics substrate for the Reflector. Heuristics seed:
 `critic/heuristics.seed.md`, copied to `.codecouncil/heuristics.md` on first run.
-Set `CRITIC_CMD=<script>` to stub the sandbox in tests.
+Set `CRITIC_CMD=<script>` to stub the model in tests.
 
 ## Install the hook (per watched repo)
 
@@ -90,15 +101,18 @@ python3 -m reflector . --once --force-rewrite         # demo: rewrite below thre
 python3 -m reflector.report .                         # acceptance per heuristics version
 ```
 
-Rewrites are guarded: strict `version: N+1` + length validation (bad output →
-old file kept), prior versions archived to `.codecouncil/heuristics-history/`,
-atomic swap so the Critic never reads a half-written file.
+Rewrites are guarded: strict `version: N+1` + length validation, then an eval
+gate — the candidate must match or beat the current rules on the frozen cases
+(`evals/cases/` + self-harvested `evals/cases-harvested/`) or it's rejected.
+Prior versions archive to `.codecouncil/heuristics-history/` (atomic swap), and
+a version whose real-world acceptance drops below its predecessor's is
+auto-rolled-back — as a new, higher version, so history never rewinds.
 
 ## Run the dashboard
 
 ```sh
-cd ui && bun install && bun dev        # http://localhost:4700
-COUNCIL_REPO=/path/to/repo bun dev     # watch a different repo's .codecouncil/
+cd ui && npm install && npm run dev        # http://localhost:4700
+COUNCIL_REPO=/path/to/repo npm run dev     # watch a different repo's .codecouncil/
 ```
 
 xai-inspired live UI: reads the real `.codecouncil/` files every 2s — observer

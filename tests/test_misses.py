@@ -158,6 +158,46 @@ class TestMissDetection(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["pass_id"], "p1")
 
+    def test_multi_subject_commit_fix_in_later_subject(self):
+        """Multi-subject commit: fix word in later subject -> reports that subject."""
+        pass_rows = [_pass_row("p1", NOW, ("a.py",))]
+        commit_events = [
+            {
+                "type": "commit",
+                "ts": _iso(NOW + 100),
+                "payload": {
+                    "subjects": [
+                        "abc111 add documentation",
+                        "abc222 fix crash in parser",
+                    ],
+                    "diff": "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new",
+                },
+            }
+        ]
+        result = detect_misses(pass_rows, commit_events, set())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["pass_id"], "p1")
+        self.assertEqual(result[0]["file"], "a.py")
+        self.assertEqual(result[0]["commit_subject"], "fix crash in parser")
+        self.assertIn("fix crash in parser", result[0]["evidence"])
+
+    def test_single_word_subject_no_crash(self):
+        """Single-word subject (no space) -> doesn't crash, reports the word."""
+        pass_rows = [_pass_row("p1", NOW, ("a.py",))]
+        commit_events = [
+            {
+                "type": "commit",
+                "ts": _iso(NOW + 100),
+                "payload": {
+                    "subjects": ["abc123 Fix"],
+                    "diff": "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new",
+                },
+            }
+        ]
+        result = detect_misses(pass_rows, commit_events, set())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["commit_subject"], "Fix")
+
 
 class TestFixRegex(unittest.TestCase):
     """Test the FIX_RE regex pattern."""
@@ -168,7 +208,11 @@ class TestFixRegex(unittest.TestCase):
             "fix the bug",
             "fixed an issue",
             "fixes something",
+            "fix crash",
+            "Fixed the race",
             "bug fix",
+            "bugfix",
+            "bugfixes",
             "revert bad commit",
             "reverting",
             "correct typo",
@@ -176,9 +220,11 @@ class TestFixRegex(unittest.TestCase):
             "repair leak",
             "repairing",
             "hotfix critical",
-            "hotfixing",
+            "hotfixes",
             "regress test",
             "regression",
+            "regression in parser",
+            "regressions found",
         ]
         for subject in fix_words:
             self.assertTrue(FIX_RE.search(subject), f"Should match '{subject}'")
@@ -192,6 +238,10 @@ class TestFixRegex(unittest.TestCase):
             "improve perf",
             "cleanup",
             "style changes",
+            "add fixtures for tests",  # "fixtures" contains "fix" but is a different word
+            "buggy feature docs",  # "buggy" contains "bug" but is a different word
+            "fixation of layout",  # "fixation" contains "fix" but is a different word
+            "debug logging",  # "debug" contains "bug" but as a substring, not a word
         ]
         for subject in non_fix:
             self.assertFalse(FIX_RE.search(subject), f"Should not match '{subject}'")

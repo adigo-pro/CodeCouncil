@@ -2,7 +2,8 @@
 
 A false 'missed' grade poisons the eval harvest downstream — precision matters more
 than recall. Both conditions must hold: (1) fix-shaped commit subject AND (2) file overlap
-in the commit diff. One miss per PASS (first matching commit wins).
+in the commit diff. One miss per PASS (first matching commit wins). commit_events must be
+time-ordered (append-only log order); "first matching commit" means list order.
 """
 
 from __future__ import annotations
@@ -12,7 +13,12 @@ from datetime import datetime
 
 from observer.gitwatch import _touched_paths
 
-FIX_RE = re.compile(r"\b(fix|bug|revert|correct|repair|hotfix|regress)\w*\b", re.I)
+FIX_RE = re.compile(
+    r"\b(?:fix(?:es|ed|ing)?|bug(?:s)?|bugfix(?:es)?|revert(?:s|ed|ing)?|"
+    r"correct(?:s|ed|ing|ion)?|repair(?:s|ed|ing)?|hotfix(?:es)?|"
+    r"regress(?:es|ed|ion|ions)?)\b",
+    re.I
+)
 LOOKBACK_S = 3600  # one hour
 
 
@@ -74,9 +80,14 @@ def detect_misses(
             if commit_ts <= pass_ts or commit_ts > pass_ts + LOOKBACK_S:
                 continue
 
-            # Check if commit subject is fix-shaped
-            subject_text = " ".join(subjects)
-            if not FIX_RE.search(subject_text):
+            # Find first subject that is fix-shaped
+            fix_subject = None
+            for subject in subjects:
+                if FIX_RE.search(subject):
+                    fix_subject = subject
+                    break
+
+            if not fix_subject:
                 continue
 
             # Check if commit modifies any reviewed files
@@ -94,7 +105,9 @@ def detect_misses(
                 continue
 
             # Found a miss: fix commit within window that touched a reviewed file
-            commit_subject = subjects[0].split(None, 1)[1] if subjects else "unknown"
+            # Extract commit message (after hash) from the fix subject line
+            parts = fix_subject.split(None, 1)
+            commit_subject = parts[1] if len(parts) > 1 else parts[0]
             evidence = f"file={matching_file}, commit_subject={commit_subject}"
             misses.append(
                 {

@@ -309,9 +309,15 @@ class TestGateCandidate(unittest.TestCase):
 
 # The rewrite-prompt call and the two eval-scoring passes (candidate v2,
 # current v1) are told apart purely by markers already present in the real
-# prompts, so one stub script handles all three call shapes.
+# prompts, so one stub script handles all three call shapes. Also logs one
+# line per invocation next to itself, so tests can assert a second
+# maybe_rewrite call made zero model calls (backoff after rejection).
 REWRITE_GATE_FAIL_STUB = """#!/usr/bin/env python3
+import os
 import sys
+here = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(here, "calls.log"), "a") as f:
+    f.write("1\\n")
 text = open(sys.argv[1], encoding="utf-8").read()
 if "TASK: REWRITE HEURISTICS" in text:
     print("version: 2")
@@ -387,6 +393,32 @@ class TestMaybeRewriteGateIntegration(unittest.TestCase):
         self.assertEqual(reflections[0]["to_version"], 2)
         self.assertIn("candidate 1.00", reflections[0]["gate"])
 
+    def test_gate_fail_backs_off_no_calls_on_next_pass_with_unchanged_outcomes(self):
+        """A rejected candidate must not be regenerated + rescored every
+        beat off the same stale outcomes — state has to advance so
+        should_rewrite gates the next attempt until fresh grades land."""
+        import reflector.main as main_mod
+
+        stub = _make_stub(Path(self.td.name), REWRITE_GATE_FAIL_STUB)
+        os.environ["CRITIC_CMD"] = str(stub)
+        calls_log = Path(self.td.name) / "calls.log"
+        state: dict = {}
+
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+            main_mod.maybe_rewrite(self.cc, state, force=False)
+        self.assertTrue(calls_log.exists())
+        first_pass_calls = len(calls_log.read_text().splitlines())
+        self.assertGreater(first_pass_calls, 0)
+        self.assertIn("n_graded_at_last_rewrite", state)
+
+        with mock.patch("evals.run.CASES_DIR", self.cases_dir):
+            main_mod.maybe_rewrite(self.cc, state, force=False)  # same outcomes on disk
+
+        self.assertEqual(len(calls_log.read_text().splitlines()), first_pass_calls,
+                         "second pass made model calls despite no new graded outcomes")
+        reflections = (self.cc / "reflections.ndjsonl").read_text().splitlines()
+        self.assertEqual(len(reflections), 1)  # no second rewrite_rejected row
+
 
 def _outcome(sid: str, outcome: str, version: int) -> dict:
     return {"suggestion_id": sid, "outcome": outcome, "issue": "x", "heuristics_version": version}
@@ -439,6 +471,22 @@ class TestMaybeRollback(unittest.TestCase):
         self.assertEqual(self.heuristics.read_text(), before)
         self.assertEqual(len(
             (self.cc / "reflections.ndjsonl").read_text().splitlines()), 1)
+
+    def test_rollback_advances_state_so_rewrite_does_not_thrash_same_pass(self):
+        """Without advancing n_graded_at_last_rewrite on revert, a
+        maybe_rewrite call right after maybe_rollback (same pass, same
+        outcomes) would immediately try to rewrite the just-restored rules
+        using the very outcomes that condemned the reverted-away version."""
+        import reflector.main as main_mod
+
+        state: dict = {}
+        main_mod.maybe_rollback(self.cc, state, self.outcomes)
+        self.assertEqual(self.heuristics.read_text(), "version: 3\n- v1 rule\n")
+
+        total_graded = sum(1 for o in self.outcomes if o["outcome"] in rewrite.GRADED)
+        self.assertEqual(state["n_graded_at_last_rewrite"], total_graded)
+        self.assertFalse(rewrite.should_rewrite(
+            self.outcomes, state["n_graded_at_last_rewrite"], force=False))
 
     def test_revert_once_guard_blocks_even_when_conditions_still_qualify(self):
         import reflector.main as main_mod

@@ -94,9 +94,14 @@ def maybe_rewrite(cc: Path, state: dict, force: bool,
     except agent.AgentError as e:
         print(f"reflector: rewrite failed ({e}); keeping v{version}")
         return
+    graded_now = sum(1 for o in outcomes if o.get("outcome") in rewrite.GRADED)
     err = rewrite.validate(new_text, version + 1)
     if err:
         print(f"reflector: rewrite rejected ({err}); keeping v{version}")
+        # No new signal will appear until fresh grades land — without this,
+        # every pass would regenerate a candidate from the same stale
+        # outcomes and hit this same rejection forever.
+        state["n_graded_at_last_rewrite"] = graded_now
         return
     gate_ok, gate_note = rewrite.gate_candidate(new_text, current)
     if not gate_ok:
@@ -105,11 +110,13 @@ def maybe_rewrite(cc: Path, state: dict, force: bool,
             "ts": now_iso(), "event": "rewrite_rejected",
             "from_version": version, "note": gate_note,
         })
+        # Same reasoning as the validate() failure above: back off until
+        # MIN_NEW_OUTCOMES fresh grades accumulate, instead of re-running
+        # 2×len(cases) model calls every pass against unchanged outcomes.
+        state["n_graded_at_last_rewrite"] = graded_now
         return
     archive = rewrite.apply(heuristics_path, new_text, current, version)
-    state["n_graded_at_last_rewrite"] = sum(
-        1 for o in outcomes if o.get("outcome") in rewrite.GRADED
-    )
+    state["n_graded_at_last_rewrite"] = graded_now
     record = rewrite.rewrite_record(current, new_text, version, outcomes)
     append_ndjson(cc / "reflections.ndjsonl", {"ts": now_iso(), "gate": gate_note, **record})
     print(f"reflector: heuristics v{version} → v{version + 1} "
@@ -166,6 +173,14 @@ def maybe_rollback(cc: Path, state: dict, outcomes: list[dict]) -> None:
                 f"v{prev_version} acceptance {prev_row['acceptance']:.0%}",
     })
     state[guard_key] = True
+    # Same fix as maybe_rewrite's post-apply update: the outcomes that
+    # triggered this revert are stale evidence against the restored
+    # version — without advancing this, maybe_rewrite (called right after
+    # maybe_rollback in the same pass) would immediately try to rewrite the
+    # just-restored rules using the very outcomes that condemned the old v2.
+    state["n_graded_at_last_rewrite"] = sum(
+        1 for o in outcomes if o.get("outcome") in rewrite.GRADED
+    )
     print(f"reflector: auto-rollback v{current_version} → v{new_version} "
           f"(restoring rules of v{prev_version}, archived {archive.name})")
 

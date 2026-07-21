@@ -340,13 +340,39 @@ export function aggregate(repo: string) {
       historyCount,
       evolution: heuristicsEvolution(path.join(cc, "heuristics-history"), heuristicsText),
       rewrites: reflections
-        .map((r) => ({
-          ts: r.ts ?? "",
-          from: r.from_version ?? 0,
-          to: r.to_version ?? 0,
-          headline: truncate(String(r.headline ?? ""), 140),
-          stats: r.stats ?? {},
-        }))
+        .flatMap((r) => {
+          // Plain rewrite records carry no "event" key (from/to/headline/stats
+          // already shaped by reflector.rewrite.rewrite_record). The gate and
+          // auto-rollback control-system events are separate row shapes
+          // (rewrite_rejected / rollback) — synthesize a matching entry for
+          // each instead of letting them render as {to: 0, blank headline}.
+          if (r.event === "rewrite_rejected") {
+            return [{
+              ts: r.ts ?? "",
+              from: r.from_version ?? 0,
+              to: r.from_version ?? 0,
+              headline: truncate(`rewrite rejected — ${String(r.note ?? "")}`, 140),
+              stats: {},
+            }];
+          }
+          if (r.event === "rollback") {
+            return [{
+              ts: r.ts ?? "",
+              from: r.from_version ?? 0,
+              to: (r.from_version ?? 0) + 1,
+              headline: truncate(`rolled back to rules of v${r.restored_version_content_of ?? "?"}`, 140),
+              stats: {},
+            }];
+          }
+          if (r.event) return []; // unrecognized future event kind: skip, don't render garbage
+          return [{
+            ts: r.ts ?? "",
+            from: r.from_version ?? 0,
+            to: r.to_version ?? 0,
+            headline: truncate(String(r.headline ?? ""), 140),
+            stats: r.stats ?? {},
+          }];
+        })
         .reverse(),
     },
   };

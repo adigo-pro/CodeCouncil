@@ -547,6 +547,86 @@ class TestSessionTagging(unittest.TestCase):
         self.assertNotIn("session", row)
 
 
+class TestCommittedOffset(unittest.TestCase):
+    """Task 6: a crash while a judgment thread is in flight must not silently
+    drop the batch — committed_offset only advances once the record lands."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name)
+        self.obs = self.cc / "observations.ndjsonl"
+        self.suggestions = self.cc / "suggestions.ndjsonl"
+        self.heuristics = self.cc / "heuristics.md"
+        self.stub = self.cc / "stub.sh"
+        self.ctx = {"heuristics_path": self.heuristics, "suggestions_file": self.suggestions,
+                    "persona": "", "project": "", "repo": self.cc, "verify": False}
+
+    def tearDown(self):
+        os.environ.pop("CRITIC_CMD", None)
+        self.td.cleanup()
+
+    def _set_stub(self, reply: str):
+        self.stub.write_text(f"#!/bin/sh\necho '{reply}'\n")
+        self.stub.chmod(self.stub.stat().st_mode | stat.S_IEXEC)
+        os.environ["CRITIC_CMD"] = str(self.stub)
+
+    def _write_obs(self, events):
+        with self.obs.open("a") as f:
+            for e in events:
+                f.write(json.dumps(e) + "\n")
+
+    def _state_roundtrip(self, state):
+        state_path = self.cc / "critic-state.json"
+        state_path.write_text(json.dumps(
+            {k: state[k] for k in ("offset", "committed_offset", "beat") if k in state}
+        ), encoding="utf-8")
+        return load_state(state_path)
+
+    def test_clean_beat_advances_committed_offset_and_roundtrips(self):
+        self._set_stub("PASS")
+        self._write_obs([
+            {"ts": "t", "beat": 1, "type": "diff", "session": None,
+             "payload": {"diff": "+code", "stat": "", "untracked": []}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler(on_committed=lambda off: state.__setitem__("committed_offset", off))
+        status = heartbeat(self.obs, state, scheduler, self.ctx)
+        self.assertEqual(status, "dispatched")
+        scheduler.thread.join()
+        self.assertEqual(state["committed_offset"], state["offset"])
+        loaded = self._state_roundtrip(state)
+        self.assertEqual(loaded["offset"], state["offset"])
+        self.assertEqual(loaded["committed_offset"], state["committed_offset"])
+
+    def test_crash_before_append_leaves_committed_offset_behind_and_replays(self):
+        self._write_obs([
+            {"ts": "t", "beat": 1, "type": "diff", "session": None,
+             "payload": {"diff": "+code", "stat": "", "untracked": []}},
+        ])
+        state = load_state(self.cc / "nope.json")
+
+        def boom(batch, ctx):
+            raise RuntimeError("simulated crash before append")
+
+        scheduler = TurnScheduler(
+            judge_fn=boom,
+            on_committed=lambda off: state.__setitem__("committed_offset", off))
+        status = heartbeat(self.obs, state, scheduler, self.ctx)
+        self.assertEqual(status, "dispatched")
+        scheduler.thread.join()  # the exception dies in the worker thread, not here
+        self.assertGreater(state["offset"], state["committed_offset"])
+        self.assertFalse(self.suggestions.exists())  # nothing durably landed
+        loaded = self._state_roundtrip(state)
+        self.assertEqual(loaded["offset"], state["committed_offset"])  # batch replays
+
+    def test_legacy_state_without_committed_offset_does_not_reset_offset(self):
+        state_path = self.cc / "critic-state.json"
+        state_path.write_text(json.dumps({"offset": 500, "beat": 3}), encoding="utf-8")
+        loaded = load_state(state_path)
+        self.assertEqual(loaded["offset"], 500)
+        self.assertEqual(loaded["committed_offset"], 500)
+
+
 class TestPromptAuditCap(unittest.TestCase):
     def test_save_prompt_prunes_beyond_cap(self):
         from critic import main as cmain

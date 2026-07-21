@@ -31,10 +31,21 @@ SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
 def load_state(path: Path) -> dict:
     if path.exists():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            state = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            pass
-    return {"offset": 0, "beat": 0}
+            state = None
+        if state is not None:
+            # committed_offset: how far batches have DURABLY landed (their
+            # record appended to suggestions.ndjsonl). Legacy state files
+            # predate this field — default it to offset so upgrading never
+            # triggers a false replay. If a crash left committed_offset
+            # behind offset, reset the read cursor so the lost batch replays.
+            if "committed_offset" not in state:
+                state["committed_offset"] = state.get("offset", 0)
+            elif state["committed_offset"] < state.get("offset", 0):
+                state["offset"] = state["committed_offset"]
+            return state
+    return {"offset": 0, "beat": 0, "committed_offset": 0}
 
 
 def project_context(repo: Path) -> str:
@@ -239,13 +250,17 @@ class TurnScheduler:
     busy or gated, and dispatch as one merged batch when possible."""
 
     def __init__(self, judge_fn=judge_batch, judge_every_beat: bool = False,
-                 min_spacing: float = 0.0):
+                 min_spacing: float = 0.0, on_committed=None):
         self.judge_fn = judge_fn
         self.judge_every_beat = judge_every_beat
         self.min_spacing = min_spacing  # floor between turn *starts*: fast beats, flat cost
         self.last_dispatch = float("-inf")  # a fresh scheduler must never start cooling
         self.pending: list[dict] = []
         self.thread: threading.Thread | None = None
+        # called with the offset a dispatched batch reaches, but only once
+        # judge_fn returns successfully (its record durably appended) — a
+        # crash or exception mid-turn must never advance this.
+        self.on_committed = on_committed
 
     def busy(self) -> bool:
         return self.thread is not None and self.thread.is_alive()
@@ -268,9 +283,16 @@ class TurnScheduler:
             return "cooling"
         self.last_dispatch = time.monotonic()
         batch, self.pending = self.pending, []
-        self.thread = threading.Thread(target=self.judge_fn, args=(batch, ctx), daemon=True)
+        offset_at_dispatch = ctx.get("offset_now")
+        self.thread = threading.Thread(
+            target=self._run, args=(batch, ctx, offset_at_dispatch), daemon=True)
         self.thread.start()
         return "dispatched"
+
+    def _run(self, batch: list[dict], ctx: dict, offset_at_dispatch) -> None:
+        self.judge_fn(batch, ctx)  # if this raises, on_committed below never runs
+        if self.on_committed is not None and offset_at_dispatch is not None:
+            self.on_committed(offset_at_dispatch)
 
     def run_special(self, fn) -> bool:
         """Run a one-off turn (e.g. a task review) on the worker if it's idle."""
@@ -311,7 +333,8 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
     if any(e.get("type") in ("diff", "commit") for e in events):
         state["material_since_review"] = True
 
-    ctx = {**ctx, "beat": beat, "ts": ts, "latest_diff": state.get("latest_diff")}
+    ctx = {**ctx, "beat": beat, "ts": ts, "latest_diff": state.get("latest_diff"),
+           "offset_now": state["offset"]}
     status = scheduler.submit(events, ctx)
 
     # the coding agent declared itself done: consider a task-level claim review
@@ -374,20 +397,32 @@ def main(argv: list[str] | None = None) -> int:
         "verify": not args.no_verify,
         "task_review_cooldown": args.task_review_cooldown,
     }
+    def _on_committed(offset: int) -> None:
+        # plain int assignment on the main-thread state dict — atomic under
+        # the GIL; the daemon persists state to disk on the main loop below.
+        state["committed_offset"] = offset
+
     scheduler = TurnScheduler(judge_every_beat=args.judge_every_beat,
-                              min_spacing=args.turn_spacing)
+                              min_spacing=args.turn_spacing,
+                              on_committed=_on_committed)
     state["interval"] = args.interval
     try:
         while True:
             heartbeat(obs_file, state, scheduler, ctx)
+            if args.once:
+                # drain first so a clean --once exit persists the
+                # committed_offset the drained batch actually reached,
+                # rather than a stale one that would replay it needlessly.
+                scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),
+                                 "latest_diff": state.get("latest_diff"),
+                                 "offset_now": state["offset"]})
             state_path.write_text(json.dumps(
                 {k: state[k] for k in
-                 ("offset", "beat", "latest_diff", "interval", "review_offset",
-                  "last_task_review", "material_since_review") if k in state}
+                 ("offset", "committed_offset", "beat", "latest_diff", "interval",
+                  "review_offset", "last_task_review", "material_since_review")
+                 if k in state}
             ), encoding="utf-8")
             if args.once:
-                scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),
-                                 "latest_diff": state.get("latest_diff")})
                 break
             time.sleep(args.interval)
     except KeyboardInterrupt:

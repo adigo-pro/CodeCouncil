@@ -178,6 +178,26 @@ class TestMaybeHarvest(unittest.TestCase):
         second = harvest.maybe_harvest(self.cc, row2, "accepted")
         self.assertEqual(second, "harvest-s2")
 
+    def test_missed_outcome_creates_must_flag_case_with_miss_file(self):
+        _write_material(self.cc, "p1", events=[{"type": "diff", "payload": {"diff": "+x"}}])
+        row = {"id": "p1", "verdict": "PASS", "reason": "looked fine at review time"}
+        name = harvest.maybe_harvest(self.cc, row, "missed", miss_file="src/a.py")
+        self.assertEqual(name, "harvest-p1")
+        case = json.loads((self.harvested_dir / "harvest-p1.json").read_text())
+        self.assertEqual(case["expected"], "flag")
+        self.assertEqual(case["expect_files"], ["a.py"])
+
+    def test_missed_without_miss_file_writes_nothing(self):
+        _write_material(self.cc, "p2")
+        row = {"id": "p2", "verdict": "PASS"}
+        self.assertIsNone(harvest.maybe_harvest(self.cc, row, "missed"))
+
+    def test_missed_missing_case_material_returns_none(self):
+        row = {"id": "no-material", "verdict": "PASS"}
+        self.assertIsNone(harvest.maybe_harvest(self.cc, row, "missed", miss_file="a.py"))
+        self.assertFalse(self.harvested_dir.exists() and
+                         any(self.harvested_dir.glob("*.json")))
+
     def test_cap_at_max_harvested(self):
         old_max = harvest.MAX_HARVESTED
         harvest.MAX_HARVESTED = 3

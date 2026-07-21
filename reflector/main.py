@@ -22,7 +22,7 @@ from critic.prompt import heuristics_version
 from hooks import ledger as ledger_mod
 from observer.events import now_iso
 
-from . import harvest, judge, report, rewrite
+from . import harvest, judge, misses, report, rewrite
 
 PERSONA = Path(__file__).parent / "persona.md"
 
@@ -44,6 +44,10 @@ def grade_pending(cc: Path) -> int:
     now = time.time()
 
     to_judge, undelivered = judge.pending(suggestions, delivered, graded_ids, now)
+    # Ids actually graded during THIS pass — the miss pass below (which runs
+    # after both loops) must not re-flag a PASS whose fix commit happens to
+    # also be evidence for a suggestion judged earlier in the same pass.
+    appended_ids: set[str] = set()
 
     for row in undelivered:
         append_ndjson(outcomes_path, {
@@ -51,6 +55,7 @@ def grade_pending(cc: Path) -> int:
             "outcome": "undelivered", "issue": row["suggestion"]["issue"],
             "heuristics_version": row.get("heuristics_version", 0),
         })
+        appended_ids.add(row["id"])
         print(f"reflector: {row['id']} → undelivered (no model call)")
 
     for row in to_judge:
@@ -74,6 +79,7 @@ def grade_pending(cc: Path) -> int:
             "file_touched": touched,
             **({"malformed": grade["malformed"]} if "malformed" in grade else {}),
         })
+        appended_ids.add(row["id"])
         print(f"reflector: {row['id']} → {grade['outcome']}"
               + (f" ({grade['evidence']})" if grade.get("evidence") else ""))
         try:
@@ -84,7 +90,42 @@ def grade_pending(cc: Path) -> int:
         if case_name:
             print(f"reflector: harvested eval case {case_name}")
 
-    return len(to_judge) + len(undelivered)
+    # Missed catches: PASS verdicts later contradicted by a fix commit that
+    # touched a reviewed file (reflector.misses). No model call — the same
+    # deterministic evidence used for the explicit-rebuttal path above.
+    # Guarded end-to-end: daemons never die on unexpected errors here.
+    n_missed = 0
+    try:
+        pass_by_id = {r["id"]: r for r in suggestions
+                      if r.get("verdict") == "PASS" and r.get("id")}
+        commit_events = [o for o in observations if o.get("type") == "commit"]
+        # graded_ids is the pre-pass, on-disk dedup set; appended_ids adds the
+        # ids this very pass just graded above, so a suggestion (or
+        # undelivered PASS-adjacent row) graded earlier in this pass can't
+        # also be flagged as a miss in the same pass.
+        already_graded = graded_ids | appended_ids
+        for miss in misses.detect_misses(list(pass_by_id.values()), commit_events, already_graded):
+            pass_row = pass_by_id.get(miss["pass_id"])
+            append_ndjson(outcomes_path, {
+                "id": uuid.uuid4().hex[:12], "suggestion_id": miss["pass_id"], "ts": now_iso(),
+                "outcome": "missed", "evidence": miss["evidence"],
+                "heuristics_version": (pass_row or {}).get("heuristics_version", 0),
+            })
+            appended_ids.add(miss["pass_id"])
+            n_missed += 1
+            print(f"reflector: {miss['pass_id']} → missed ({miss['evidence']})")
+            try:
+                case_name = harvest.maybe_harvest(cc, pass_row or {}, "missed",
+                                                  miss_file=miss["file"])
+            except Exception as e:  # harvesting is best-effort, never fatal
+                print(f"reflector: harvest failed for {miss['pass_id']} ({e}) — continuing")
+                case_name = None
+            if case_name:
+                print(f"reflector: harvested eval case {case_name}")
+    except Exception as e:  # daemons never die: miss detection is best-effort
+        print(f"reflector: miss detection failed ({e}) — continuing")
+
+    return len(to_judge) + len(undelivered) + n_missed
 
 
 def maybe_rewrite(cc: Path, state: dict, force: bool,

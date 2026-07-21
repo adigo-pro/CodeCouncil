@@ -145,6 +145,7 @@ function Breakdown({ c }: { c: CurvePoint }) {
     { k: "rebutted", v: c.rebutted, cls: "bg-warn" },
     { k: "ignored", v: c.ignored, cls: "bg-muted-foreground/40" },
     { k: "undelivered", v: c.undelivered, cls: "bg-border" },
+    { k: "missed", v: c.missed, cls: "bg-bad/40" },
   ].filter((s) => s.v > 0);
   const total = segs.reduce((a, s) => a + s.v, 0);
   if (!total) return null;

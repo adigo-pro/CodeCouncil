@@ -233,6 +233,14 @@ class TestReport(unittest.TestCase):
         self.assertIsNone(rows[0]["acceptance"])
         self.assertEqual(rows[0]["undelivered"], 1)
 
+    def test_missed_not_in_acceptance_rate(self):
+        pass_row = {"id": "p1", "verdict": "PASS", "heuristics_version": 3,
+                   "reviewed_files": ["a.py"]}
+        rows = build_rows([pass_row], [{"suggestion_id": "p1", "outcome": "missed",
+                                        "heuristics_version": 3}])
+        self.assertIsNone(rows[0]["acceptance"])
+        self.assertEqual(rows[0]["missed"], 1)
+
 
 def _write_case(cases_dir: Path, name: str, expected: str, marker: str,
                 expect_files: list[str] | None = None) -> None:
@@ -608,6 +616,75 @@ class TestGradePendingHarvestsCases(unittest.TestCase):
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0]["outcome"], "accepted")
         self.assertFalse((self.harvested_dir / "harvest-s1.json").exists())
+
+
+class TestMissedGrading(unittest.TestCase):
+    """Task 3: grade_pending must also detect PASS verdicts later contradicted
+    by a fix commit (reflector.misses), grade them 'missed' with no model
+    call, and harvest them as must-flag eval cases."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.cc = Path(self.td.name) / ".codecouncil"
+        self.cc.mkdir()
+        self.harvested_dir = Path(self.td.name) / "cases-harvested"
+        self.patcher = mock.patch("reflector.harvest.HARVESTED_DIR", self.harvested_dir)
+        self.patcher.start()
+
+        self.pass_ts = NOW - 3000
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
+            "id": "p1", "ts": _iso(self.pass_ts), "verdict": "PASS",
+            "heuristics_version": 2, "reviewed_files": ["a.py"],
+            "reason": "looked fine",
+        }) + "\n", encoding="utf-8")
+        (self.cc / "observations.ndjsonl").write_text(json.dumps({
+            "type": "commit", "ts": _iso(self.pass_ts + 100),
+            "payload": {"subjects": ["abc123 fix off-by-one in a.py"],
+                       "diff": "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new"},
+        }) + "\n", encoding="utf-8")
+        material_dir = self.cc / "case-material"
+        material_dir.mkdir()
+        (material_dir / "p1.json").write_text(json.dumps({
+            "events": [{"type": "diff", "payload": {"diff": "+guard"}}],
+            "latest_diff": None,
+        }), encoding="utf-8")
+
+    def tearDown(self):
+        self.patcher.stop()
+        self.td.cleanup()
+
+    def test_missed_pass_gets_graded_and_harvested(self):
+        import reflector.main as main_mod
+
+        n = main_mod.grade_pending(self.cc)
+        self.assertEqual(n, 1)
+
+        outc = [json.loads(l) for l in
+               (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outc[-1]["outcome"], "missed")
+        self.assertEqual(outc[-1]["suggestion_id"], "p1")
+        self.assertEqual(outc[-1]["heuristics_version"], 2)
+        self.assertTrue(any(p.name.startswith("harvest-") for p in
+                            self.harvested_dir.glob("*.json")))
+
+    def test_missed_grade_is_idempotent_across_passes(self):
+        import reflector.main as main_mod
+
+        main_mod.grade_pending(self.cc)
+        before = len((self.cc / "outcomes.ndjsonl").read_text().splitlines())
+        main_mod.grade_pending(self.cc)
+        after = len((self.cc / "outcomes.ndjsonl").read_text().splitlines())
+        self.assertEqual(before, after)
+
+    def test_miss_detection_failure_does_not_kill_grade_pending(self):
+        """Daemons never die: a broken misses.detect_misses must not take
+        down grade_pending or lose outcomes already appended this pass."""
+        import reflector.main as main_mod
+
+        with mock.patch("reflector.main.misses.detect_misses",
+                        side_effect=RuntimeError("boom")):
+            main_mod.grade_pending(self.cc)  # must not raise
+        self.assertFalse((self.cc / "outcomes.ndjsonl").exists())
 
 
 if __name__ == "__main__":

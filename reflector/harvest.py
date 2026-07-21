@@ -38,46 +38,23 @@ def _content_hash(file: str, issue: str) -> str:
     return hashlib.sha1(f"{file}|{issue}".encode("utf-8")).hexdigest()[:12]
 
 
-def maybe_harvest(cc: Path, suggestion_row: dict, outcome: str) -> str | None:
-    """Freeze a graded suggestion's judged inputs into a new eval case, if it
-    qualifies. Returns the case name written, or None.
-
-    Rules:
-    - accepted + verification verified (or no verification) -> must-FLAG case.
-    - verification refuted (regardless of outcome), OR rebutted with the
-      flagged file untouched -> must-PASS case. A rebuttal where the file WAS
-      touched is ambiguous (the agent may have fixed the issue while
-      disagreeing about something else) so it is not harvested either way.
-    """
-    if suggestion_row.get("verdict") != "SUGGESTION":
-        return None
-    suggestion = suggestion_row.get("suggestion") or {}
-    verification = suggestion_row.get("verification") or {}
-    status = verification.get("status")
-
-    if outcome == "accepted" and status in (None, "verified"):
-        expected = "flag"
-    elif status == "refuted" or (
-        outcome == "rebutted" and not suggestion_row.get("file_touched", True)
-    ):
-        expected = "pass"
-    else:
-        return None
-
-    sid = suggestion_row.get("id")
-    if not sid:
-        return None
+def _load_material(cc: Path, sid: str) -> dict | None:
     material_path = cc / "case-material" / f"{sid}.json"
     if not material_path.exists():
         return None
     try:
-        material = json.loads(material_path.read_text(encoding="utf-8"))
+        return json.loads(material_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
-    file_name = Path(suggestion.get("file", "")).name
-    issue = suggestion.get("issue", "")
-    content_hash = _content_hash(suggestion.get("file", ""), issue)
+
+def _write_case(sid: str, hash_file: str, file_name: str, issue: str,
+                expected: str, material: dict) -> str | None:
+    """Shared dedupe + cap + write tail, used by both the SUGGESTION-graded
+    path and the missed-PASS path below. `hash_file` is the raw (possibly
+    directory-qualified) file identifier the dedupe hash is keyed on;
+    `file_name` is the basename that actually goes into expect_files."""
+    content_hash = _content_hash(hash_file, issue)
 
     HARVESTED_DIR.mkdir(parents=True, exist_ok=True)
     existing_files = sorted(HARVESTED_DIR.glob("*.json"))
@@ -103,3 +80,60 @@ def maybe_harvest(cc: Path, suggestion_row: dict, outcome: str) -> str | None:
     }
     (HARVESTED_DIR / f"{name}.json").write_text(json.dumps(case, indent=1), encoding="utf-8")
     return name
+
+
+def maybe_harvest(cc: Path, suggestion_row: dict, outcome: str,
+                  miss_file: str | None = None) -> str | None:
+    """Freeze a graded suggestion's judged inputs into a new eval case, if it
+    qualifies. Returns the case name written, or None.
+
+    Rules:
+    - accepted + verification verified (or no verification) -> must-FLAG case.
+    - verification refuted (regardless of outcome), OR rebutted with the
+      flagged file untouched -> must-PASS case. A rebuttal where the file WAS
+      touched is ambiguous (the agent may have fixed the issue while
+      disagreeing about something else) so it is not harvested either way.
+    - missed (a PASS verdict later contradicted by a fix commit touching a
+      reviewed file, see reflector.misses) -> must-FLAG case. `suggestion_row`
+      here is the PASS row itself, which has no "suggestion" dict to read a
+      file from, so the flagged file comes from `miss_file` instead.
+    """
+    if outcome == "missed":
+        if not miss_file:
+            return None
+        sid = suggestion_row.get("id")
+        if not sid:
+            return None
+        material = _load_material(cc, sid)
+        if material is None:
+            return None
+        file_name = Path(miss_file).name
+        issue = suggestion_row.get("reason", "")
+        return _write_case(sid, miss_file, file_name, issue, "flag", material)
+
+    if suggestion_row.get("verdict") != "SUGGESTION":
+        return None
+    suggestion = suggestion_row.get("suggestion") or {}
+    verification = suggestion_row.get("verification") or {}
+    status = verification.get("status")
+
+    if outcome == "accepted" and status in (None, "verified"):
+        expected = "flag"
+    elif status == "refuted" or (
+        outcome == "rebutted" and not suggestion_row.get("file_touched", True)
+    ):
+        expected = "pass"
+    else:
+        return None
+
+    sid = suggestion_row.get("id")
+    if not sid:
+        return None
+    material = _load_material(cc, sid)
+    if material is None:
+        return None
+
+    raw_file = suggestion.get("file", "")
+    file_name = Path(raw_file).name
+    issue = suggestion.get("issue", "")
+    return _write_case(sid, raw_file, file_name, issue, expected, material)

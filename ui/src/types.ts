@@ -6,6 +6,7 @@ export interface CurvePoint {
   rebutted: number;
   ignored: number;
   undelivered: number;
+  missed: number;
   graded: number;
   acceptance: number | null;
   xcheck: number | null;

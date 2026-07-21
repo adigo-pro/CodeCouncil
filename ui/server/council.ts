@@ -106,7 +106,7 @@ function buildCurve(suggestions: Record<string, any>[], outcomes: Record<string,
     if (!per.has(v))
       per.set(v, {
         suggested: 0, delivered: 0, accepted: 0, rebutted: 0,
-        ignored: 0, undelivered: 0, xcheckOk: 0, xcheckN: 0,
+        ignored: 0, undelivered: 0, missed: 0, xcheckOk: 0, xcheckN: 0,
       });
     return per.get(v)!;
   };
@@ -125,6 +125,13 @@ function buildCurve(suggestions: Record<string, any>[], outcomes: Record<string,
       }
     } else if (o.outcome === "undelivered") {
       v.undelivered += 1;
+    } else if (o.outcome === "missed") {
+      // Mirrors reflector/report.py build_rows: "missed" (a PASS later
+      // contradicted by a fix commit, reflector.misses) is its own column,
+      // deliberately excluded from the acceptance-rate denominator below —
+      // the two measurement signals must stay independent (CLAUDE.md's
+      // two-signal separation rule).
+      v.missed += 1;
     }
   }
   return [...per.keys()].sort((a, b) => a - b).map((version) => {

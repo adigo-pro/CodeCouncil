@@ -30,7 +30,7 @@ def consistent(outcome: dict) -> bool | None:
 def build_rows(suggestions: list[dict], outcomes: list[dict]) -> list[dict]:
     per: dict[int, dict] = defaultdict(lambda: {
         "suggested": 0, "delivered": 0,
-        "accepted": 0, "rebutted": 0, "ignored": 0, "undelivered": 0,
+        "accepted": 0, "rebutted": 0, "ignored": 0, "undelivered": 0, "missed": 0,
         "xcheck_ok": 0, "xcheck_n": 0,
     })
     inconsistent = []
@@ -51,6 +51,16 @@ def build_rows(suggestions: list[dict], outcomes: list[dict]) -> list[dict]:
                     inconsistent.append(o)
         elif outcome == "undelivered":
             v["undelivered"] += 1
+        elif outcome == "missed":
+            # "missed" = a PASS verdict later contradicted by a fix commit
+            # (reflector.misses). It is a distinct failure mode from a
+            # delivered-and-graded suggestion (accepted/rebutted/ignored) and
+            # deliberately stays OUT of the acceptance-rate denominator: the
+            # two measurement signals (acceptance rate here, frozen evals in
+            # evals/) must stay independent per CLAUDE.md's two-signal
+            # separation rule — folding misses into acceptance would let one
+            # failure mode silently move the other's gate/rollback math.
+            v["missed"] += 1
     rows = []
     for version in sorted(per):
         v = per[version]
@@ -65,7 +75,7 @@ def build_rows(suggestions: list[dict], outcomes: list[dict]) -> list[dict]:
 
 
 def render(rows: list[dict]) -> str:
-    header = f"{'version':>7}  {'suggested':>9}  {'delivered':>9}  {'accepted':>8}  {'rebutted':>8}  {'ignored':>7}  {'undeliv':>7}  {'acceptance':>10}  {'xcheck':>6}"
+    header = f"{'version':>7}  {'suggested':>9}  {'delivered':>9}  {'accepted':>8}  {'rebutted':>8}  {'ignored':>7}  {'undeliv':>7}  {'missed':>6}  {'acceptance':>10}  {'xcheck':>6}"
     lines = [header, "-" * len(header)]
     for r in rows:
         acc = f"{r['acceptance']:.0%}" if r["acceptance"] is not None else "—"
@@ -73,7 +83,7 @@ def render(rows: list[dict]) -> str:
         lines.append(
             f"{'v' + str(r['version']):>7}  {r['suggested']:>9}  {r['delivered']:>9}  "
             f"{r['accepted']:>8}  {r['rebutted']:>8}  {r['ignored']:>7}  "
-            f"{r['undelivered']:>7}  {acc:>10}  {xc:>6}"
+            f"{r['undelivered']:>7}  {r['missed']:>6}  {acc:>10}  {xc:>6}"
         )
     flagged = rows[-1]["inconsistent"] if rows else []
     for o in flagged:

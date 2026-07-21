@@ -77,7 +77,7 @@ def head(repo: Path) -> str | None:
 
 def capture_commits(repo: Path, old: str, new: str) -> dict:
     """What landed between two HEADs — so committed work stays reviewable."""
-    subjects = [s for s in _git(repo, "log", "--format=%h %s", f"{old}..{new}").splitlines() if s]
+    subjects = [redact(s) for s in _git(repo, "log", "--format=%h %s", f"{old}..{new}").splitlines() if s]
     diff = redact(_git(repo, "diff", "-U8", old, new))
     if len(diff) > COMMIT_DIFF_MAX_CHARS:
         diff = diff[:COMMIT_DIFF_MAX_CHARS] + f"\n… [commit diff truncated, {len(diff)} chars total]"

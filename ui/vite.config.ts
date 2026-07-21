@@ -48,7 +48,7 @@ function councilApi(): Plugin {
           /* malformed percent-encoding — fall through to validation below */
         }
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
-        if (!name || name.includes("/") || name.includes("..")) {
+        if (!name || name.includes("/") || name.includes("\\") || name.includes("..") || !name.endsWith(".md")) {
           res.statusCode = 400;
           res.end("bad name");
           return;

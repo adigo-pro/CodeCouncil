@@ -56,6 +56,21 @@ class TestUntrackedContents(unittest.TestCase):
         self.assertIn("bump x", c["subjects"][0])
         self.assertIn("+x = 2", c["diff"])
 
+    def test_commit_subject_secret_redacted(self):
+        secret = "nvapi-" + "a" * 24
+        (self.repo / "a.py").write_text("x = 1\n")
+        subprocess.run(["git", "-C", str(self.repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "first"], check=True)
+        old = gitwatch.head(self.repo)
+        (self.repo / "a.py").write_text("x = 2\n")
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qam", f"oops committed {secret}"],
+                       check=True)
+        new = gitwatch.head(self.repo)
+        c = gitwatch.capture_commits(self.repo, old, new)
+        self.assertEqual(len(c["subjects"]), 1)
+        self.assertNotIn(secret, c["subjects"][0])
+        self.assertIn("«REDACTED:nvidia-key»", c["subjects"][0])
+
     def test_head_none_before_first_commit(self):
         self.assertIsNone(gitwatch.head(self.repo))
 

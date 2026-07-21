@@ -102,6 +102,30 @@ class TestRedact(unittest.TestCase):
         self.assertNotIn(secret, out)
         self.assertIn("«REDACTED:assignment»", out)
 
+    def test_assignment_special_char_tail_fully_redacted(self):
+        # A special character right after the qualifying 16+ char charset
+        # run must not leave a tail of the secret exposed past the marker --
+        # special characters are common in exactly the password class this
+        # pattern targets.
+        out = redact.redact('PASSWORD = "abcdefgh12345678!tail%rest"')
+        self.assertIn("«REDACTED:assignment»", out)
+        self.assertNotIn("!tail", out)
+        self.assertNotIn("tail", out)
+        self.assertNotIn("rest", out)
+
+    def test_assignment_stops_at_closing_quote(self):
+        out = redact.redact('SECRET_KEY = "abcdefgh12345678!x"y')
+        self.assertIn("«REDACTED:assignment»", out)
+        self.assertNotIn("!x", out)
+        self.assertTrue(out.endswith('"y'))
+
+    def test_assignment_url_value_not_redacted(self):
+        # "https" is only 5 chars before the "://" breaks the charset run --
+        # well under the 16-char floor -- so a URL-shaped value must never
+        # trigger redaction, even though its name contains "token".
+        text = 'token_endpoint = "https://auth.example.com/oauth/token"'
+        self.assertEqual(redact.redact(text), text)
+
     def test_short_value_not_redacted(self):
         # Below the 16-char floor -- not high-confidence, must be left alone.
         text = 'token = "short1"'

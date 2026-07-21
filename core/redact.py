@@ -45,7 +45,12 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
             # trigger redaction, not just a bare `key`/`secret`/... name.
             r"(?i)(?P<prefix>\b[A-Za-z0-9_-]*(?:key|secret|token|password|passwd)"
             r"[A-Za-z0-9_-]*\s*[=:]\s*['\"]?)"
-            r"[A-Za-z0-9+/_=-]{" + str(ASSIGNMENT_MIN_VALUE_LEN) + r",}",
+            # The 16+ charset run is what qualifies the value as "high
+            # entropy enough" to redact; once qualified, also consume any
+            # trailing non-whitespace/non-quote characters (e.g. `!`, `%`)
+            # so a special character after the clean run doesn't leave a
+            # tail of the secret exposed past the marker.
+            r"[A-Za-z0-9+/_=-]{" + str(ASSIGNMENT_MIN_VALUE_LEN) + r",}[^\s'\"]*",
         ),
     ),
 ]

@@ -1653,6 +1653,35 @@ class TestMergeCouncil(unittest.TestCase):
         self.assertEqual(council["agreement"], "primary-only")
         self.assertEqual(council["prober_verdict"], "ERROR")
 
+    def test_primary_errors_prober_suggests_agreement_prober_only(self):
+        """Safety-edge case flagged in review: a primary AgentError must not
+        swallow a prober catch. The prober's suggestion becomes the chosen
+        verdict AND agreement is tagged "prober-only" — this exact tag is
+        what Task 3's verification/delivery gate keys off of to require
+        repro proof before ever delivering a prober-only finding. If this
+        combo were mis-tagged "both" or "primary-only" here, Task 3's gate
+        would either skip verification it must run, or never run at all."""
+        from critic.main import merge_council
+        chosen, council = merge_council(PRIMARY_ERROR, PROBER_SUGGESTION)
+        self.assertEqual(chosen, PROBER_SUGGESTION)
+        self.assertEqual(council["agreement"], "prober-only")
+        self.assertEqual(council["prober_verdict"], "SUGGESTION")
+
+    def test_primary_errors_prober_passes_verdict_stays_error(self):
+        """Safety-edge case: when the primary itself failed and the prober
+        found nothing, the merged verdict must stay "ERROR" (judge_batch's
+        render_error/ERROR-row branch depends on this), not silently become
+        a clean PASS. merge_council's agreement label here is "both" —
+        cosmetically odd for an ERROR row, but harmless: ERROR short-circuits
+        judge_batch before any delivery-eligibility check ever reads
+        council["agreement"], so no gate can be fooled by the label. Only the
+        verdict value is load-bearing for this combo."""
+        from critic.main import merge_council
+        chosen, council = merge_council(PRIMARY_ERROR, PROBER_PASS)
+        self.assertEqual(chosen["verdict"], "ERROR")
+        self.assertEqual(council["agreement"], "both")
+        self.assertEqual(council["prober_verdict"], "PASS")
+
 
 # Multi-model stub: branches on argv[2] (the resolved model, per agent.ask's
 # CRITIC_CMD contract) rather than argv[1]'s prompt content, since the whole
@@ -1787,6 +1816,35 @@ class TestCouncilJudgeBatch(unittest.TestCase):
         row = rows[0]
         self.assertNotIn("council", row)
         self.assertEqual(len(self._calls()), 1)
+
+
+class TestCouncilRenderRegression(unittest.TestCase):
+    """Task 2 review follow-up: render_verdict must not raise on a
+    council-bearing record, on either the PASS or the SUGGESTION branch, and
+    must surface the council note text in both cases."""
+
+    def test_render_verdict_pass_with_council_both_agreement(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            render_verdict(1, "2026-01-01T00:00:00", {
+                "verdict": "PASS",
+                "council": {"prober_model": "x", "prober_verdict": "PASS", "agreement": "both"},
+            })
+        text = out.getvalue()
+        self.assertIn("council: prober agreed", text)
+
+    def test_render_verdict_suggestion_with_council_prober_only_agreement(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            render_verdict(1, "2026-01-01T00:00:00", {
+                "verdict": "SUGGESTION",
+                "suggestion": {"file": "x.py", "line": 1, "severity": "medium",
+                               "issue": "possible bug", "rationale": ""},
+                "council": {"prober_model": "x", "prober_verdict": "SUGGESTION",
+                           "agreement": "prober-only"},
+            })
+        text = out.getvalue()
+        self.assertIn("council: prober-only finding (needs proof)", text)
 
 
 if __name__ == "__main__":

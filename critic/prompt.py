@@ -337,6 +337,7 @@ def parse_reply(raw: str) -> dict[str, Any]:
             obj = json.loads(text[start : end + 1])
             if isinstance(obj, dict) and obj.get("file") and obj.get("issue"):
                 rule = obj.get("rule")
+                fm = obj.get("failure_mode")
                 return {
                     "verdict": "SUGGESTION",
                     "suggestion": {
@@ -352,8 +353,13 @@ def parse_reply(raw: str) -> dict[str, Any]:
                         "rule": rule if isinstance(rule, int) and not isinstance(rule, bool) and rule > 0 else None,
                         # which documented failure pattern (persona.md) motivated
                         # this finding — kept only when it's a recognized member
-                        # of FAILURE_MODES, else None (legacy replies fine).
-                        "failure_mode": obj.get("failure_mode") if obj.get("failure_mode") in FAILURE_MODES else None,
+                        # of FAILURE_MODES, else None (legacy replies fine). The
+                        # isinstance(fm, str) check must run before `in
+                        # FAILURE_MODES`: obj is untrusted model JSON, and an
+                        # unhashable value (list/dict) would raise TypeError on
+                        # the `in` check against a frozenset otherwise — same
+                        # guard shape as "rule" above.
+                        "failure_mode": fm if isinstance(fm, str) and fm in FAILURE_MODES else None,
                     },
                 }
         except json.JSONDecodeError:

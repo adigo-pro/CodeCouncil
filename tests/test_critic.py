@@ -81,6 +81,17 @@ class TestParseReply(unittest.TestCase):
             prompt.parse_reply('{"file":"a.py","issue":"x","failure_mode":"nonsense"}')
             ["suggestion"]["failure_mode"])
 
+    def test_parse_reply_failure_mode_unhashable_or_wrong_type_defaults_none(self):
+        """A model reply is untrusted JSON: "failure_mode" as a list or dict
+        is unhashable and must not raise `in FAILURE_MODES` — same class of
+        bug the rule guard avoids via isinstance() before comparison."""
+        for raw in (
+            '{"file":"a.py","issue":"x","failure_mode":["claim-drift"]}',
+            '{"file":"a.py","issue":"x","failure_mode":{"a":1}}',
+            '{"file":"a.py","issue":"x","failure_mode":7}',
+        ):
+            self.assertIsNone(prompt.parse_reply(raw)["suggestion"]["failure_mode"], raw)
+
     def test_suggestion_issue_is_redacted(self):
         """The model's judgment turn has read-only repo tools (repo_read,
         repo_grep, ...) that can echo live file contents back into "issue"/

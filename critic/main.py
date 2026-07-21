@@ -72,6 +72,10 @@ def load_state(path: Path) -> dict:
     return {"offset": 0, "beat": 0, "committed_offset": 0}
 
 
+# CLAUDE.md excerpt cap for the REPO INVARIANTS block below (Task 3).
+CLAUDE_MD_EXCERPT_CHARS = 1200
+
+
 def project_context(repo: Path) -> str:
     """A short identity header so the critic knows what repo it is judging."""
     lines = [f"PROJECT: {repo.name} ({repo})"]
@@ -90,6 +94,19 @@ def project_context(repo: Path) -> str:
             if l.strip()
         )
         lines.append("README: " + excerpt[:600])
+    # REPO INVARIANTS rides in EVERY prompt — this "project" string is passed
+    # to both build_prompt and build_task_review (Task 3) unconditionally,
+    # not gated behind is_plan_material — because invariant-aware criticism
+    # is useful for any change, not just plan/design documents (e.g. "does
+    # this diff cross a loop boundary CLAUDE.md forbids?"). Plan review
+    # (prompt.PLAN_REVIEW_ADDENDUM) additionally tells the model to check a
+    # plan document's own steps against this same block.
+    claude_md = repo / "CLAUDE.md"
+    if claude_md.exists():
+        text = claude_md.read_text(encoding="utf-8", errors="replace")
+        if len(text) > CLAUDE_MD_EXCERPT_CHARS:
+            text = text[:CLAUDE_MD_EXCERPT_CHARS] + f"… [{len(text)} chars total]"
+        lines.append("REPO INVARIANTS:\n" + text)
     return "\n".join(lines)
 
 

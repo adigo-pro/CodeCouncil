@@ -15,7 +15,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from critic import prompt
-from critic.main import TurnScheduler, heartbeat, load_state, verdict_history
+from critic.main import TurnScheduler, heartbeat, load_state, project_context, verdict_history
 from critic.render import render_verdict
 
 
@@ -329,6 +329,94 @@ class TestPrompt(unittest.TestCase):
         self.assertLess(len(text), prompt.PROMPT_BUDGET_CHARS + prompt.MIN_DIFF_CHARS
                         + prompt.TOUCHED_PROMPT_CHARS + 2_000)
         self.assertIn("… [truncated]", text)
+
+
+class TestPlanReview(unittest.TestCase):
+    """is_plan_material + PLAN_REVIEW_ADDENDUM (Task 3): a substantial .md
+    diff (plan/design doc) gets an extra instruction to judge the document
+    itself for internal consistency against repo invariants."""
+
+    def _md_diff(self, n_added: int, path: str = "plan.md") -> dict:
+        hunk = "\n".join(f"+line {i}" for i in range(n_added))
+        diff = f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -0,0 +1,{n_added} @@\n{hunk}\n"
+        return {"type": "diff", "payload": {"diff": diff, "untracked": []}}
+
+    def test_large_md_diff_is_plan_material(self):
+        self.assertTrue(prompt.is_plan_material(self._md_diff(40)))
+
+    def test_small_md_edit_is_not_plan_material(self):
+        self.assertFalse(prompt.is_plan_material(self._md_diff(5)))
+
+    def test_large_py_diff_is_not_plan_material(self):
+        self.assertFalse(prompt.is_plan_material(self._md_diff(40, path="big.py")))
+
+    def test_large_untracked_md_is_plan_material(self):
+        text = "\n".join(f"line {i}" for i in range(41))  # 40 newlines
+        diff = {"type": "diff", "payload": {
+            "diff": "", "untracked": ["plan.md"],
+            "untracked_contents": {"plan.md": text},
+        }}
+        self.assertTrue(prompt.is_plan_material(diff))
+
+    def test_small_untracked_md_is_not_plan_material(self):
+        diff = {"type": "diff", "payload": {
+            "diff": "", "untracked": ["plan.md"],
+            "untracked_contents": {"plan.md": "short\nplan\n"},
+        }}
+        self.assertFalse(prompt.is_plan_material(diff))
+
+    def test_large_touched_md_is_plan_material(self):
+        text = "\n".join(f"line {i}" for i in range(41))
+        diff = {"type": "diff", "payload": {
+            "diff": "", "touched_contents": {"plan.md": text},
+        }}
+        self.assertTrue(prompt.is_plan_material(diff))
+
+    def test_no_diff_is_not_plan_material(self):
+        self.assertFalse(prompt.is_plan_material(None))
+
+    def test_addendum_present_when_plan_material(self):
+        events = [{"type": "reasoning", "payload": {"kind": "text", "text": "writing the plan"}}]
+        text = prompt.build_prompt(events, self._md_diff(40), "version: 1")
+        self.assertIn(prompt.PLAN_REVIEW_ADDENDUM, text)
+        self.assertIn("plan-inconsistency", text)
+
+    def test_addendum_absent_when_not_plan_material(self):
+        events = [{"type": "reasoning", "payload": {"kind": "text", "text": "small tweak"}}]
+        text = prompt.build_prompt(events, self._md_diff(5), "version: 1")
+        self.assertNotIn(prompt.PLAN_REVIEW_ADDENDUM, text)
+
+
+class TestProjectContextInvariants(unittest.TestCase):
+    """project_context's REPO INVARIANTS block (Task 3): the watched repo's
+    own CLAUDE.md, capped, so the critic can judge changes (and especially
+    plan documents) against the repo's stated conventions."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.repo = Path(self.td.name)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_no_claude_md_no_section(self):
+        text = project_context(self.repo)
+        self.assertNotIn("REPO INVARIANTS:", text)
+
+    def test_claude_md_excerpt_included(self):
+        (self.repo / "CLAUDE.md").write_text("Loop boundaries: only NDJSON files.", encoding="utf-8")
+        text = project_context(self.repo)
+        self.assertIn("REPO INVARIANTS:", text)
+        self.assertIn("Loop boundaries: only NDJSON files.", text)
+
+    def test_claude_md_excerpt_capped_with_truncation_marker(self):
+        from critic.main import CLAUDE_MD_EXCERPT_CHARS
+        full = "x" * (CLAUDE_MD_EXCERPT_CHARS + 500)
+        (self.repo / "CLAUDE.md").write_text(full, encoding="utf-8")
+        text = project_context(self.repo)
+        self.assertIn("REPO INVARIANTS:", text)
+        self.assertIn(f"… [{len(full)} chars total]", text)
+        self.assertLess(text.count("x"), len(full))
 
 
 class TestHeartbeatWithStub(unittest.TestCase):

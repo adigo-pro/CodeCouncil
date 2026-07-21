@@ -38,6 +38,67 @@ FAILURE_MODES = frozenset({
     "assumption", "error-suppression", "secret", "plan-inconsistency", "other",
 })
 
+# Plan/design review (Task 3): agent workflows produce plan/design markdown
+# that later agents implement verbatim — a contradiction caught at plan time
+# (this repo's own history has an example: a plan placed a module on the
+# wrong side of an import boundary; it shipped to implementation before
+# being caught) prevents whole tasks of rework. A substantial .md diff is
+# the trigger; small doc tweaks (a typo fix, a one-line note) aren't worth
+# the extra scrutiny.
+PLAN_MATERIAL_MIN_LINES = 40
+
+PLAN_REVIEW_ADDENDUM = (
+    "PLAN/DESIGN DOCUMENT DETECTED in this change. Additionally judge the "
+    "document itself: internal contradictions; interfaces referenced in one "
+    "section but defined differently (or never) in another; steps that "
+    "violate the REPO INVARIANTS in the project header. A design bug caught "
+    "now is worth ten caught in code — but the one-issue discipline still "
+    "applies. Use failure_mode \"plan-inconsistency\"."
+)
+
+
+def _diff_added_lines_per_md_file(diff: str) -> dict[str, int]:
+    """Count '+' added lines per .md file touched by a unified diff. A
+    single linear scan tracks which file's hunk region we're currently in
+    (set at each "+++ b/<path>" header, naturally replaced at the next
+    file's own "+++ " header) rather than pre-splitting the diff on
+    "diff --git" — simpler, and this function never needs the other
+    per-file sections in isolation."""
+    counts: dict[str, int] = {}
+    current: str | None = None
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            target = line[4:]
+            if target.startswith("b/"):
+                target = target[2:]
+            current = target if target.endswith(".md") else None
+            continue
+        if line.startswith("--- "):
+            continue  # the "--- a/<path>" header line, never content
+        if current and line.startswith("+"):
+            counts[current] = counts.get(current, 0) + 1
+    return counts
+
+
+def is_plan_material(latest_diff: dict | None) -> bool:
+    """True when this beat's diff carries a substantial (>= PLAN_MATERIAL_MIN_LINES
+    added/content lines) .md file — large enough to be a plan/design document
+    rather than a passing doc edit. Checked across all three ways a .md file
+    shows up in a beat's diff payload: modified in the tracked diff, newly
+    created (untracked_contents), or already-tracked and touched
+    (touched_contents, Task 11's whole-file render)."""
+    if not latest_diff:
+        return False
+    payload = latest_diff.get("payload", {})
+    added = _diff_added_lines_per_md_file(payload.get("diff", "") or "")
+    if any(n >= PLAN_MATERIAL_MIN_LINES for n in added.values()):
+        return True
+    for contents in (payload.get("untracked_contents") or {}, payload.get("touched_contents") or {}):
+        for path, text in contents.items():
+            if path.endswith(".md") and text.count("\n") >= PLAN_MATERIAL_MIN_LINES:
+                return True
+    return False
+
 
 def _cap(text: str, limit: int) -> str:
     """Truncate with the same '… [N chars total]' marker used elsewhere in
@@ -219,6 +280,8 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
         "doesn't do, an unportable path)? Respond per your output protocol: PASS "
         "(optionally 'PASS: <reason under 15 words>'), or one raw JSON object."
     )
+    if is_plan_material(latest_diff):
+        parts += ["", PLAN_REVIEW_ADDENDUM]
     return "\n".join(parts)
 
 

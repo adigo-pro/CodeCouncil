@@ -554,6 +554,68 @@ class TestAskWithRetry(unittest.TestCase):
         self.assertEqual(v["verdict"], "ERROR")
 
 
+class TestJudgeToolsPlumbing(unittest.TestCase):
+    """Task 4: judgment turns get read-only repo tools so the model can check
+    a suspicion before flagging; eval replays (no repo in ctx) stay tool-less
+    so frozen-case scoring remains hermetic."""
+
+    def test_constant_is_read_only(self):
+        from critic.main import JUDGE_TOOLS
+        self.assertEqual(JUDGE_TOOLS, "read,grep,find,ls")
+        self.assertNotIn("bash", JUDGE_TOOLS.split(","))
+        self.assertNotIn("edit", JUDGE_TOOLS.split(","))
+        self.assertNotIn("write", JUDGE_TOOLS.split(","))
+
+    def test_judgment_turn_passes_repo_tools(self):
+        from critic import main as main_mod
+        captured = {}
+
+        def fake_ask(text, system=None, tools=None, cwd=None):
+            captured["tools"] = tools
+            captured["cwd"] = cwd
+            return "PASS"
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td)
+            obs = cc / "observations.ndjsonl"
+            suggestions = cc / "suggestions.ndjsonl"
+            heuristics = cc / "heuristics.md"
+            with obs.open("a") as f:
+                f.write(json.dumps({
+                    "ts": "t", "beat": 1, "type": "diff", "session": None,
+                    "payload": {"diff": "+code", "stat": "", "untracked": []},
+                }) + "\n")
+            ctx = {"heuristics_path": heuristics, "suggestions_file": suggestions,
+                   "persona": "", "project": "", "repo": cc, "verify": False}
+            state = load_state(cc / "nope.json")
+            scheduler = TurnScheduler()
+            with mock.patch.object(main_mod.agent, "ask", fake_ask):
+                heartbeat(obs, state, scheduler, ctx)
+                if scheduler.thread:
+                    scheduler.thread.join()
+
+        self.assertEqual(captured["tools"], main_mod.JUDGE_TOOLS)
+        self.assertEqual(captured["cwd"], str(cc))
+
+    def test_eval_scoring_stays_toolless(self):
+        from critic import agent as agent_mod
+        from evals.run import score_heuristics
+        captured = {}
+
+        def fake_ask(prompt, system=None, tools=None, cwd=None):
+            captured["tools"] = tools
+            captured["cwd"] = cwd
+            return "PASS"
+
+        with mock.patch.object(agent_mod, "ask", fake_ask):
+            score_heuristics("version: 1\n\n- rule\n", cases=[{
+                "name": "c1", "events": [], "expected": "pass", "expect_files": [],
+            }])
+
+        self.assertIsNone(captured["tools"])
+        self.assertIsNone(captured["cwd"])
+
+
 class TestMalformedVisibility(unittest.TestCase):
     """Task 5: a malformed reply must not silently degrade into an ordinary
     PASS — render_verdict has to shout about it."""

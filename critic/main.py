@@ -34,6 +34,12 @@ from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
 
+# Read-only pi builtins for judgment turns (Task 4): the model may look before
+# it flags, but a judgment turn must never be able to mutate the developer's
+# repo — explicitly never "bash", never "edit"/"write". Verification turns
+# keep their separate, sandboxed tool set (critic/verify.py, staging dir only).
+JUDGE_TOOLS = "read,grep,find,ls"
+
 
 def load_state(path: Path) -> dict:
     if path.exists():
@@ -245,9 +251,14 @@ def ask_with_retry(text: str, ctx: dict) -> dict:
     """One agent turn, retried once on transport failure or malformed reply —
     transient gateway errors were observed eating real catches."""
     last: dict = {}
+    repo = ctx.get("repo")
     for attempt in range(2):
         try:
-            reply = agent.ask(text, system=ctx.get("persona"))
+            if repo:
+                reply = agent.ask(text, system=ctx.get("persona"),
+                                  tools=JUDGE_TOOLS, cwd=str(repo))
+            else:
+                reply = agent.ask(text, system=ctx.get("persona"))
         except agent.AgentError as e:
             last = {"verdict": "ERROR", "error": str(e)}
             continue

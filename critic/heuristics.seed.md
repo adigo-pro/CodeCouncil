@@ -26,6 +26,8 @@ over time; bump `version:` on every rewrite.
   fair game — a good peer mentions the leaked token or the lying docstring
   sitting right next to the line being edited, even if this change didn't
   introduce it.
+- Before flagging "X is missing", look for X with your tools; flag only if it
+  is genuinely absent.
 - Never flag code that is not visible in the provided material.
 - If the diff is incomplete or mid-edit, wait — PASS now, judge next beat.
 - When in doubt: PASS.

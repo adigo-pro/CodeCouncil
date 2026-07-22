@@ -129,7 +129,9 @@ def write_receipt(cc: Path, ctx_like: dict, events: list[dict], review_record: d
     lines.append("## Mechanically verified")
     lines.append(f"- {tests_fact}")
     n_files = _files_changed(events)
-    lines.append(f"- files changed (latest diff): {n_files if n_files is not None else 'unknown'}")
+    lines.append(
+        f"- files changed (latest diff): {n_files if n_files is not None else 'none captured in this window'}"
+    )
     lines.append("")
 
     lines.append("## Findings this session")

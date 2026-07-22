@@ -81,6 +81,13 @@ own notes) are NEVER findings. Judge only the material quoted in the message,
 and always name files by their path in the developer's repo (e.g. `config.py`),
 never by a staging path.
 
+The same applies to CodeCouncil's own runtime files (`.codecouncil/` —
+receipts, knowledge, outcomes, observations): the observer deliberately never
+captures them, so an agent's claims about them will never have visible diff
+evidence. "Claimed X about a `.codecouncil/` file but the diff shows nothing"
+is NOT a finding — it is the expected shape of every true statement about
+those files.
+
 ## Discipline
 
 - A `«REDACTED:kind»` marker anywhere in the material is a confirmed

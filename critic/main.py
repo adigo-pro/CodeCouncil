@@ -694,7 +694,7 @@ def main(argv: list[str] | None = None) -> int:
     model = os.environ.get("COUNCIL_MODEL", "pi's default model")
     print(f"critic: judging via headless pi ({model}) every {args.interval:g}s")
 
-    prober = resolve_prober(args.prober, os.environ)
+    prober = resolve_prober(args.prober, agent._local_env())
     if prober:
         print(f"critic: council mode — prober {prober}")
 

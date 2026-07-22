@@ -1871,5 +1871,33 @@ class TestResolveProber(unittest.TestCase):
         self.assertIsNone(resolve_prober(None, {}))
 
 
+class TestMainResolvesProberFromLocalEnv(unittest.TestCase):
+    """Regression (reviewer catch on T4): main() must resolve COUNCIL_PROBER
+    from agent._local_env() (which tops up from ~/.codecouncil/env), not raw
+    os.environ — otherwise a COUNCIL_PROBER set only in that file passes
+    codecouncil's preflight check (which already reads _local_env()) but
+    silently never activates council mode. Monkeypatches agent._local_env and
+    drives main()'s own --once path end to end, the way the module's other
+    integration-style tests (TestHeartbeatWithStub) exercise real code paths
+    rather than re-testing resolve_prober's precedence in isolation."""
+
+    def test_council_prober_from_local_env_file_activates(self):
+        import critic.main as main_mod
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            cc = repo / ".codecouncil"
+            cc.mkdir()
+            (cc / "observations.ndjsonl").write_text("")
+            with mock.patch.object(
+                main_mod.agent, "_local_env",
+                return_value={"COUNCIL_PROBER": "openrouter/openai/gpt-5-mini"}):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    rc = main_mod.main([str(repo), "--once"])
+            self.assertEqual(rc, 0)
+            self.assertIn("critic: council mode — prober openrouter/openai/gpt-5-mini",
+                          out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

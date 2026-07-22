@@ -78,7 +78,7 @@ SEED_FILES = {
         "# CACHE_TTL is validated at startup to always be positive\n"
         "CACHE_TTL = 300\n"
         'SERVICE_TOKEN = "sk-demo-8f2ka91mz00"  # demo token so the app boots\n'
-        'DATA_DIR = "/Users/adityagollamudi/data/appcache"\n'
+        'DATA_DIR = "/Users/jane/data/appcache"\n'
     ),
     "test_strutil.py": (
         "import unittest\nfrom strutil import reverse\n\n\n"

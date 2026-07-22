@@ -29,6 +29,17 @@ FIX_RE = re.compile(
 LOOKBACK_S = 3600  # one hour
 
 
+# Paths never eligible for miss-grading: CodeCouncil's own learning corpus and
+# runtime state. A fix commit that touches harvested eval cases is housekeeping
+# of the loop's own files — grading a PASS as having "missed" a bug in the
+# corpus produced live self-referential noise cases (observed 2026-07-22).
+MISS_EXCLUDED_PREFIXES = ("evals/cases-harvested/", ".codecouncil/")
+
+
+def _miss_eligible(path: str) -> bool:
+    return not path.startswith(MISS_EXCLUDED_PREFIXES)
+
+
 def _paths_match(reviewed: str, touched: str) -> bool:
     """True if `reviewed` and `touched` name the same file: exact (relative)
     path equality, OR matching basenames but ONLY when at least one side has
@@ -94,7 +105,7 @@ def detect_misses(
         if pass_ts is None:
             continue
 
-        reviewed_files = pass_row.get("reviewed_files", [])
+        reviewed_files = [f for f in pass_row.get("reviewed_files", []) if _miss_eligible(f)]
         if not reviewed_files:
             continue
 
@@ -126,8 +137,9 @@ def detect_misses(
             if not fix_subject:
                 continue
 
-            # Check if commit modifies any reviewed files
-            touched = _touched_paths(commit_diff)
+            # Check if commit modifies any reviewed files (corpus/state paths
+            # excluded on both sides — see MISS_EXCLUDED_PREFIXES)
+            touched = [t for t in _touched_paths(commit_diff) if _miss_eligible(t)]
             matching_file = None
             for reviewed_file in reviewed_files:
                 for touched_file in touched:

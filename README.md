@@ -1,177 +1,120 @@
 # CodeCouncil
 
-An AI peer programmer that watches your Claude Code session and, over time, gets
-measurably better at critiquing your work. Four loops:
+[![CI](https://github.com/adigo-tamu/CodeCouncil/actions/workflows/ci.yml/badge.svg)](https://github.com/adigo-tamu/CodeCouncil/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-1. **Observer** — event-driven daemon pairing the agent's *intent* (transcript
-   reasoning + tool calls) with what actually *changed* (git diffs + commits).
-   Everything is **redacted at capture**: credentials in diffs, new files,
-   commands, reasoning, or commit messages become `«REDACTED:kind»` markers
-   before any text leaves your machine — and the marker itself is a finding.
-2. **Critic** — reads observations, mostly says PASS, occasionally flags one
-   verified high-value issue (findings are repro'd before delivery; refuted ones
-   never ship). Sees the full current contents of changed files, not just hunks.
-   When the agent declares work done, it runs a task review and writes a
-   **session receipt** — claims vs mechanically-verified facts — to
-   `.codecouncil/receipts/`. Judgment runs as a headless [pi](https://pi.dev)
-   agent turn (`pi -p`) — any provider pi supports, including OpenAI-compatible
-   endpoints and local models.
-3. **Hook injection** — Claude Code hooks deliver findings into the coding
-   agent's own context, scoped to the session whose work produced them:
-   medium/high injected after edits (PostToolUse), high blocks completion once
-   (Stop) until fixed or rebutted (`COUNCIL-REBUTTAL: <reason>` records an
-   honest disagreement). New receipts are announced into the transcript once.
-4. **Reflector** — grades delivered suggestions against what actually happened
-   next (accepted / rebutted / ignored), then rewrites the Critic's heuristics
-   from the grades. Rewrites are **eval-gated** (a candidate must match or beat
-   the current rules on frozen cases), **auto-rolled-back** on measured
-   regression, and the eval set **grows itself** from graded outcomes. The
-   recursive self-improvement loop — measured, reversible, honest.
+**An AI peer reviewer for AI coding agents.** CodeCouncil watches your Claude
+Code session in real time, pairs what the agent *says* it's doing with what
+*actually changed*, and interrupts only when it can back a finding — ideally
+with an executed repro. Then it grades its own performance against what you
+did next, and rewrites its own review rules from the results.
 
-## Quick start — one command
+The premise: AI coding agents are fast and confident, and their most common
+failure isn't broken syntax — it's a **claim that isn't true**. "Handled the
+edge case" (it didn't). "All tests pass" (they never ran). A docstring that
+promises behavior the code doesn't have. Nobody reads the diff to check.
+CodeCouncil is the second pair of eyes that does — a *differently-trained*
+model, so it doesn't share your agent's blind spots.
 
-```sh
-python3 -m codecouncil /path/to/repo-being-coded-in   # hooks + all three loops
+```
+you + Claude Code ──▶ transcripts + git ──▶ Observer ──▶ Critic ──▶ verified finding
+                                                            │            │
+                            heuristics rewrite ◀── Reflector ◀── hooks inject it into
+                            (eval-gated, rolled            the agent's own context —
+                             back on regression)           fix it or rebut it
 ```
 
-Requires [pi](https://pi.dev) with a provider configured (see below). Pass
-`--model provider/id` to pick the model, `--no-hooks` to skip hook install.
-The sections below run each loop individually.
-
-## Run the Observer
+## Sixty-second start
 
 ```sh
-python3 -m observer /path/to/repo-being-coded-in   # event-driven, 10s floor
-python3 -m observer . --once                       # single beat
-python3 -m observer . --from-start                 # replay transcripts from the top
+npm install -g @earendil-works/pi-coding-agent     # the model runtime (pi.dev)
+echo 'NVIDIA_API_KEY=nvapi-...' > ~/.codecouncil/env   # free Nemotron; or any pi provider
+git clone https://github.com/adigo-tamu/CodeCouncil && cd CodeCouncil
+python3 -m codecouncil /path/to/repo-you-code-in   # hooks + all three loops
 ```
 
-Beats fire the moment a session transcript grows; `--interval` is only the
-fallback ceiling that catches git-only changes.
+No pip installs — the loops are stdlib-only Python 3.10+. Findings appear in
+your terminal, on the dashboard (`cd ui && npm install && npm run dev` →
+localhost:4700), and — the important part — **inside your coding agent's own
+context** via Claude Code hooks, scoped to the session that caused them.
 
-Output: live terminal narration + `.codecouncil/observations.ndjsonl` in the watched
-repo (one JSON event per line: `reasoning`, `tool_call`, `diff` — diffs include
-capped contents of new untracked files so the Critic can see brand-new code).
-No dependencies — Python 3.10+ stdlib only.
+## What makes it different
 
-## Run the Critic
+- **Findings arrive with receipts.** Before delivering, the critic writes and
+  runs a repro against a staged copy of the flagged file. Refuted findings
+  are never delivered; confirmed ones ship with the proof and a
+  review-before-running repro command.
+- **It grades its own silences.** Every verdict records what it reviewed.
+  When a later fix commit revises files a PASS covered, that PASS is graded
+  `missed` — and the judgment packet becomes a frozen eval case
+  automatically. The eval set grows from real mistakes.
+- **Self-improvement is measured and reversible, not vibes.** The Reflector
+  rewrites the critic's rules from graded outcomes — but a candidate must
+  match or beat the current rules on the frozen evals to ship, and a version
+  whose real-world acceptance drops gets auto-rolled-back. Every finding
+  cites the rule that motivated it, so rewrites are evidence-linked per rule.
+- **Rebuttals become knowledge.** Your agent can push back
+  (`COUNCIL-REBUTTAL: <reason>`) — recorded honestly, distilled into a
+  per-repo facts file the critic reads on every future judgment. The same
+  disagreement never needs to happen twice.
+- **Council mode** (opt-in): a second, decorrelated model probes alongside
+  the primary. The pairing is measured, not vibes — see
+  [docs/benchmarks/](docs/benchmarks/): Nemotron (0 false positives, 2/4
+  catches) anchors precision; `gpt-5-mini` (4/4 catches, 2 false positives)
+  adds recall. A prober-only finding is delivered **only** with repro proof.
+- **When your agent says "done", you get a session receipt** — claims made
+  vs. mechanically verified facts (did a test command actually run?), written
+  to `.codecouncil/receipts/` and announced in the transcript.
+
+## Security model, in one paragraph
+
+Everything is **redacted at capture** — credentials in diffs, new files,
+commands, reasoning, or commit messages become `«REDACTED:kind»` markers
+before any text is written to disk or built into a prompt (and the marker
+itself is taught to the critic as a confirmed finding). The only thing that
+leaves your machine is review prompts to the provider *you* configure; keys
+live in `~/.codecouncil/env`, outside every repo. Repros run in throwaway
+temp dirs; investigation tools are path-jailed to the repo. Full contract:
+[SECURITY.md](SECURITY.md).
+
+## Running the loops individually
 
 ```sh
-python3 -m critic /path/to/repo-being-coded-in    # 10s beat, model call only when code changed
-python3 -m critic . --once                        # single beat
+python3 -m observer /path/to/repo        # event-driven; 10s fallback floor
+python3 -m critic /path/to/repo          # 10s beat; model call only when code changed
+python3 -m critic /path/to/repo --prober openrouter/openai/gpt-5-mini   # council mode
+python3 -m reflector /path/to/repo       # grade + gated rewrites, every 5 min
+python3 -m reflector.report /path/to/repo  # acceptance per heuristics version + per rule
+python3 -m hooks.install /path/to/repo   # idempotent; peer_hook is fail-open
+python3 -m evals.run /path/to/repo       # replay frozen cases against every rules version
 ```
 
-Each prompt carries a project-identity header, the critic's recent verdicts with
-their outcomes (rebutted findings are settled), windowed events, and new-file
-contents. Model calls happen only when code actually changed and run on a worker
-thread, so the heartbeat never blocks (`--judge-every-beat` to judge everything).
+Loops communicate **only through NDJSON files** in the watched repo's
+`.codecouncil/` (gitignored) — each is independently restartable, crash-safe
+(byte-offset cursors commit only after judgments durably land), and dies
+never (missing inputs → wait). `COUNCIL_MODEL=provider/model` picks the
+primary model; `CRITIC_CMD=<script>` stubs the model for tests.
 
-Requires [pi](https://pi.dev) (`npm install -g @earendil-works/pi-coding-agent`)
-with a provider configured — run `pi` once and `/login`, or set an API key env
-var. `COUNCIL_MODEL=provider/model` overrides pi's default model; the persona
-is `critic/persona.md`, passed via `--system-prompt`. Verification runs the
-repro in a throwaway staging directory with pi's read/bash tools.
+## Honest numbers
 
-**Zero pi-login option:** put `NVIDIA_API_KEY=nvapi-...` in `~/.codecouncil/env`
-(outside any git repo — never committed) and the critic uses NVIDIA's hosted
-Nemotron for free automatically, via the bundled provider extension
-(`critic/pi_extensions/nvidia_provider.mjs`). Override the model with
-`COUNCIL_MODEL=nvidia-nim/nvidia/<model-id>`.
-Output: every verdict (PASS and suggestions) appends to
-`.codecouncil/suggestions.ndjsonl` tagged with `beat` + `heuristics_version` —
-the metrics substrate for the Reflector. Heuristics seed:
-`critic/heuristics.seed.md`, copied to `.codecouncil/heuristics.md` on first run.
-Set `CRITIC_CMD=<script>` to stub the model in tests.
+From this repo's own dogfooding (it watches itself — the hooks are installed
+here, and the critic reviews its builders):
 
-## Council mode
+- Plant-to-catch on a claim-vs-code bug: **~90 seconds**; catch-to-delivery
+  into the agent's context: **~2 minutes**.
+- It caught a real secret-leak bug **in its own redaction code** that two
+  independent reviewers had approved.
+- Model bake-offs across 12 candidates, 7 frozen cases each, latency and
+  format discipline measured: [docs/benchmarks/](docs/benchmarks/).
+- 400 tests, CI on 3.10/3.12 + UI build. Small-n caveat: the self-improvement
+  curves are days old, not months. That's what running it grows.
 
-By default the Critic asks one model per batch. Council mode adds a second,
-independent model — a **prober** — asked the exact same prompt, so a batch
-gets two takes instead of one.
+## Contributing
 
-The pairing is deliberate, not arbitrary: a small bake-off
-(`docs/benchmarks/2026-07-21-critic-bakeoff.json`,
-`docs/benchmarks/2026-07-21-critic-bakeoff-round2.json`) measured two very
-different profiles on the same 7 frozen eval cases (3 clean, 4 genuinely
-flaggable):
+See [CONTRIBUTING.md](CONTRIBUTING.md) — the eight invariants matter more
+than any style guide. Good first issues: redaction patterns, frozen eval
+cases, adapters for other coding agents (the observer only needs an intent
+stream; the hooks only need an injection channel).
 
-- **NVIDIA Nemotron** (the default primary) — 0 false positives on clean
-  changes, but only 2-of-4 catches on the flaggable ones. A precision anchor.
-- **OpenRouter `openai/gpt-5-mini`** — 4-of-4 catches, but 2 false positives
-  on clean changes. Full recall, noisier.
-
-**Merge rule** (`critic/main.py`'s `merge_council`): the primary's verdict
-flows through whenever it has one — if the primary flags something, that's
-the finding, prober agreement or not. Only when the primary says PASS but the
-prober says SUGGESTION does the prober's finding get a chance, and even then
-only after `critic/verify.py` reproduces it — an unverified prober-only
-finding is exactly the false-positive failure mode the bake-off measured, so
-it never ships without repro proof. Every judged batch records which model(s)
-produced the verdict as a `council` field (`prober_verdict`, `agreement`,
-`prober_model`) on the suggestion row.
-
-**Enable it:**
-
-```sh
-python3 -m codecouncil /path/to/repo --prober openrouter/openai/gpt-5-mini
-python3 -m critic /path/to/repo --prober openrouter/openai/gpt-5-mini
-# or set COUNCIL_PROBER=openrouter/openai/gpt-5-mini in the environment
-```
-
-Precedence is `--prober` flag > `COUNCIL_PROBER` env > off (unchanged
-single-model behavior — no `council` key is ever added to a suggestion row
-unless a prober is configured). The launcher's preflight warns if a
-configured `openrouter/*` prober has no `OPENROUTER_API_KEY` available (env
-or `~/.codecouncil/env`), the same way it already warns about a missing
-primary-model key.
-
-**Cost:** one extra model call per judged batch — calls are already gated on
-actual code changes (never on reasoning-only beats), so this is roughly ~1¢
-per judged batch at `gpt-5-mini` pricing, not per beat.
-
-## Install the hook (per watched repo)
-
-```sh
-python3 -m hooks.install /path/to/repo-being-coded-in   # idempotent settings.json merge
-```
-
-The hook is fail-open (any error → silent exit 0), delivers each suggestion at
-most once per channel (`.codecouncil/delivered.json`), never blocks twice, and
-ignores suggestions older than 10 minutes.
-
-## Run the Reflector
-
-```sh
-python3 -m reflector /path/to/repo-being-coded-in     # grade + maybe rewrite, every 5 min
-python3 -m reflector . --once --force-rewrite         # demo: rewrite below threshold
-python3 -m reflector.report .                         # acceptance per heuristics version
-```
-
-Rewrites are guarded: strict `version: N+1` + length validation, then an eval
-gate — the candidate must match or beat the current rules on the frozen cases
-(`evals/cases/` + self-harvested `evals/cases-harvested/`) or it's rejected.
-Prior versions archive to `.codecouncil/heuristics-history/` (atomic swap), and
-a version whose real-world acceptance drops below its predecessor's is
-auto-rolled-back — as a new, higher version, so history never rewinds.
-
-## Run the dashboard
-
-```sh
-cd ui && npm install && npm run dev        # http://localhost:4700
-COUNCIL_REPO=/path/to/repo npm run dev     # watch a different repo's .codecouncil/
-```
-
-xai-inspired live UI: reads the real `.codecouncil/` files every 2s — observer
-activity feed, every Critic verdict + suggestion with its Reflector grade, and
-the acceptance-per-heuristics-version curve (same math as `reflector.report`,
-n-counts shown). Nothing is mocked; empty states explain what unlocks them.
-
-## Tests
-
-```sh
-python3 -m unittest discover -s tests
-```
-
-CI runs the same suite on every push and pull request (see `.github/workflows/ci.yml`).
-
-Design notes: `docs/specs/2026-07-18-observer-design.md`.
+Plain-language architecture tour: [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md).
+Design history: [docs/plans/](docs/plans/). License: [Apache-2.0](LICENSE).

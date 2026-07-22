@@ -333,5 +333,31 @@ class TestFixRegex(unittest.TestCase):
             self.assertFalse(FIX_RE.search(subject), f"Should not match '{subject}'")
 
 
+
+
+class TestMissExclusions(unittest.TestCase):
+    """A fix commit touching CodeCouncil's own learning corpus must never
+    grade a PASS as missed — observed live: housekeeping of harvested eval
+    cases produced self-referential noise cases embedding stale material."""
+
+    def test_corpus_paths_excluded_both_sides(self):
+        from reflector.misses import detect_misses
+        pass_row = {"id": "p1", "verdict": "PASS", "ts": _iso(NOW - 600),
+                    "reviewed_files": ["evals/cases-harvested/harvest-abc.json"],
+                    "heuristics_version": 1}
+        fix = {"type": "commit", "ts": _iso(NOW - 300), "payload": {
+            "subjects": ["abc123 Fix basename cross-fire in miss detection"],
+            "diff": "--- a/evals/cases-harvested/harvest-abc.json\n+++ b/evals/cases-harvested/harvest-abc.json\n+x\n"}}
+        self.assertEqual(detect_misses([pass_row], [fix], set()), [])
+
+    def test_normal_paths_still_eligible(self):
+        from reflector.misses import detect_misses
+        pass_row = {"id": "p2", "verdict": "PASS", "ts": _iso(NOW - 600),
+                    "reviewed_files": ["critic/main.py"], "heuristics_version": 1}
+        fix = {"type": "commit", "ts": _iso(NOW - 300), "payload": {
+            "subjects": ["abc123 fix crash in critic main"],
+            "diff": "--- a/critic/main.py\n+++ b/critic/main.py\n+x\n"}}
+        self.assertEqual(len(detect_misses([pass_row], [fix], set())), 1)
+
 if __name__ == "__main__":
     unittest.main()

@@ -1847,5 +1847,29 @@ class TestCouncilRenderRegression(unittest.TestCase):
         self.assertIn("council: prober-only finding (needs proof)", text)
 
 
+class TestResolveProber(unittest.TestCase):
+    """Task 4: council mode's model precedence for ctx["prober"] —
+    --prober flag > COUNCIL_PROBER env > None. Testing the extracted pure
+    helper (rather than critic.main.main(), which has no existing direct-call
+    test pattern — it blocks on wait_for/the daemon loop) keeps this
+    RED/GREEN cheap and matches how the rest of this module is tested."""
+
+    def test_flag_beats_env(self):
+        from critic.main import resolve_prober
+        self.assertEqual(
+            resolve_prober("openrouter/openai/gpt-5-mini", {"COUNCIL_PROBER": "other/model"}),
+            "openrouter/openai/gpt-5-mini")
+
+    def test_env_used_when_no_flag(self):
+        from critic.main import resolve_prober
+        self.assertEqual(
+            resolve_prober(None, {"COUNCIL_PROBER": "openrouter/openai/gpt-5-mini"}),
+            "openrouter/openai/gpt-5-mini")
+
+    def test_none_when_neither_set(self):
+        from critic.main import resolve_prober
+        self.assertIsNone(resolve_prober(None, {}))
+
+
 if __name__ == "__main__":
     unittest.main()

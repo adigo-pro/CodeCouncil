@@ -83,6 +83,52 @@ the metrics substrate for the Reflector. Heuristics seed:
 `critic/heuristics.seed.md`, copied to `.codecouncil/heuristics.md` on first run.
 Set `CRITIC_CMD=<script>` to stub the model in tests.
 
+## Council mode
+
+By default the Critic asks one model per batch. Council mode adds a second,
+independent model — a **prober** — asked the exact same prompt, so a batch
+gets two takes instead of one.
+
+The pairing is deliberate, not arbitrary: a small bake-off
+(`docs/benchmarks/2026-07-21-critic-bakeoff.json`,
+`docs/benchmarks/2026-07-21-critic-bakeoff-round2.json`) measured two very
+different profiles on the same 7 frozen eval cases (3 clean, 4 genuinely
+flaggable):
+
+- **NVIDIA Nemotron** (the default primary) — 0 false positives on clean
+  changes, but only 2-of-4 catches on the flaggable ones. A precision anchor.
+- **OpenRouter `openai/gpt-5-mini`** — 4-of-4 catches, but 2 false positives
+  on clean changes. Full recall, noisier.
+
+**Merge rule** (`critic/main.py`'s `merge_council`): the primary's verdict
+flows through whenever it has one — if the primary flags something, that's
+the finding, prober agreement or not. Only when the primary says PASS but the
+prober says SUGGESTION does the prober's finding get a chance, and even then
+only after `critic/verify.py` reproduces it — an unverified prober-only
+finding is exactly the false-positive failure mode the bake-off measured, so
+it never ships without repro proof. Every judged batch records which model(s)
+produced the verdict as a `council` field (`prober_verdict`, `agreement`,
+`prober_model`) on the suggestion row.
+
+**Enable it:**
+
+```sh
+python3 -m codecouncil /path/to/repo --prober openrouter/openai/gpt-5-mini
+python3 -m critic /path/to/repo --prober openrouter/openai/gpt-5-mini
+# or set COUNCIL_PROBER=openrouter/openai/gpt-5-mini in the environment
+```
+
+Precedence is `--prober` flag > `COUNCIL_PROBER` env > off (unchanged
+single-model behavior — no `council` key is ever added to a suggestion row
+unless a prober is configured). The launcher's preflight warns if a
+configured `openrouter/*` prober has no `OPENROUTER_API_KEY` available (env
+or `~/.codecouncil/env`), the same way it already warns about a missing
+primary-model key.
+
+**Cost:** one extra model call per judged batch — calls are already gated on
+actual code changes (never on reasoning-only beats), so this is roughly ~1¢
+per judged batch at `gpt-5-mini` pricing, not per beat.
+
 ## Install the hook (per watched repo)
 
 ```sh

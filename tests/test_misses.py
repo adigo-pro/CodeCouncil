@@ -268,10 +268,7 @@ class TestFixRegex(unittest.TestCase):
             "repairing",
             "hotfix critical",
             "hotfixes",
-            "regress test",
-            "regression",
-            "regression in parser",
-            "regressions found",
+            "fix regression in parser",  # regression alone doesn't match, but "fix" does
         ]
         for subject in fix_words:
             self.assertTrue(FIX_RE.search(subject), f"Should match '{subject}'")
@@ -289,6 +286,18 @@ class TestFixRegex(unittest.TestCase):
             "buggy feature docs",  # "buggy" contains "bug" but is a different word
             "fixation of layout",  # "fixation" contains "fix" but is a different word
             "debug logging",  # "debug" contains "bug" but as a substring, not a word
+            # Dogfood false-miss (2026-07-21): the bare "regress*" alternation
+            # matched test-only commit subjects that merely mention the word
+            # "regression" without describing an actual fix, poisoning the
+            # miss detector with false "missed" grades. Removed entirely —
+            # a genuine regression fix virtually always also says
+            # fix/repair/correct, which still matches below.
+            "regress test",
+            "regression",
+            "regression in parser",
+            "regressions found",
+            "Council merge: cover primary-ERROR axis and render regression",
+            "add regression tests for parser",
         ]
         for subject in non_fix:
             self.assertFalse(FIX_RE.search(subject), f"Should not match '{subject}'")

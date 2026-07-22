@@ -347,6 +347,14 @@ def ask_with_retry(text: str, ctx: dict, model: str | None = None) -> dict:
     return last
 
 
+def resolve_prober(flag: str | None, env: dict) -> str | None:
+    """Council mode's model precedence for ctx["prober"]: an explicit
+    --prober flag wins, then COUNCIL_PROBER from the environment, else no
+    council (single-model flow, unchanged from before council mode existed).
+    Pure — no I/O — so main() and tests share one place this rule lives."""
+    return flag or env.get("COUNCIL_PROBER") or None
+
+
 def merge_council(primary: dict, prober: dict) -> tuple[dict, dict]:
     """Pure merge of two parsed verdicts (ask_with_retry's return shape) into
     one chosen verdict + a council info dict. No I/O, no model calls — the
@@ -670,6 +678,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="skip repro verification of findings")
     ap.add_argument("--task-review-cooldown", type=float, default=TASK_REVIEW_COOLDOWN_S,
                     help="minimum seconds between task reviews (default 600)")
+    ap.add_argument("--prober", default=None,
+                    help="council mode: second model asked the same prompt, "
+                         "recall-oriented, verified before delivery (or COUNCIL_PROBER env)")
     args = ap.parse_args(argv)
 
     cc = args.repo.resolve() / ".codecouncil"
@@ -683,6 +694,10 @@ def main(argv: list[str] | None = None) -> int:
     model = os.environ.get("COUNCIL_MODEL", "pi's default model")
     print(f"critic: judging via headless pi ({model}) every {args.interval:g}s")
 
+    prober = resolve_prober(args.prober, os.environ)
+    if prober:
+        print(f"critic: council mode — prober {prober}")
+
     ctx = {
         "repo": args.repo.resolve(),
         "heuristics_path": cc / "heuristics.md",
@@ -691,6 +706,7 @@ def main(argv: list[str] | None = None) -> int:
         "project": project_context(args.repo.resolve()),
         "verify": not args.no_verify,
         "task_review_cooldown": args.task_review_cooldown,
+        "prober": prober,
     }
     def _on_committed(offset: int) -> None:
         # Runs on the scheduler's worker thread (called from TurnScheduler._run

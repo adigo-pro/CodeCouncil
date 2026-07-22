@@ -14,10 +14,16 @@ from pathlib import Path
 
 from observer.gitwatch import _touched_paths
 
+# Deliberately no bare "regress*" alternative (dogfood false-miss,
+# 2026-07-21): a test-only commit subject that merely mentions "regression"
+# without describing an actual fix (e.g. "cover primary-ERROR axis and
+# render regression") matched and produced false "missed" grades + noise
+# harvested eval cases. A genuine regression fix virtually always also says
+# fix/repair/correct — "fix regression in parser" still matches via "fix" —
+# so precision wins over the marginal recall a bare "regress*" would add.
 FIX_RE = re.compile(
     r"\b(?:fix(?:es|ed|ing)?|bug(?:s)?|bugfix(?:es)?|revert(?:s|ed|ing)?|"
-    r"correct(?:s|ed|ing|ion)?|repair(?:s|ed|ing)?|hotfix(?:es)?|"
-    r"regress(?:es|ed|ion|ions)?)\b",
+    r"correct(?:s|ed|ing|ion)?|repair(?:s|ed|ing)?|hotfix(?:es)?)\b",
     re.I
 )
 LOOKBACK_S = 3600  # one hour

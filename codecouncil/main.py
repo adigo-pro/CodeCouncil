@@ -26,7 +26,7 @@ KEY_VARS = ("NVIDIA_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
             "GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY")
 
 
-def preflight(model: str | None) -> list[str]:
+def preflight(model: str | None, prober: str | None = None) -> list[str]:
     """Warnings to surface before launching — a misconfigured backend otherwise
     just makes all three loops fail every beat with no obvious cause."""
     warns = []
@@ -40,6 +40,17 @@ def preflight(model: str | None) -> list[str]:
         warns.append("no model configured: pass --model, set COUNCIL_MODEL, or put an "
                      "API key in ~/.codecouncil/env. pi will fall back to its own default, "
                      "which may not be authenticated.")
+    # Council mode (Task 4): the prober is a second, independent model call
+    # (critic/main.py's resolve_prober precedence: --prober flag > this same
+    # COUNCIL_PROBER env fallback > None). openrouter/* providers need
+    # OPENROUTER_API_KEY specifically — the generic has_key check above can't
+    # cover it, since e.g. an NVIDIA key configures the primary just fine
+    # while leaving every prober call failing.
+    resolved_prober = prober or env.get("COUNCIL_PROBER")
+    if resolved_prober and resolved_prober.startswith("openrouter/") and not env.get("OPENROUTER_API_KEY"):
+        warns.append(f"prober '{resolved_prober}' needs OPENROUTER_API_KEY: set it "
+                     "or put it in ~/.codecouncil/env. Without it, every council beat's "
+                     "prober call will fail (the primary verdict still runs).")
     return warns
 
 LOOPS = ["observer", "critic", "reflector"]
@@ -61,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="codecouncil", description=__doc__)
     ap.add_argument("repo", type=Path, help="path to the repo being coded in")
     ap.add_argument("--model", help="model for pi turns (sets COUNCIL_MODEL, e.g. openai/gpt-4o)")
+    ap.add_argument("--prober", help="council mode: second model asked alongside --model/"
+                    "COUNCIL_MODEL (e.g. openrouter/openai/gpt-5-mini), or set COUNCIL_PROBER")
     ap.add_argument("--no-hooks", action="store_true", help="skip hook installation")
     args = ap.parse_args(argv)
 
@@ -69,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {repo} is not a directory", file=sys.stderr)
         return 2
 
-    for w in preflight(args.model):
+    for w in preflight(args.model, args.prober):
         print(f"{_tag('critic')} warning: {w}", flush=True)
 
     if not args.no_hooks:
@@ -81,7 +94,9 @@ def main(argv: list[str] | None = None) -> int:
         env["COUNCIL_MODEL"] = args.model
 
     root = Path(__file__).resolve().parent.parent
-    extra = {"observer": ["--wait"], "critic": [], "reflector": []}
+    extra = {"observer": ["--wait"],
+             "critic": ["--prober", args.prober] if args.prober else [],
+             "reflector": []}
     procs: dict[str, subprocess.Popen] = {}
     for name in LOOPS:
         procs[name] = subprocess.Popen(

@@ -169,7 +169,7 @@ export function ReviewPanel({ data }: { data: Council | null }) {
         <VerdictStrip verdicts={data?.verdicts ?? []} />
       </div>
 
-      <div className="mt-6 flex-1 space-y-3 overflow-y-auto" style={{ maxHeight: 560 }}>
+      <div className="mt-6 min-h-0 flex-1 space-y-3 overflow-y-auto scroll-fade">
         {reviews.length ? (
           reviews.map((r) => <ReviewCard key={r.id} r={r} now={data?.now} />)
         ) : (

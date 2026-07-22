@@ -187,7 +187,7 @@ export function ImprovementChart({ data }: { data: Council | null }) {
         )}
       </div>
 
-      <div className="mt-6 flex-1">
+      <div className="mt-6">
         {curve.length && anyGraded ? <Chart curve={curve} /> : <Empty />}
       </div>
 

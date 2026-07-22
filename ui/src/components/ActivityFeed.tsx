@@ -97,8 +97,7 @@ export function ActivityFeed({ data }: { data: Council | null }) {
       </div>
       <div
         ref={scroller}
-        className="flex-1 space-y-1.5 overflow-y-auto p-5 font-mono text-[11.5px] leading-relaxed"
-        style={{ maxHeight: 480 }}
+        className="min-h-0 flex-1 space-y-1.5 overflow-y-auto scroll-fade p-5 font-mono text-[11.5px] leading-relaxed"
       >
         {rows.length ? (
           rows

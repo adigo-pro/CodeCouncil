@@ -17,10 +17,10 @@ export default function App() {
         <StatBand data={data} />
 
         <div className="mt-6 grid gap-4 lg:grid-cols-5">
-          <div className="lg:col-span-3">
+          <div className="min-h-0 lg:col-span-3 lg:h-[640px]">
             <ReviewPanel data={data} />
           </div>
-          <div className="lg:col-span-2">
+          <div className="min-h-0 lg:col-span-2 lg:h-[640px]">
             <ActivityFeed data={data} />
           </div>
         </div>

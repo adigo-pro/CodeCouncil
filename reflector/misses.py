@@ -43,10 +43,11 @@ def _miss_eligible(path: str) -> bool:
 def _paths_match(reviewed: str, touched: str) -> bool:
     """True if `reviewed` and `touched` name the same file: exact (relative)
     path equality, OR matching basenames but ONLY when at least one side has
-    no directory component. That bare-name tolerance exists for a
-    staging-path prefix (e.g. 'underreview/d4ab-app.py' vs 'app.py') the same
-    way critic/main.py's normalize_file already does, and for a bare name
-    matching a directory-qualified one (e.g. 'app.py' vs 'src/app.py') — but
+    no directory component. That bare-name tolerance exists for a bare name
+    matching a directory-qualified one (e.g. 'app.py' vs 'src/app.py' —
+    staging paths reach here already normalized to bare/repo-relative names
+    by critic/main.py's normalize_file, whose uuid-prefix handling is what
+    covers 'underreview/d4ab-app.py'-style paths, not this function) — but
     it must NOT fire when BOTH sides are directory-qualified: two files that
     merely share a common basename (e.g. 'critic/main.py' vs
     'codecouncil/main.py') are not the same file, and matching them on

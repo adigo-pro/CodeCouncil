@@ -19,7 +19,7 @@ export function HeuristicsCard({ data }: { data: Council | null }) {
         )}
       </div>
 
-      <ul className="mt-6 flex-1 space-y-3 overflow-y-auto text-sm leading-relaxed" style={{ maxHeight: 460 }}>
+      <ul className="mt-6 max-h-80 space-y-3 overflow-y-auto text-sm leading-relaxed">
         {(h?.rules ?? []).map((r, i) => (
           <li key={i} className="flex gap-3">
             <span className="mt-[9px] h-1 w-1 shrink-0 rounded-full bg-foreground/60" />

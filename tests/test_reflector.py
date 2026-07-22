@@ -952,12 +952,10 @@ class TestOutcomeRowsCarryRule(HarvestIsolatedTestCase):
 class TestOutcomeRowsCarryCouncilAgreement(HarvestIsolatedTestCase):
     """Task 3: outcome rows copy "council_agreement" from the suggestion's
     council.agreement, on both the explicit-rebuttal and model-judged paths
-    — so acceptance-per-agreement-class can be computed later. Unlike
-    "rule"/"failure_mode" (which always carry a key, even null), this key is
-    included ONLY when the suggestion actually has a "council" dict — a
-    suggestion with no council key (single-model flow, today's default)
-    must produce an outcome row with no "council_agreement" key at all.
-    Never present on missed/undelivered rows either."""
+    — so acceptance-per-agreement-class can be computed later. Mirrors
+    "rule"/"failure_mode" exactly: always present on graded rows, even as
+    null when the suggestion has no "council" dict (single-model flow,
+    today's default). Never present on missed/undelivered rows."""
 
     def setUp(self):
         super().setUp()
@@ -1010,7 +1008,7 @@ class TestOutcomeRowsCarryCouncilAgreement(HarvestIsolatedTestCase):
         self.assertEqual(outcomes[0]["outcome"], "accepted")
         self.assertEqual(outcomes[0]["council_agreement"], "both")
 
-    def test_no_council_key_omits_council_agreement_field(self):
+    def test_no_council_key_carries_null_council_agreement_field(self):
         import reflector.main as main_mod
 
         self._write_suggestion(council=None)
@@ -1021,7 +1019,8 @@ class TestOutcomeRowsCarryCouncilAgreement(HarvestIsolatedTestCase):
         outcomes = [json.loads(l) for l in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "accepted")
-        self.assertNotIn("council_agreement", outcomes[0])
+        self.assertIn("council_agreement", outcomes[0])
+        self.assertIsNone(outcomes[0]["council_agreement"])
 
     def test_undelivered_outcome_has_no_council_agreement_field(self):
         import reflector.main as main_mod
@@ -1105,6 +1104,28 @@ class TestMissedGrading(HarvestIsolatedTestCase):
                         side_effect=RuntimeError("boom")):
             main_mod.grade_pending(self.cc)  # must not raise
         self.assertFalse((self.cc / "outcomes.ndjsonl").exists())
+
+    def test_missed_outcome_has_no_council_agreement_field(self):
+        """A PASS row can carry a "council" tag too (e.g. council mode's
+        "primary PASS + prober PASS -> both" branch) — the missed outcome
+        row built from it must still omit council_agreement entirely, same
+        as every other missed/undelivered row (only graded rows carry it,
+        even as null)."""
+        import reflector.main as main_mod
+
+        (self.cc / "suggestions.ndjsonl").write_text(json.dumps({
+            "id": "p1", "ts": _iso(self.pass_ts), "verdict": "PASS",
+            "heuristics_version": 2, "reviewed_files": ["a.py"],
+            "reason": "looked fine",
+            "council": {"agreement": "both", "prober_verdict": "PASS"},
+        }) + "\n", encoding="utf-8")
+
+        main_mod.grade_pending(self.cc)
+
+        outc = [json.loads(l) for l in
+               (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
+        self.assertEqual(outc[-1]["outcome"], "missed")
+        self.assertNotIn("council_agreement", outc[-1])
 
 
 if __name__ == "__main__":

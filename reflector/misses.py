@@ -31,18 +31,31 @@ LOOKBACK_S = 3600  # one hour
 
 def _paths_match(reviewed: str, touched: str) -> bool:
     """True if `reviewed` and `touched` name the same file: exact (relative)
-    path equality, or matching basenames. Basename equality is deliberate —
-    it tolerates a staging-path prefix (e.g. 'underreview/d4ab-app.py' vs
-    'app.py') the same way critic/main.py's normalize_file already does —
-    but it is NOT substring containment: the previous bidirectional
+    path equality, OR matching basenames but ONLY when at least one side has
+    no directory component. That bare-name tolerance exists for a
+    staging-path prefix (e.g. 'underreview/d4ab-app.py' vs 'app.py') the same
+    way critic/main.py's normalize_file already does, and for a bare name
+    matching a directory-qualified one (e.g. 'app.py' vs 'src/app.py') — but
+    it must NOT fire when BOTH sides are directory-qualified: two files that
+    merely share a common basename (e.g. 'critic/main.py' vs
+    'codecouncil/main.py') are not the same file, and matching them on
+    basename alone (the old rule) produced a live false 'missed' grade —
+    a fix commit touching codecouncil/main.py wrongly graded a PASS that
+    reviewed critic/main.py, purely on the 'main.py' collision. Common
+    filenames (main.py, utils.py, index.js, ...) make that systematic.
+    This is also NOT substring containment: the older bidirectional
     `a in b or b in a` check wrongly matched 'utils.py' against
-    'tests/test_utils.py' (one string contains the other), poisoning the
-    miss detector with a false 'missed' grade. Path(...).name comparison
-    rejects that pair (their basenames differ) while still matching
-    'src/app.py' against 'app.py'."""
+    'tests/test_utils.py' (one string contains the other); basename
+    comparison alone already rejects that pair."""
     if reviewed == touched:
         return True
-    return Path(reviewed).name == Path(touched).name
+    reviewed_path = Path(reviewed)
+    touched_path = Path(touched)
+    if reviewed_path.name != touched_path.name:
+        return False
+    reviewed_is_bare = str(reviewed_path.parent) == "."
+    touched_is_bare = str(touched_path.parent) == "."
+    return reviewed_is_bare or touched_is_bare
 
 
 def _epoch(iso: str) -> float | None:

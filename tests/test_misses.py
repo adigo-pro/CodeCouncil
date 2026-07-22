@@ -245,6 +245,36 @@ class TestFileOverlapMatching(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["file"], "src/app.py")
 
+    def test_same_basename_different_dirs_no_match(self):
+        """Both sides directory-qualified with the same basename ('main.py')
+        must NOT match — cross-fire regression: a fix commit touching
+        codecouncil/main.py wrongly graded a PASS reviewing critic/main.py
+        as missed, purely on basename collision. Common filenames make the
+        old cross-dir basename rule systematic."""
+        self.assertFalse(_paths_match("critic/main.py", "codecouncil/main.py"))
+
+    def test_same_path_same_dir_matches(self):
+        self.assertTrue(_paths_match("critic/main.py", "critic/main.py"))
+
+    def test_bare_name_side_matches_directory_qualified(self):
+        self.assertTrue(_paths_match("main.py", "src/main.py"))
+
+    def test_detect_misses_no_false_positive_on_cross_dir_basename_collision(self):
+        """End-to-end regression for the live basename cross-fire: a PASS
+        reviewing critic/main.py must not be flagged as missed by a later
+        fix commit that only touched the unrelated codecouncil/main.py."""
+        pass_rows = [_pass_row("p1", NOW, ("critic/main.py",))]
+        commit_events = [
+            _commit(
+                NOW + 100,
+                "fix startup crash",
+                "--- a/codecouncil/main.py\n+++ b/codecouncil/main.py\n"
+                "@@ -1 +1 @@\n-old\n+new",
+            )
+        ]
+        result = detect_misses(pass_rows, commit_events, set())
+        self.assertEqual(len(result), 0)
+
 
 class TestFixRegex(unittest.TestCase):
     """Test the FIX_RE regex pattern."""

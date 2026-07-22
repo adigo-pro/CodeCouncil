@@ -120,7 +120,14 @@ def maybe_harvest(cc: Path, suggestion_row: dict, outcome: str,
       `commit_subject` (the fix commit's subject, from reflector.misses'
       output) is folded into the dedupe hash so two distinct misses on the
       same file — different fix commits — harvest as two cases instead of
-      collapsing into one under the old (file, "") hash.
+      collapsing into one. The hash is keyed on exactly
+      (miss_file, commit_subject) — deliberately NOT on the PASS row's own
+      "reason" text, which is per-call free text that differs between two
+      PASS rows even when they name the same file and were contradicted by
+      the same fix commit. Hashing on "reason" (the old behavior) let three
+      live harvested cases for the same (critic/main.py, fix commit) pair
+      escape dedupe as three distinct files. One case per (file, fix-commit)
+      is the invariant.
     """
     if outcome == "missed":
         if not miss_file:
@@ -132,8 +139,7 @@ def maybe_harvest(cc: Path, suggestion_row: dict, outcome: str,
         if material is None:
             return None
         file_name = Path(miss_file).name
-        issue = suggestion_row.get("reason", "")
-        return _write_case(sid, miss_file, file_name, issue, "flag", material,
+        return _write_case(sid, miss_file, file_name, "", "flag", material,
                            dedupe_extra=commit_subject or "")
 
     if suggestion_row.get("verdict") != "SUGGESTION":

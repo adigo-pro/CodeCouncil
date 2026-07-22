@@ -256,6 +256,25 @@ class TestMaybeHarvest(HarvestIsolatedTestCase):
         self.assertIsNone(second)
         self.assertEqual(len(list(self.harvested_dir.glob("*.json"))), 1)
 
+    def test_missed_dedupe_ignores_differing_pass_reason_text(self):
+        """Live bug: three harvested cases shared (file=critic/main.py,
+        same commit_subject) but got distinct hashes because the dedupe hash
+        included the PASS row's own "reason" text (which varies call to
+        call) instead of hashing on exactly (miss_file, commit_subject).
+        Two PASS rows with different ids AND different reason text, but the
+        same miss_file + commit_subject, must still collapse to one file."""
+        _write_material(self.cc, "p1")
+        _write_material(self.cc, "p2")
+        row1 = {"id": "p1", "verdict": "PASS", "reason": "looked fine at review time"}
+        row2 = {"id": "p2", "verdict": "PASS", "reason": "no issues spotted in diff"}
+        first = harvest.maybe_harvest(self.cc, row1, "missed", miss_file="critic/main.py",
+                                      commit_subject="fix startup crash")
+        second = harvest.maybe_harvest(self.cc, row2, "missed", miss_file="critic/main.py",
+                                       commit_subject="fix startup crash")
+        self.assertEqual(first, "harvest-p1")
+        self.assertIsNone(second)
+        self.assertEqual(len(list(self.harvested_dir.glob("*.json"))), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

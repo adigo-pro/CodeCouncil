@@ -1,0 +1,14 @@
+{
+  "name": "codecouncil-demo",
+  "private": true,
+  "scripts": {
+    "render": "remotion render Catch ../docs/demo.mp4",
+    "render-gif": "remotion render Catch ../docs/demo.gif --codec=gif --every-nth-frame=2 --scale=0.75"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0"
+  }
+}

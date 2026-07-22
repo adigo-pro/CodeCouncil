@@ -3,6 +3,10 @@
 [![CI](https://github.com/adigo-tamu/CodeCouncil/actions/workflows/ci.yml/badge.svg)](https://github.com/adigo-tamu/CodeCouncil/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+![CodeCouncil catching a claim-vs-code bug: the agent's docstring promises ValueError, the code doesn't raise, the critic proves it by running it and delivers the finding into the agent's context](docs/demo.gif)
+
+*Every line above is from a real run — the finding, the repro, the timings. Recreated frame-for-frame with [Remotion](https://remotion.dev) (`demo/`).*
+
 **An AI peer reviewer for AI coding agents.** CodeCouncil watches your Claude
 Code session in real time, pairs what the agent *says* it's doing with what
 *actually changed*, and interrupts only when it can back a finding — ideally

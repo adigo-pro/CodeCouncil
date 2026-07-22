@@ -69,6 +69,16 @@ def _run(cmd: list[str], timeout: int, cwd: str | None = None,
         raise AgentError(str(e)) from e
 
 
+def _resolve_model(model: str | None, env: dict[str, str]) -> str | None:
+    """One source of truth for model precedence: explicit param > COUNCIL_MODEL
+    env > NVIDIA default (when its key resolves) > None. The CRITIC_CMD stub
+    branch and the pi branch must never drift apart on this — the stub's
+    argv[2] IS the test contract for what production would have sent."""
+    return model or env.get("COUNCIL_MODEL") or (
+        DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None
+    )
+
+
 def ask(prompt: str, system: str | None = None, tools: str | None = None,
         cwd: str | None = None, model: str | None = None) -> str:
     """Run one agent turn and return its raw reply text.
@@ -84,9 +94,7 @@ def ask(prompt: str, system: str | None = None, tools: str | None = None,
     override = os.environ.get("CRITIC_CMD")
     if override:
         env = _local_env()
-        resolved_model = model or env.get("COUNCIL_MODEL") or (
-            DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None
-        ) or ""
+        resolved_model = _resolve_model(model, env) or ""
         with tempfile.NamedTemporaryFile(
             "w", suffix=".txt", delete=False, encoding="utf-8"
         ) as f:
@@ -117,9 +125,7 @@ def ask(prompt: str, system: str | None = None, tools: str | None = None,
     cmd += ["--tools", tools] if tools else ["--no-tools"]
     if system:
         cmd += ["--system-prompt", system]
-    resolved_model = model or env.get("COUNCIL_MODEL") or (
-        DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None
-    )
+    resolved_model = _resolve_model(model, env)
     if resolved_model:
         cmd += ["--model", resolved_model]
     cmd.append(prompt)

@@ -134,6 +134,51 @@ const VerdictStrip: React.FC = () => {
   );
 };
 
+// ---- the real header bar + stat band ----
+const TopChrome: React.FC = () => {
+  const frame = useCurrentFrame();
+  const flagged = frame >= T.findingStart;
+  const chip = (label: string, dot?: string) => (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      border: `1px solid ${C.border}`, background: C.card, color: C.mutedFg,
+      borderRadius: 999, padding: "4px 12px", fontFamily: MONO, fontSize: 11.5,
+    }}>
+      {dot && <span style={{ width: 6, height: 6, borderRadius: 3, background: dot }} />}
+      {label}
+    </span>
+  );
+  return (
+    <div style={{
+      position: "absolute", top: 0, left: 0, right: 0,
+      display: "flex", alignItems: "center", gap: 10, padding: "14px 22px",
+      borderBottom: `1px solid ${C.border}`, background: C.background,
+    }}>
+      <span style={{ display: "flex", gap: 3, marginRight: 6 }}>
+        <span style={{ width: 7, height: 7, borderRadius: 4, background: C.fg }} />
+        <span style={{ width: 7, height: 7, borderRadius: 4, border: `1px solid ${C.fg}` }} />
+      </span>
+      <span style={{ fontFamily: SANS, fontWeight: 700, fontSize: 15, color: C.fg }}>CodeCouncil</span>
+      <span style={{ flex: 1 }} />
+      {chip("watching payments-app · beat 5734")}
+      {chip("heuristics v10")}
+      {chip(flagged ? "1 finding" : "critic", flagged ? C.warn : C.live)}
+      {chip("LIVE", C.live)}
+      <span style={{
+        position: "absolute", top: 54, left: 22, display: "flex", gap: 26,
+        fontFamily: SANS, fontSize: 12, color: C.mutedFg, alignItems: "baseline",
+      }}>
+        {[["286", "verdicts"], ["236", "quiet passes"], ["49", "issues flagged"], ["6%", "acceptance (n=31)"]].map(([v, l]) => (
+          <span key={l} style={{ display: "inline-flex", gap: 7, alignItems: "baseline" }}>
+            <span style={{ fontFamily: MONO, fontSize: 17, fontWeight: 600, color: C.fg }}>{v}</span>
+            {l}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+};
+
 // ---- scenes ----
 const Title: React.FC = () => {
   const frame = useCurrentFrame();
@@ -379,11 +424,12 @@ export const Catch: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: C.background }}>
       {frame >= T.titleEnd - 12 && (
-        <AbsoluteFill style={{ flexDirection: "row", gap: 16, padding: 20 }}>
-          <FeedCard />
+        <AbsoluteFill style={{ flexDirection: "row", gap: 16, padding: "86px 20px 20px" }}>
           <ReviewCardPanel />
+          <FeedCard />
         </AbsoluteFill>
       )}
+      {frame >= T.titleEnd - 12 && <TopChrome />}
       <TimeSkip />
       {frame < T.titleEnd && <Title />}
       <EndCard />

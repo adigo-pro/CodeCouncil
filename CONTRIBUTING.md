@@ -43,8 +43,9 @@ They exist because each one was earned by a real failure — see
 
 - Tests are stdlib `unittest`, one file per loop in `tests/`. TDD is the
   house style: the regression test lands with (ideally before) the fix.
-- Run the full suite before pushing; CI runs it on 3.10/3.12 plus the UI
-  typecheck/build.
+- Run the full suite before pushing; CI runs four jobs: the Python suite on
+  3.10/3.12, the UI typecheck + build, `ruff check .`, and an installer
+  smoke test.
 - Commit messages: imperative subject, a body that explains *why*.
 - The repo watches itself during development — the critic may review your
   work as you code. If it flags something wrongly, reply with a line
@@ -74,8 +75,17 @@ model's reply. To poke a loop by hand against a scratch repo:
 
 ```sh
 printf '#!/bin/sh\necho "PASS — stub"\n' > /tmp/stub && chmod +x /tmp/stub
-git init /tmp/scratch && cd /tmp/scratch && git commit --allow-empty -m init
-CRITIC_CMD=/tmp/stub python3 -m critic /tmp/scratch --once
+git init /tmp/scratch && git -C /tmp/scratch commit --allow-empty -m init
+
+# observer requires a Claude Code session transcript for the repo it's
+# watching; fake a minimal one so the scratch repo doesn't need a real
+# Claude Code session pointed at it.
+mkdir -p /tmp/scratch-home/.claude/projects/x
+printf '{"type":"user","cwd":"%s"}\n' "$(cd /tmp/scratch && pwd -P)" \
+    > /tmp/scratch-home/.claude/projects/x/s.jsonl
+
+HOME=/tmp/scratch-home python3 -m observer /tmp/scratch --once
+CRITIC_CMD=/tmp/stub HOME=/tmp/scratch-home python3 -m critic /tmp/scratch --once
 ```
 
 Where things live: `observer/` tails transcripts + git into

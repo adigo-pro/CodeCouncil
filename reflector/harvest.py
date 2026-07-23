@@ -8,9 +8,11 @@ observation events the critic judges from. Every text-bearing event field —
 diff content and untracked file contents (observer.gitwatch), reasoning text
 and tool_call commands (observer.transcript) — is passed through
 core.redact.redact() at observer capture time, before it ever lands in
-observations.ndjsonl. So everything harvested here is already redacted.
-evals/cases-harvested/ is therefore safe to version and must NOT be
-gitignored.
+observations.ndjsonl. So everything harvested here is already redacted —
+safe to store. But it's still a runtime artifact (machine-generated, one
+directory per checkout), so evals/cases-harvested/ is deliberately
+gitignored; promoting a harvested case into evals/cases/ is a manual
+curation step, not automatic.
 """
 
 from __future__ import annotations
@@ -20,9 +22,10 @@ import json
 from pathlib import Path
 
 # Sibling of evals/cases, inside the CodeCouncil source tree itself (not the
-# watched repo's .codecouncil/ dir) — harvested cases are versioned right
-# alongside the hand-made ones so evals.run.load_cases and the rewrite gate
-# see both. A module-level Path (not a function) so tests can monkeypatch it.
+# watched repo's .codecouncil/ dir) — a gitignored runtime directory that
+# evals.run.load_cases and the rewrite gate both read alongside the
+# hand-made cases. A module-level Path (not a function) so tests can
+# monkeypatch it.
 #
 # Deliberately global, not per-watched-repo: every repo CodeCouncil watches
 # harvests into this one shared directory, so a finding graded in repo A

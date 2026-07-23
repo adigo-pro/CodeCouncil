@@ -1881,7 +1881,7 @@ class TestMainResolvesProberFromLocalEnv(unittest.TestCase):
     integration-style tests (TestHeartbeatWithStub) exercise real code paths
     rather than re-testing resolve_prober's precedence in isolation."""
 
-    def test_council_prober_fromlocal_env_file_activates(self):
+    def test_council_prober_from_local_env_file_activates(self):
         import critic.main as main_mod
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)

@@ -90,9 +90,9 @@ def project_context(repo: Path) -> str:
     readme = repo / "README.md"
     if readme.exists():
         try:
+            readme_lines = readme.read_text(encoding="utf-8", errors="replace").splitlines()
             excerpt = " ".join(
-                l.strip() for l in readme.read_text(encoding="utf-8", errors="replace").splitlines()[:20]
-                if l.strip()
+                line.strip() for line in readme_lines[:20] if line.strip()
             )
             lines.append("README: " + excerpt[:600])
         except OSError:

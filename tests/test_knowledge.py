@@ -83,7 +83,7 @@ class TestAddFact(unittest.TestCase):
                 self.assertTrue(knowledge.add_fact(cc, f"Fact {i}."))
 
             text = knowledge.load(cc)
-            facts = [l[2:] for l in text.splitlines() if l.startswith("- ")]
+            facts = [line[2:] for line in text.splitlines() if line.startswith("- ")]
             self.assertEqual(len(facts), knowledge.KNOWLEDGE_MAX_FACTS)
             # oldest evicted: "Fact one." and "Fact 2." fell off the front
             self.assertNotIn("Fact one.", facts)

@@ -28,7 +28,7 @@ WANTED = {
 
 def main() -> int:
     repo = Path(sys.argv[1]).resolve()
-    obs = [json.loads(l) for l in
+    obs = [json.loads(line) for line in
            (repo / ".codecouncil" / "observations.ndjsonl").read_text().splitlines()]
     CASES_DIR.mkdir(parents=True, exist_ok=True)
     for e in obs:

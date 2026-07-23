@@ -1,6 +1,5 @@
 """Tests for the codecouncil launcher's preflight warnings."""
 
-import os
 import sys
 import unittest
 from pathlib import Path

@@ -294,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
         while True:
             n = grade_pending(cc)
             if n == 0:
-                print(f"reflector: nothing to grade")
+                print("reflector: nothing to grade")
             maybe_rollback(cc, state, read_ndjson(cc / "outcomes.ndjsonl"))
             maybe_rewrite(cc, state, args.force_rewrite,
                           rewrite_after=args.rewrite_after)

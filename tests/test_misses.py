@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from reflector.misses import _paths_match, detect_misses, FIX_RE, LOOKBACK_S
 
 

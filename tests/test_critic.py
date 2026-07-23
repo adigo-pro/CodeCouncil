@@ -501,7 +501,7 @@ class TestHeartbeatWithStub(unittest.TestCase):
              "payload": {"diff": "+code", "stat": "", "untracked": []}},
         ])
         self.assertEqual(self._beat(state, scheduler), "dispatched")
-        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.suggestions.read_text().splitlines()]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["n_events"], 2)  # merged: held reasoning + new diff
 
@@ -515,7 +515,7 @@ class TestHeartbeatWithStub(unittest.TestCase):
         ])
         state = load_state(self.cc / "nope.json")
         self._beat(state, TurnScheduler())
-        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.suggestions.read_text().splitlines()]
         self.assertEqual(len(rows), 1)
         row = rows[0]
         # Both fields present
@@ -528,7 +528,6 @@ class TestHeartbeatWithStub(unittest.TestCase):
 
     def test_ts_is_usable_by_age_ok(self):
         """Task 3: record["ts"] at write time is usable by hooks/logic._age_ok."""
-        from datetime import datetime
         from hooks import logic
         import time
         self._set_stub("PASS")
@@ -538,7 +537,7 @@ class TestHeartbeatWithStub(unittest.TestCase):
         ])
         state = load_state(self.cc / "nope.json")
         self._beat(state, TurnScheduler())
-        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.suggestions.read_text().splitlines()]
         row = rows[0]
         # The written ts should pass the age check (TTL is 600s)
         now = time.time()
@@ -554,7 +553,7 @@ class TestHeartbeatWithStub(unittest.TestCase):
         state = load_state(self.cc / "nope.json")
         status = self._beat(state, TurnScheduler(judge_every_beat=True))
         self.assertEqual(status, "dispatched")
-        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.suggestions.read_text().splitlines()]
         self.assertEqual(rows[0]["verdict"], "PASS")
         self.assertEqual(rows[0]["heuristics_version"], 1)  # seeded from heuristics.seed.md
         # audit trail: the exact prompt is saved under the verdict id
@@ -573,7 +572,7 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self._beat(state, scheduler)
         # second beat: nothing new -> no second row
         self._beat(state, scheduler)
-        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.suggestions.read_text().splitlines()]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["verdict"], "SUGGESTION")
         self.assertEqual(state["latest_diff"]["payload"]["diff"], "+bad")
@@ -907,7 +906,7 @@ class TestMalformedVisibility(unittest.TestCase):
                     judge_batch(events, ctx)
             finally:
                 os.environ.pop("CRITIC_CMD", None)
-            rows = [json.loads(l) for l in suggestions.read_text().splitlines()]
+            rows = [json.loads(line) for line in suggestions.read_text().splitlines()]
             self.assertEqual(len(rows), 1)
             self.assertIn("malformed", rows[0])
             self.assertIn("⚠", out.getvalue())
@@ -915,7 +914,9 @@ class TestMalformedVisibility(unittest.TestCase):
 
 class TestTaskReview(unittest.TestCase):
     def test_tests_run_detection(self):
-        ev = lambda cmd: {"type": "tool_call", "payload": {"tool": "Bash", "input": {"command": cmd}}}
+        def ev(cmd):
+            return {"type": "tool_call", "payload": {"tool": "Bash", "input": {"command": cmd}}}
+
         self.assertEqual(prompt.tests_run([ev("python3 -m unittest discover")]), "python3 -m unittest")
         self.assertEqual(prompt.tests_run([ev("npm test -- --watch=false")]), "npm test")
         self.assertIsNone(prompt.tests_run([ev("git commit -m 'tests pass'")]))
@@ -1159,7 +1160,7 @@ class TestSessionTagging(unittest.TestCase):
         os.environ["CRITIC_CMD"] = str(self.stub)
 
     def _rows(self):
-        return [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        return [json.loads(line) for line in self.suggestions.read_text().splitlines()]
 
     def test_majority_session_tags_record(self):
         from critic.main import judge_batch
@@ -1376,7 +1377,7 @@ class TestJudgeBatchCaseMaterial(unittest.TestCase):
         events = [{"type": "diff", "session": None,
                    "payload": {"diff": "+bad", "stat": "", "untracked": []}}]
         judge_batch(events, ctx)
-        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.suggestions.read_text().splitlines()]
         verdict_id = rows[0]["id"]
         material_path = self.cc / "case-material" / f"{verdict_id}.json"
         self.assertTrue(material_path.exists())
@@ -1396,7 +1397,7 @@ class TestJudgeBatchCaseMaterial(unittest.TestCase):
         events = [{"type": "diff", "session": None,
                    "payload": {"diff": "+ok", "stat": "", "untracked": []}}]
         judge_batch(events, ctx)
-        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.suggestions.read_text().splitlines()]
         verdict_id = rows[0]["id"]
         material_path = self.cc / "case-material" / f"{verdict_id}.json"
         self.assertTrue(material_path.exists())
@@ -1587,7 +1588,7 @@ class TestReceiptTaskReviewIntegration(unittest.TestCase):
         with mock.patch("critic.main.receipt.write_receipt", side_effect=OSError("boom")):
             task_review(self.obs, {**self.ctx, "beat": 1, "ts": "2026-01-01T00:00:01+00:00"},
                        since_epoch=since)
-        rows = [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        rows = [json.loads(line) for line in self.suggestions.read_text().splitlines()]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["verdict"], "PASS")
         self.assertFalse((self.cc / "receipts").exists())
@@ -1749,12 +1750,12 @@ class TestCouncilJudgeBatch(unittest.TestCase):
         os.environ["CRITIC_CMD"] = str(stub)
 
     def _rows(self):
-        return [json.loads(l) for l in self.suggestions.read_text().splitlines()]
+        return [json.loads(line) for line in self.suggestions.read_text().splitlines()]
 
     def _calls(self):
         if not self.calls_log.exists():
             return []
-        return [l for l in self.calls_log.read_text().splitlines() if l or l == ""]
+        return [line for line in self.calls_log.read_text().splitlines() if line or line == ""]
 
     def test_prober_only_finding_gets_council_agreement_and_survives(self):
         from critic.main import judge_batch

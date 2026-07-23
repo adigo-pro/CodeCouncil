@@ -486,7 +486,7 @@ class TestMaybeRewriteGateIntegration(unittest.TestCase):
             main_mod.maybe_rewrite(self.cc, {}, force=False)
 
         self.assertEqual(self.heuristics.read_text(), "version: 1\n- old rule\n")
-        reflections = [json.loads(l) for l in
+        reflections = [json.loads(line) for line in
                        (self.cc / "reflections.ndjsonl").read_text().splitlines()]
         self.assertEqual(len(reflections), 1)
         self.assertEqual(reflections[0]["event"], "rewrite_rejected")
@@ -504,7 +504,7 @@ class TestMaybeRewriteGateIntegration(unittest.TestCase):
             main_mod.maybe_rewrite(self.cc, {}, force=False)
 
         self.assertEqual(self.heuristics.read_text(), "version: 2\n- new rule\n")
-        reflections = [json.loads(l) for l in
+        reflections = [json.loads(line) for line in
                        (self.cc / "reflections.ndjsonl").read_text().splitlines()]
         self.assertEqual(len(reflections), 1)
         self.assertEqual(reflections[0]["from_version"], 1)
@@ -576,7 +576,7 @@ class TestMaybeRollback(unittest.TestCase):
         self.assertEqual(self.heuristics.read_text(), "version: 3\n- v1 rule\n")
         self.assertEqual((self.cc / "heuristics-history" / "v2.md").read_text(),
                          "version: 2\n- v2 rule\n")
-        reflections = [json.loads(l) for l in
+        reflections = [json.loads(line) for line in
                        (self.cc / "reflections.ndjsonl").read_text().splitlines()]
         self.assertEqual(len(reflections), 1)
         self.assertEqual(reflections[0]["event"], "rollback")
@@ -671,7 +671,7 @@ class TestGradePendingHarvestsCases(HarvestIsolatedTestCase):
         n = main_mod.grade_pending(self.cc)
         self.assertEqual(n, 1)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "accepted")
 
@@ -691,7 +691,7 @@ class TestGradePendingHarvestsCases(HarvestIsolatedTestCase):
         ) + "\n", encoding="utf-8")
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "rebutted")
         self.assertFalse(outcomes[0]["file_touched"])
@@ -713,7 +713,7 @@ class TestGradePendingHarvestsCases(HarvestIsolatedTestCase):
             n = main_mod.grade_pending(self.cc)
         self.assertEqual(n, 1)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0]["outcome"], "accepted")
@@ -770,7 +770,7 @@ class TestGradePendingCreditsUntrackedFix(HarvestIsolatedTestCase):
         os.environ["CRITIC_CMD"] = str(stub)
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "accepted")
 
@@ -820,7 +820,7 @@ class TestGradePendingDistillsKnowledge(HarvestIsolatedTestCase):
         os.environ["CRITIC_CMD"] = str(stub)
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "rebutted")
         self.assertIn("stdlib unittest", (self.cc / "knowledge.md").read_text())
@@ -837,7 +837,7 @@ class TestGradePendingDistillsKnowledge(HarvestIsolatedTestCase):
 
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "rebutted")
         self.assertIn("stdlib unittest", (self.cc / "knowledge.md").read_text())
@@ -860,7 +860,7 @@ class TestGradePendingDistillsKnowledge(HarvestIsolatedTestCase):
             n = main_mod.grade_pending(self.cc)
 
         self.assertEqual(n, 1)
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0]["outcome"], "rebutted")
@@ -908,7 +908,7 @@ class TestOutcomeRowsCarryRule(HarvestIsolatedTestCase):
         ) + "\n", encoding="utf-8")
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "rebutted")
         self.assertEqual(outcomes[0]["rule"], 2)
@@ -922,7 +922,7 @@ class TestOutcomeRowsCarryRule(HarvestIsolatedTestCase):
         os.environ["CRITIC_CMD"] = str(stub)
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "accepted")
         self.assertIn("rule", outcomes[0])
@@ -942,7 +942,7 @@ class TestOutcomeRowsCarryRule(HarvestIsolatedTestCase):
         }) + "\n", encoding="utf-8")
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "undelivered")
         self.assertNotIn("rule", outcomes[0])
@@ -990,7 +990,7 @@ class TestOutcomeRowsCarryCouncilAgreement(HarvestIsolatedTestCase):
         ) + "\n", encoding="utf-8")
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "rebutted")
         self.assertEqual(outcomes[0]["council_agreement"], "prober-only")
@@ -1003,7 +1003,7 @@ class TestOutcomeRowsCarryCouncilAgreement(HarvestIsolatedTestCase):
         os.environ["CRITIC_CMD"] = str(stub)
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "accepted")
         self.assertEqual(outcomes[0]["council_agreement"], "both")
@@ -1016,7 +1016,7 @@ class TestOutcomeRowsCarryCouncilAgreement(HarvestIsolatedTestCase):
         os.environ["CRITIC_CMD"] = str(stub)
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "accepted")
         self.assertIn("council_agreement", outcomes[0])
@@ -1034,7 +1034,7 @@ class TestOutcomeRowsCarryCouncilAgreement(HarvestIsolatedTestCase):
         }) + "\n", encoding="utf-8")
         main_mod.grade_pending(self.cc)
 
-        outcomes = [json.loads(l) for l in
+        outcomes = [json.loads(line) for line in
                    (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outcomes[0]["outcome"], "undelivered")
         self.assertNotIn("council_agreement", outcomes[0])
@@ -1078,7 +1078,7 @@ class TestMissedGrading(HarvestIsolatedTestCase):
         n = main_mod.grade_pending(self.cc)
         self.assertEqual(n, 1)
 
-        outc = [json.loads(l) for l in
+        outc = [json.loads(line) for line in
                (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outc[-1]["outcome"], "missed")
         self.assertEqual(outc[-1]["suggestion_id"], "p1")
@@ -1122,7 +1122,7 @@ class TestMissedGrading(HarvestIsolatedTestCase):
 
         main_mod.grade_pending(self.cc)
 
-        outc = [json.loads(l) for l in
+        outc = [json.loads(line) for line in
                (self.cc / "outcomes.ndjsonl").read_text().splitlines()]
         self.assertEqual(outc[-1]["outcome"], "missed")
         self.assertNotIn("council_agreement", outc[-1])

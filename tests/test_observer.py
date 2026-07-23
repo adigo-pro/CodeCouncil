@@ -161,7 +161,7 @@ class TestStateAndLog(unittest.TestCase):
             p = Path(td) / "obs.ndjsonl"
             EventLog(p).append([Event(beat=1, type=DIFF, payload={"diff": ""})])
             EventLog(p).append([Event(beat=2, type=REASONING, session="s", payload={"text": "t"})])
-            rows = [json.loads(l) for l in p.read_text().splitlines()]
+            rows = [json.loads(line) for line in p.read_text().splitlines()]
             self.assertEqual([r["beat"] for r in rows], [1, 2])
             self.assertEqual([r["type"] for r in rows], [DIFF, REASONING])
 
@@ -170,7 +170,7 @@ class TestStateAndLog(unittest.TestCase):
 
 class TestEventDrivenPacing(unittest.TestCase):
     def test_transcript_sig_changes_on_append(self):
-        from observer.main import transcript_sig, wait_for_material
+        from observer.main import transcript_sig
         with tempfile.TemporaryDirectory() as td:
             d = Path(td)
             (d / "s.jsonl").write_text("{}\n")

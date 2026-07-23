@@ -15,13 +15,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from . import ledger as ledger_mod
+
 TTL_SECONDS = 600
 MAX_CONTEXT_ITEMS = 3
 
 CONTEXT_SEVERITIES = {"medium", "high"}
 BLOCK_SEVERITIES = {"high"}
-
-from . import ledger as ledger_mod
 
 
 def _age_ok(row: dict, now: float) -> bool:

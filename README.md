@@ -39,7 +39,7 @@ on your PATH, wires up [pi](https://pi.dev) (the model runtime) if npm is
 available, and scaffolds `~/.codecouncil/env` for your key. Then:
 
 ```sh
-echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env   # free Nemotron; or any pi provider
+echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env   # free — see "Model providers"
 codecouncil /path/to/repo-you-code-in                   # hooks + all three loops
 ```
 
@@ -105,6 +105,45 @@ findings, repro proofs, council votes, grades, heuristics rewrites, receipts
 — arrive **★ highlighted**. The dashboard auto-starts when built
 (`cd ui && npm install`, once) and announces its URL:
 `[ui] dashboard ready → http://localhost:4700/`.
+
+## Model providers
+
+CodeCouncil talks to models through [pi](https://pi.dev), so **any provider
+pi supports works** — put the provider's standard API key in
+`~/.codecouncil/env` (or run `/keys` in the running council) and pick a
+model with `/model provider/model-id` or `COUNCIL_MODEL`.
+
+**The free option (recommended start): NVIDIA.** No credit card, no pi
+login — NVIDIA hosts Nemotron and other open models with a free API key:
+
+1. Go to [build.nvidia.com](https://build.nvidia.com) and sign in (any
+   email works).
+2. Open any model page and click **Get API Key** — it starts with
+   `nvapi-`. (NVIDIA's own docs:
+   [docs.api.nvidia.com](https://docs.api.nvidia.com/nim/reference/getting-started).)
+3. `echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env` — with that key
+   present and no model configured, CodeCouncil defaults to NVIDIA-hosted
+   Nemotron automatically.
+
+| Provider | Key in `~/.codecouncil/env` | Example `/model` value |
+|---|---|---|
+| NVIDIA (free) | `NVIDIA_API_KEY` | `nvidia-nim/nvidia/nemotron-3-super-120b-a12b` |
+| OpenRouter | `OPENROUTER_API_KEY` | `openrouter/openai/gpt-5-mini` |
+| OpenAI | `OPENAI_API_KEY` | `openai/gpt-5-mini` |
+| Anthropic | `ANTHROPIC_API_KEY` | `anthropic/claude-haiku-4-5` |
+| Google | `GEMINI_API_KEY` | `google/gemini-3-flash-preview` |
+| Groq | `GROQ_API_KEY` | `groq/openai/gpt-oss-120b` |
+
+The `nvidia-nim/…` and `openrouter/…` IDs above are the exact strings from
+our [bake-off](docs/benchmarks/); for other providers, any model ID from
+[pi's provider list](https://pi.dev/docs) works as `provider/model-id`.
+
+One deliberate caveat: **prefer a critic from a different model family than
+your coding agent** — the whole premise is a second pair of *differently
+trained* eyes. If Claude Code writes your code, an Anthropic critic shares
+its blind spots; Nemotron, GPT, or Gemini won't. (Council mode formalizes
+this: `--prober openrouter/openai/gpt-5-mini` adds a decorrelated second
+opinion, delivered only with repro proof.)
 
 ## Security model, in one paragraph
 

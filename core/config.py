@@ -20,8 +20,10 @@ CONFIG_DIR = Path.home() / ".codecouncil"
 KNOWN_KEYS = {
     "NVIDIA_API_KEY": "free Nemotron via build.nvidia.com (nvapi-...)",
     "OPENROUTER_API_KEY": "any OpenRouter model (sk-or-...)",
-    "OPENAI_API_KEY": "OpenAI direct",
+    "OPENAI_API_KEY": "OpenAI direct (sk-...)",
     "ANTHROPIC_API_KEY": "Anthropic direct (avoid for the critic: decorrelation)",
+    "GEMINI_API_KEY": "Google Gemini via aistudio.google.com",
+    "GROQ_API_KEY": "Groq-hosted open models (gsk_...)",
 }
 
 

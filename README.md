@@ -146,13 +146,17 @@ here, and the critic reviews its builders):
   independent reviewers had approved.
 - Model bake-offs across 12 candidates, 7 frozen cases each, latency and
   format discipline measured: [docs/benchmarks/](docs/benchmarks/).
-- 408 tests, CI on 3.10/3.12 + UI build. Small-n caveat: the self-improvement
+- 411 tests (`python3 -m unittest discover -s tests`), CI on 3.10/3.12 +
+  UI build + installer smoke test. Small-n caveat: the self-improvement
   curves are days old, not months. That's what running it grows.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) — the eight invariants matter more
-than any style guide. Good first issues: redaction patterns, frozen eval
+than any style guide. The whole dev loop is three commands: clone, `python3 -m unittest discover
+-s tests` (stdlib-only — no venv, no pip install), and `CRITIC_CMD=<stub>`
+to fake the model (see CONTRIBUTING.md's "Development loop").
+Good first issues: redaction patterns, frozen eval
 cases, adapters for other coding agents (the observer only needs an intent
 stream; the hooks only need an injection channel).
 

@@ -33,3 +33,24 @@ jobs:
         run: npx tsc --noEmit
       - working-directory: ui
         run: npm run build
+
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run install.sh against this checkout
+        run: |
+          export CODECOUNCIL_HOME="$RUNNER_TEMP/cc-home"
+          export CODECOUNCIL_REPO_URL="file://$GITHUB_WORKSPACE"
+          sh install.sh
+          test -x "$HOME/.local/bin/codecouncil"
+          test -f "$HOME/.codecouncil/env"
+      - name: Launcher runs and prints usage
+        run: |
+          export CODECOUNCIL_HOME="$RUNNER_TEMP/cc-home"
+          "$HOME/.local/bin/codecouncil" --help
+      - name: Re-run is idempotent (update path)
+        run: |
+          export CODECOUNCIL_HOME="$RUNNER_TEMP/cc-home"
+          export CODECOUNCIL_REPO_URL="file://$GITHUB_WORKSPACE"
+          sh install.sh

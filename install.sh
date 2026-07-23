@@ -72,8 +72,11 @@ fi
 # on that: a CODECOUNCIL_HOME override clones elsewhere and this write is
 # then the first touch of the directory.
 if [ ! -f "$ENV_FILE" ]; then
-  mkdir -p "$(dirname "$ENV_FILE")"
   umask 077
+  mkdir -p "$(dirname "$ENV_FILE")"
+  # the app clone (or an older installer) may have created the directory
+  # with default 755 — the credentials dir must not be listable by others
+  chmod 700 "$(dirname "$ENV_FILE")"
   cat > "$ENV_FILE" <<'ENV'
 # CodeCouncil model credentials — this file lives OUTSIDE every git repo on
 # purpose, so a key here can never be committed. One line per key, KEY=value.

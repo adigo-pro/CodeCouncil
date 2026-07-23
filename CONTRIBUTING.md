@@ -57,3 +57,32 @@ They exist because each one was earned by a real failure — see
 - An adapter for another coding agent (the observer only needs an intent
   stream; the hooks only need an injection channel).
 - Bake-off data for more models (`docs/benchmarks/` shows the format).
+
+## Development loop
+
+No venv, no pip install — the loops are stdlib-only Python 3.10+.
+
+```sh
+python3 -m unittest discover -s tests     # everything (~10s)
+python3 -m unittest tests.test_critic     # one slice
+pipx run ruff check .                     # same lint CI runs
+```
+
+Model calls are stubbed in tests via `CRITIC_CMD` — an executable invoked
+as `$CRITIC_CMD <prompt-file> <resolved-model>` whose stdout becomes the
+model's reply. To poke a loop by hand against a scratch repo:
+
+```sh
+printf '#!/bin/sh\necho "PASS — stub"\n' > /tmp/stub && chmod +x /tmp/stub
+git init /tmp/scratch && cd /tmp/scratch && git commit --allow-empty -m init
+CRITIC_CMD=/tmp/stub python3 -m critic /tmp/scratch --once
+```
+
+Where things live: `observer/` tails transcripts + git into
+`.codecouncil/observations.ndjsonl`; `critic/` judges new observations
+(`critic/main.py` is the beat, `critic/prompt.py` builds prompts,
+`critic/verify.py` runs repros in a staging dir); `hooks/` delivers
+(`logic.py` is pure — test it without I/O); `reflector/` grades and
+rewrites `heuristics.md`; `core/` is the only shared code. Tests mirror
+this: one `tests/test_<thing>.py` per concern, real session transcript in
+`tests/fixtures/session.jsonl`.

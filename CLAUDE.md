@@ -19,7 +19,7 @@ python3 -m critic /path/to/repo          # critic daemon (--once, --judge-every-
 python3 -m reflector /path/to/repo       # reflector daemon (--once, --force-rewrite)
 python3 -m reflector.report /path/to/repo  # acceptance per heuristics version
 python3 -m hooks.install /path/to/repo   # install Claude Code hooks (idempotent)
-python3 -m training.run                  # scripted headless sessions that generate real data
+python3 -m training.run                  # scripted headless sessions that generate real data (verified clean under CRITIC_CMD stub + a stubbed `claude`; spawns real, costly `claude -p` sessions, so point --dir at a scratch repo)
 python3 -m evals.run /path/to/repo       # replay frozen cases against every heuristics version
 
 cd ui && npm run dev                     # dashboard at http://localhost:4700 (COUNCIL_REPO=/path to watch another repo)

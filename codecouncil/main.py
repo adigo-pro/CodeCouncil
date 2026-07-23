@@ -38,7 +38,7 @@ def preflight(model: str | None, prober: str | None = None) -> list[str]:
     if shutil.which(pi_bin) is None:
         warns.append(f"'{pi_bin}' not found on PATH — install pi (https://pi.dev) "
                      "or set PI_BIN. The critic and reflector cannot run without it.")
-    env = agent._local_env()  # includes ~/.codecouncil/env
+    env = agent.local_env()  # includes ~/.codecouncil/env
     has_key = any(env.get(v) for v in KEY_VARS)
     if not model and not env.get("COUNCIL_MODEL") and not has_key:
         warns.append("no model configured: pass --model, set COUNCIL_MODEL, or put an "

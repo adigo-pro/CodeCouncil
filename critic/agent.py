@@ -43,7 +43,7 @@ class AgentError(Exception):
     pass
 
 
-def _local_env() -> dict[str, str]:
+def local_env() -> dict[str, str]:
     """Real process env, topped up from ~/.codecouncil/env for anything unset.
     That file never lives inside a git repo, so a credential pasted there can
     never be committed by CodeCouncil regardless of which repo is watched."""
@@ -93,7 +93,7 @@ def ask(prompt: str, system: str | None = None, tools: str | None = None,
     """
     override = os.environ.get("CRITIC_CMD")
     if override:
-        env = _local_env()
+        env = local_env()
         resolved_model = _resolve_model(model, env) or ""
         with tempfile.NamedTemporaryFile(
             "w", suffix=".txt", delete=False, encoding="utf-8"
@@ -111,7 +111,7 @@ def ask(prompt: str, system: str | None = None, tools: str | None = None,
         finally:
             Path(prompt_file).unlink(missing_ok=True)
 
-    env = _local_env()
+    env = local_env()
     cmd = [env.get("PI_BIN", "pi"), "-p", "--no-session",
            "--no-context-files", "--no-extensions", "--no-skills",
            "--no-prompt-templates", "--no-themes"]

@@ -126,8 +126,8 @@ class Console:
         version = heur.read_text(encoding="utf-8").splitlines()[0] if heur.exists() else "(none)"
         rows = read_tail_rows(cc / "suggestions.ndjsonl")
         last = rows[-1] if rows else None
-        from critic.agent import _local_env
-        env = _local_env()
+        from critic.agent import local_env
+        env = local_env()
         keys = [k for k in cfg.KNOWN_KEYS if env.get(k)]
         self.say(f"observer beat {state.get('beat', '?')} · critic beat {cstate.get('beat', '?')}")
         if last:

@@ -22,7 +22,7 @@ class TestLocalEnv(unittest.TestCase):
                 with mock.patch.dict(os.environ, {}, clear=False):
                     os.environ.pop("FOO_KEY", None)
                     os.environ.pop("BAR", None)
-                    env = agent._local_env()
+                    env = agent.local_env()
             self.assertEqual(env["FOO_KEY"], "from-file")
             self.assertEqual(env["BAR"], "also-from-file")
 
@@ -32,19 +32,19 @@ class TestLocalEnv(unittest.TestCase):
             f.write_text("FOO_KEY=from-file\n")
             with mock.patch.object(agent, "LOCAL_ENV_FILE", f):
                 with mock.patch.dict(os.environ, {"FOO_KEY": "from-real-env"}):
-                    env = agent._local_env()
+                    env = agent.local_env()
             self.assertEqual(env["FOO_KEY"], "from-real-env")
 
     def test_missing_file_is_fine(self):
         with mock.patch.object(agent, "LOCAL_ENV_FILE", Path("/nonexistent/env")):
-            env = agent._local_env()
+            env = agent.local_env()
         self.assertIsInstance(env, dict)
 
     def test_default_model_only_when_unset_and_key_present(self):
         with mock.patch.object(agent, "LOCAL_ENV_FILE", Path("/nonexistent/env")):
             with mock.patch.dict(os.environ, {"NVIDIA_API_KEY": "x"}, clear=False):
                 os.environ.pop("COUNCIL_MODEL", None)
-                env = agent._local_env()
+                env = agent.local_env()
                 model = env.get("COUNCIL_MODEL") or (
                     agent.DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None
                 )

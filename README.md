@@ -31,11 +31,21 @@ you + Claude Code ──▶ transcripts + git ──▶ Observer ──▶ Criti
 ## Sixty-second start
 
 ```sh
-npm install -g @earendil-works/pi-coding-agent     # the model runtime (pi.dev)
-echo 'NVIDIA_API_KEY=nvapi-...' > ~/.codecouncil/env   # free Nemotron; or any pi provider
-git clone https://github.com/adigo-tamu/CodeCouncil && cd CodeCouncil
-python3 -m codecouncil /path/to/repo-you-code-in   # hooks + all three loops
+curl -fsSL https://raw.githubusercontent.com/adigo-tamu/CodeCouncil/main/install.sh | sh
 ```
+
+That checks Python 3.10+, installs to `~/.codecouncil/app`, puts `codecouncil`
+on your PATH, wires up [pi](https://pi.dev) (the model runtime) if npm is
+available, and scaffolds `~/.codecouncil/env` for your key. Then:
+
+```sh
+echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env   # free Nemotron; or any pi provider
+codecouncil /path/to/repo-you-code-in                   # hooks + all three loops
+```
+
+Re-run the installer to update. Prefer manual? `git clone` + `python3 -m
+codecouncil /path/to/repo` works identically — the installer is convenience,
+not magic ([install.sh](install.sh) is ~80 audited lines).
 
 No pip installs — the loops are stdlib-only Python 3.10+. Findings appear in
 your terminal, on the dashboard (`cd ui && npm install && npm run dev` →

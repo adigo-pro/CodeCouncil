@@ -41,8 +41,10 @@ They exist because each one was earned by a real failure — see
 
 ## Workflow
 
-- Tests are stdlib `unittest`, one file per loop in `tests/`. TDD is the
-  house style: the regression test lands with (ideally before) the fix.
+- Tests are stdlib `unittest`, one file per concern in `tests/` (the
+  critic has several: parsing/prompts, beat/scheduler, receipts, council).
+  TDD is the house style: the regression test lands with (ideally before)
+  the fix.
 - Run the full suite before pushing; CI runs four jobs: the Python suite on
   3.10/3.12, the UI typecheck + build, `ruff check .`, and an installer
   smoke test.

@@ -99,6 +99,13 @@ Settings layer the way you'd expect: **CLI flag > environment variable
 take effect on the next model call — no restarts. Piped/non-TTY runs skip the
 console entirely and behave like a plain daemon.
 
+The terminal is signal-first: idle-beat chatter is filtered (a dim summary
+line keeps the pulse; `/verbose` unmutes), while the moments that matter —
+findings, repro proofs, council votes, grades, heuristics rewrites, receipts
+— arrive **★ highlighted**. The dashboard auto-starts when built
+(`cd ui && npm install`, once) and announces its URL:
+`[ui] dashboard ready → http://localhost:4700/`.
+
 ## Security model, in one paragraph
 
 Everything is **redacted at capture** — credentials in diffs, new files,

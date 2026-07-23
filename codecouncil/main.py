@@ -22,6 +22,10 @@ from pathlib import Path
 from critic import agent
 from hooks.install import install as install_hooks
 
+from .signal_filter import DROP, HIGHLIGHT, VERBOSE, classify
+
+_dropped = {"n": 0}  # idle-beat lines filtered so far (see _pump)
+
 KEY_VARS = ("NVIDIA_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
             "GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY")
 
@@ -54,7 +58,7 @@ def preflight(model: str | None, prober: str | None = None) -> list[str]:
     return warns
 
 LOOPS = ["observer", "critic", "reflector"]
-COLORS = {"observer": "36", "critic": "33", "reflector": "35"}
+COLORS = {"observer": "36", "critic": "33", "reflector": "35", "ui": "32"}
 _TTY = sys.stdout.isatty()
 
 
@@ -65,7 +69,23 @@ def _tag(name: str) -> str:
 
 def _pump(name: str, proc: subprocess.Popen) -> None:
     for line in proc.stdout:  # type: ignore[union-attr]
-        print(f"{_tag(name)} {line.rstrip()}", flush=True)
+        text = line.rstrip()
+        if name == "ui":
+            # the dashboard dev server is chatty; surface only its URL
+            if "http://localhost" in text:
+                print(f"{_tag('ui')} dashboard ready → {text.split()[-1]}", flush=True)
+            continue
+        kind = classify(text)
+        if kind == DROP and not VERBOSE.is_set():
+            _dropped["n"] += 1
+            if _dropped["n"] % 30 == 0:
+                print(f"{_tag(name)} \033[2m· quiet ({_dropped['n']} idle beats filtered — /verbose to show)\033[0m",
+                      flush=True)
+            continue
+        if kind == HIGHLIGHT:
+            print(f"{_tag(name)} \033[1m★ {text}\033[0m", flush=True)
+        else:
+            print(f"{_tag(name)} {text}", flush=True)
 
 
 def resolve_settings(args) -> tuple[str | None, str | None]:
@@ -120,6 +140,23 @@ def main(argv: list[str] | None = None) -> int:
 
     for name in LOOPS:
         launch(name)
+
+    # dashboard: auto-start when it has been built once; otherwise say how
+    ui_dir = root / "ui"
+    if (ui_dir / "node_modules").is_dir():
+        ui_env = os.environ.copy()
+        ui_env["COUNCIL_REPO"] = str(repo)
+        procs["ui"] = subprocess.Popen(
+            ["npm", "run", "dev"], cwd=ui_dir, env=ui_env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        threading.Thread(target=_pump, args=("ui", procs["ui"]), daemon=True).start()
+    else:
+        print(f"{_tag('ui')} dashboard not built — one-time: cd {ui_dir} && npm install "
+              "(then relaunch for http://localhost:4700)", flush=True)
+
+    print(f"{_tag('critic')} model: {model or 'pi default'}"
+          + (f" · prober: {prober}" if prober else " · council mode off"), flush=True)
 
     stopping = threading.Event()
 

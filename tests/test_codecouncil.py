@@ -159,5 +159,39 @@ class TestConsoleParsing(unittest.TestCase):
         self.assertTrue(any("failed" in m for m in msgs))
 
 
+
+
+class TestSignalFilter(unittest.TestCase):
+    def test_idle_chatter_drops(self):
+        from codecouncil.signal_filter import classify, DROP
+        for line in [
+            "· beat 123 · 10:00:00 · nothing new, no call made",
+            "· beat 5 · 09:12:01 · 3 event(s) held — no code change yet",
+            "· beat 9 · 09:12:01 · cooling down — 2 event(s) queued",
+            "reflector: nothing to grade",
+        ]:
+            self.assertEqual(classify(line), DROP, line)
+
+    def test_signal_moments_highlight(self):
+        from codecouncil.signal_filter import classify, HIGHLIGHT
+        for line in [
+            "■ beat 42 · 10:00:00 · MEDIUM · payments.py:7",
+            "  verify verified: ZeroDivisionError raised",
+            "reflector: abc123 → accepted (fixed it)",
+            "reflector: abc123 → distilled fact: tests run via discover",
+            "reflector: heuristics v3 → v4 (archived v3.md)",
+            "critic: receipt written to /x/y.md",
+            "⚠ beat 9 · 10:00:00 · malformed reply — treated as PASS; raw: x",
+        ]:
+            self.assertEqual(classify(line), HIGHLIGHT, line)
+
+    def test_narration_stays_normal_and_ansi_stripped(self):
+        from codecouncil.signal_filter import classify, NORMAL, DROP
+        self.assertEqual(classify("♥ beat 12 · 10:00:00 · 3 event(s)"), NORMAL)
+        self.assertEqual(classify("✓ beat 12 · 10:00:00 · PASS — clean"), NORMAL)
+        # daemons write plain text to pipes, but tolerate ANSI anyway
+        self.assertEqual(classify("\x1b[2m· beat 1 · 10:00:00 · nothing new, no call made\x1b[0m"), DROP)
+
+
 if __name__ == "__main__":
     unittest.main()

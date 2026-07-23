@@ -25,6 +25,7 @@ commands (while the council runs):
   /prober <p/m|off>  set + persist the council prober (restarts the critic)
   /status            daemons, beats, last verdict, heuristics version, keys
   /config            show resolved configuration and where it came from
+  /verbose           toggle idle-beat chatter (default: filtered)
   /help              this text
   /quit              stop the council (same as Ctrl-C)"""
 
@@ -70,6 +71,15 @@ class Console:
     # ---- commands ----
     def _cmd_help(self, _arg: str) -> None:
         self.say(HELP)
+
+    def _cmd_verbose(self, _arg: str) -> None:
+        from .signal_filter import VERBOSE
+        if VERBOSE.is_set():
+            VERBOSE.clear()
+            self.say("idle-beat chatter: filtered (default)")
+        else:
+            VERBOSE.set()
+            self.say("idle-beat chatter: shown")
 
     def _cmd_quit(self, _arg: str) -> None:
         self.stop()

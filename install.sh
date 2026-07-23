@@ -68,7 +68,11 @@ else
 fi
 
 # --- 5. model key scaffold --------------------------------------------------
+# The default app clone happens to create $HOME/.codecouncil, but never rely
+# on that: a CODECOUNCIL_HOME override clones elsewhere and this write is
+# then the first touch of the directory.
 if [ ! -f "$ENV_FILE" ]; then
+  mkdir -p "$(dirname "$ENV_FILE")"
   umask 077
   cat > "$ENV_FILE" <<'ENV'
 # CodeCouncil model credentials — this file lives OUTSIDE every git repo on

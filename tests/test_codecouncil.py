@@ -82,5 +82,82 @@ class TestPreflightProber(unittest.TestCase):
         self.assertTrue(any("OPENROUTER_API_KEY" in w for w in warns))
 
 
+
+
+class TestConfigModule(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.td = tempfile.TemporaryDirectory()
+        self.base = Path(self.td.name)
+        self.addCleanup(self.td.cleanup)
+
+    def test_save_and_load_roundtrip_merge_delete(self):
+        from core import config as cfg
+        cfg.save_config({"model": "a/b"}, base=self.base)
+        cfg.save_config({"prober": "c/d"}, base=self.base)
+        self.assertEqual(cfg.load_config(self.base), {"model": "a/b", "prober": "c/d"})
+        cfg.save_config({"prober": None}, base=self.base)
+        self.assertEqual(cfg.load_config(self.base), {"model": "a/b"})
+
+    def test_corrupt_config_ignored(self):
+        from core import config as cfg
+        cfg.config_path(self.base).parent.mkdir(parents=True, exist_ok=True)
+        cfg.config_path(self.base).write_text("{nope")
+        self.assertEqual(cfg.load_config(self.base), {})
+
+    def test_update_env_key_replaces_preserves_comments_mode(self):
+        from core import config as cfg
+        import os as _os
+        cfg.env_path(self.base).parent.mkdir(parents=True, exist_ok=True)
+        cfg.env_path(self.base).write_text("# comment\nNVIDIA_API_KEY=old\nOTHER=x\n")
+        cfg.update_env_key("NVIDIA_API_KEY", "new", base=self.base)
+        text = cfg.env_path(self.base).read_text()
+        self.assertIn("# comment", text)
+        self.assertIn("NVIDIA_API_KEY=new", text)
+        self.assertNotIn("old", text)
+        self.assertIn("OTHER=x", text)
+        self.assertEqual(_os.stat(cfg.env_path(self.base)).st_mode & 0o777, 0o600)
+
+    def test_resolve_precedence(self):
+        from core import config as cfg
+        cfg.save_config({"model": "from-config"}, base=self.base)
+        self.assertEqual(cfg.resolve("flag", "M", "model", {"M": "from-env"}, self.base), "flag")
+        self.assertEqual(cfg.resolve(None, "M", "model", {"M": "from-env"}, self.base), "from-env")
+        self.assertEqual(cfg.resolve(None, "M", "model", {}, self.base), "from-config")
+        self.assertIsNone(cfg.resolve(None, "M", "nope", {}, self.base))
+
+
+class TestConsoleParsing(unittest.TestCase):
+    def setUp(self):
+        # Console commands persist via core.config's default CONFIG_DIR —
+        # tests must NEVER touch the real ~/.codecouncil (a /model test once
+        # silently rewrote the live config). Point the module at a tempdir.
+        import tempfile
+        from core import config as cfg
+        self.td = tempfile.TemporaryDirectory()
+        self._orig = cfg.CONFIG_DIR
+        cfg.CONFIG_DIR = Path(self.td.name)
+        self.addCleanup(lambda: setattr(cfg, "CONFIG_DIR", self._orig))
+        self.addCleanup(self.td.cleanup)
+
+    def test_parse_command_shapes(self):
+        from codecouncil.console import parse_command
+        self.assertEqual(parse_command("/model a/b"), ("model", "a/b"))
+        self.assertEqual(parse_command("/help"), ("help", ""))
+        self.assertEqual(parse_command("  /PROBER off "), ("prober", "off"))
+        self.assertIsNone(parse_command("not a command"))
+        self.assertIsNone(parse_command("/"))
+
+    def test_unknown_command_and_exception_never_raise(self):
+        from codecouncil.console import Console
+        msgs = []
+        c = Console(repo=Path("."), restart_critic=lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+                    stop=lambda: None, say=msgs.append)
+        c.handle("/nope")
+        self.assertTrue(any("unknown" in m for m in msgs))
+        c.handle("/model x/y")  # restart_critic raises; handle must swallow
+        self.assertTrue(any("failed" in m for m in msgs))
+
+
 if __name__ == "__main__":
     unittest.main()

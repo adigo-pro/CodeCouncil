@@ -68,6 +68,15 @@ def _pump(name: str, proc: subprocess.Popen) -> None:
         print(f"{_tag(name)} {line.rstrip()}", flush=True)
 
 
+def resolve_settings(args) -> tuple[str | None, str | None]:
+    """flag > env var > ~/.codecouncil/config.json — one rule for both knobs."""
+    from core import config as cfg
+    env = os.environ
+    model = cfg.resolve(args.model, "COUNCIL_MODEL", "model", dict(env))
+    prober = cfg.resolve(args.prober, "COUNCIL_PROBER", "prober", dict(env))
+    return model, prober
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="codecouncil", description=__doc__)
     ap.add_argument("repo", type=Path, help="path to the repo being coded in")
@@ -82,39 +91,75 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {repo} is not a directory", file=sys.stderr)
         return 2
 
-    for w in preflight(args.model, args.prober):
+    model, prober = resolve_settings(args)
+    for w in preflight(model, prober):
         print(f"{_tag('critic')} warning: {w}", flush=True)
 
     if not args.no_hooks:
         added = install_hooks(repo)
         print(f"{_tag('observer')} hooks {'installed: ' + ', '.join(added) if added else 'already installed'}")
 
-    env = os.environ.copy()
-    if args.model:
-        env["COUNCIL_MODEL"] = args.model
-
     root = Path(__file__).resolve().parent.parent
-    extra = {"observer": ["--wait"],
-             "critic": ["--prober", args.prober] if args.prober else [],
-             "reflector": []}
     procs: dict[str, subprocess.Popen] = {}
-    for name in LOOPS:
+
+    def launch(name: str) -> None:
+        # settings re-resolve on every (re)launch so /model and /prober apply
+        m, p = resolve_settings(args)
+        env = os.environ.copy()
+        if m:
+            env["COUNCIL_MODEL"] = m
+        extra = {"observer": ["--wait"],
+                 "critic": ["--prober", p] if p else [],
+                 "reflector": []}[name]
         procs[name] = subprocess.Popen(
-            [sys.executable, "-u", "-m", name, str(repo), *extra[name]],
+            [sys.executable, "-u", "-m", name, str(repo), *extra],
             cwd=root, env=env, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         threading.Thread(target=_pump, args=(name, procs[name]), daemon=True).start()
 
-    print(f"{_tag('critic')} council running on {repo} — Ctrl-C to stop")
+    for name in LOOPS:
+        launch(name)
+
+    stopping = threading.Event()
+
+    def restart_critic() -> None:
+        old = procs.get("critic")
+        if old and old.poll() is None:
+            old.send_signal(signal.SIGINT)
+            try:
+                old.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                old.kill()
+        launch("critic")
+
+    console_note = ""
+    if sys.stdin.isatty():
+        from .console import Console
+        console = Console(repo=repo, restart_critic=restart_critic,
+                          stop=stopping.set,
+                          say=lambda m: print(f"{_tag('critic')} {m}", flush=True))
+
+        def _read_stdin() -> None:
+            for line in sys.stdin:
+                console.handle(line)
+                if stopping.is_set():
+                    break
+
+        threading.Thread(target=_read_stdin, daemon=True).start()
+        console_note = " · type /help for commands"
+
+    print(f"{_tag('critic')} council running on {repo} — Ctrl-C to stop{console_note}")
     try:
         # if any loop dies, surface it; keep the others running
-        while procs:
+        while procs and not stopping.is_set():
             time.sleep(1)
             for name, p in list(procs.items()):
                 if p.poll() is not None:
                     print(f"{_tag(name)} exited with code {p.returncode}", flush=True)
                     del procs[name]
+        if stopping.is_set():
+            raise KeyboardInterrupt
         return 1
     except KeyboardInterrupt:
         for p in procs.values():

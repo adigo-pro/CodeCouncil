@@ -80,6 +80,25 @@ context** via Claude Code hooks, scoped to the session that caused them.
   vs. mechanically verified facts (did a test command actually run?), written
   to `.codecouncil/receipts/` and announced in the transcript.
 
+## Configuring — the two-terminal workflow
+
+CodeCouncil is built to run beside your coding agent: `codecouncil .` in one
+terminal, Claude Code in the other. The running council is interactive —
+slash commands work in place, Claude Code-style:
+
+```
+/keys              guided API-key setup (hidden input, saved to ~/.codecouncil/env)
+/model <p/m>       set + persist the primary model (restarts just the critic)
+/prober <p/m|off>  council mode on/off (restarts just the critic)
+/status            daemons, beats, last verdict, heuristics version, keys
+/config            resolved configuration and where each value came from
+```
+
+Settings layer the way you'd expect: **CLI flag > environment variable
+(`COUNCIL_MODEL` / `COUNCIL_PROBER`) > `~/.codecouncil/config.json`**. Keys
+take effect on the next model call — no restarts. Piped/non-TTY runs skip the
+console entirely and behave like a plain daemon.
+
 ## Security model, in one paragraph
 
 Everything is **redacted at capture** — credentials in diffs, new files,

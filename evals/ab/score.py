@@ -11,6 +11,7 @@ Council stats (findings, receipts) are read only for the with-council arm.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -27,8 +28,11 @@ def run_hidden_test(repo: Path, source: str) -> dict:
         f.write(source)
         script = f.name
     try:
+        # the script lives in a temp dir, so sys.path[0] is NOT the repo —
+        # imports of task modules need the repo on PYTHONPATH explicitly
+        env = {**os.environ, "PYTHONPATH": str(repo)}
         r = subprocess.run([sys.executable, script], cwd=repo, capture_output=True,
-                           text=True, timeout=HIDDEN_TEST_TIMEOUT)
+                           text=True, timeout=HIDDEN_TEST_TIMEOUT, env=env)
         out = r.stdout + r.stderr
         checks = parse_checks(out)
         return {"passed": sum(v for v in checks.values()), "total": len(checks),
@@ -77,9 +81,13 @@ def tests_run(commands: list[str]) -> bool:
 
 
 def git_facts(repo: Path) -> dict:
-    r = subprocess.run(["git", "log", "--format=%s", "-n", "5"], cwd=repo,
-                       capture_output=True, text=True)
-    subjects = [s for s in r.stdout.splitlines() if s]
+    # scoring runs after an expensive real session — never let it crash the row
+    try:
+        r = subprocess.run(["git", "log", "--format=%s", "-n", "5"], cwd=repo,
+                           capture_output=True, text=True, timeout=30)
+        subjects = [s for s in r.stdout.splitlines() if s]
+    except (OSError, subprocess.SubprocessError):
+        subjects = []
     return {"commits": len(subjects), "last_subject": subjects[0] if subjects else ""}
 
 

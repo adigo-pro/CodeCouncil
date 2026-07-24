@@ -29,8 +29,11 @@ def run_hidden_test(repo: Path, source: str) -> dict:
         script = f.name
     try:
         # the script lives in a temp dir, so sys.path[0] is NOT the repo —
-        # imports of task modules need the repo on PYTHONPATH explicitly
-        env = {**os.environ, "PYTHONPATH": str(repo)}
+        # imports of task modules need the repo on PYTHONPATH (prepended, so
+        # any existing entries keep working)
+        env = dict(os.environ)
+        prior = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(repo) + (os.pathsep + prior if prior else "")
         r = subprocess.run([sys.executable, script], cwd=repo, capture_output=True,
                            text=True, timeout=HIDDEN_TEST_TIMEOUT, env=env)
         out = r.stdout + r.stderr

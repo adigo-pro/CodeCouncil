@@ -9,6 +9,14 @@ Delivery rules:
   - high suggestions        -> block completion at Stop (once each, never
                                when stop_hook_active is set)
   - suggestions older than TTL_SECONDS are never delivered
+  - the newest receipt's test_integrity verdict == "weakened" -> block
+    completion at Stop once (ledger key "test_integrity", keyed by receipt
+    filename rather than suggestion id — Task 2). A pending high-severity
+    suggestion block takes priority in the same Stop call; the test-integrity
+    block is checked only once there is none. Never re-blocks the same
+    receipt: a COUNCIL-REBUTTAL reply is graded later by the Reflector, not
+    parsed here — the block-once ledger mark is what keeps Stop from
+    interrupting a session twice for the same receipt.
 """
 
 from __future__ import annotations
@@ -109,6 +117,35 @@ def _receipt_line(receipt: dict) -> str:
     return f"CodeCouncil wrote a session receipt: {path} (claims vs verified — worth a look)"
 
 
+def _test_integrity_block(receipts: list[dict], ledger: dict, now: float) -> dict | None:
+    """Block Stop once when the newest receipt's mechanically-scored
+    test_integrity verdict is "weakened". `receipts[0]` is caller-supplied,
+    already-parsed data (peer_hook.py reads the receipt file and calls
+    critic.receipt.parse_test_integrity — decide() stays pure/fs-free).
+    A receipt with no "test_integrity" key (written before this feature) or
+    any verdict other than "weakened" is silent."""
+    if not receipts:
+        return None
+    latest = receipts[0]
+    name = latest.get("name")
+    ti = latest.get("test_integrity") or {}
+    if not name or ti.get("verdict") != "weakened":
+        return None
+    if ledger_mod.test_integrity_blocked(ledger, name):
+        return None
+    ledger_mod.mark_test_integrity(ledger, name, now)
+    removed = ti.get("asserts_removed", 0)
+    added = ti.get("asserts_added", 0)
+    return {
+        "decision": "block",
+        "reason": (
+            f"CodeCouncil peer reviewer: this session weakened its tests "
+            f"({removed} assertions removed, {added} added) — restore them, "
+            "or explain with a line `COUNCIL-REBUTTAL: <your reason>`."
+        ),
+    }
+
+
 def decide(event: dict, suggestions: list[dict], ledger: dict, now: float,
           receipts: list[dict] = ()) -> dict | None:
     """Returns hook output JSON (or None for silence). May mark the ledger.
@@ -159,17 +196,18 @@ def decide(event: dict, suggestions: list[dict], ledger: dict, now: float,
         if event.get("stop_hook_active"):
             return None
         pending = _pending(suggestions, ledger, "block", BLOCK_SEVERITIES, now, hook_session_id)
-        if not pending:
-            return None
-        row = pending[0]  # one interruption at a time; the rest wait for the next Stop
-        ledger_mod.mark(ledger, row["id"], "block", now)
-        return {
-            "decision": "block",
-            "reason": (
-                "CodeCouncil peer reviewer has an unresolved finding: "
-                f"{_describe(row)}. Fix it if you agree, or reply with a line "
-                "`COUNCIL-REBUTTAL: <your reason>` if you disagree — then finish."
-            ),
-        }
+        if pending:
+            row = pending[0]  # one interruption at a time; the rest wait for the next Stop
+            ledger_mod.mark(ledger, row["id"], "block", now)
+            return {
+                "decision": "block",
+                "reason": (
+                    "CodeCouncil peer reviewer has an unresolved finding: "
+                    f"{_describe(row)}. Fix it if you agree, or reply with a line "
+                    "`COUNCIL-REBUTTAL: <your reason>` if you disagree — then finish."
+                ),
+            }
+        # no pending suggestion block this turn: check the test-integrity gate
+        return _test_integrity_block(receipts, ledger, now)
 
     return None

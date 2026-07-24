@@ -186,6 +186,52 @@ class TestReceiptContent(unittest.TestCase):
         text = path.read_text()
         self.assertIn("ISSUE — x.py: unsupported claim", text)
 
+    def test_write_receipt_renders_test_integrity_weakened(self):
+        from critic.receipt import parse_test_integrity, write_receipt
+
+        record = {"verdict": "PASS", "heuristics_version": 1}
+        ti = {"verdict": "weakened", "tests_added": 0, "tests_removed": 0,
+              "asserts_added": 1, "asserts_removed": 3}
+        ctx_like = {"repo": self.cc, "suggestions_file": self.suggestions, "since_epoch": 0.0}
+
+        path = write_receipt(self.cc, ctx_like, [], record, "fact", test_integrity=ti)
+        text = path.read_text()
+        self.assertIn("## Test integrity", text)
+        self.assertIn("tests: weakened — 3 assertion(s) removed, 1 added", text)
+        self.assertEqual(parse_test_integrity(text), ti)
+
+    def test_write_receipt_default_test_integrity_is_unchanged(self):
+        from critic.receipt import parse_test_integrity, write_receipt
+
+        record = {"verdict": "PASS", "heuristics_version": 1}
+        ctx_like = {"repo": self.cc, "suggestions_file": self.suggestions, "since_epoch": 0.0}
+
+        path = write_receipt(self.cc, ctx_like, [], record, "fact")
+        text = path.read_text()
+        self.assertIn("tests: unchanged", text)
+        self.assertEqual(parse_test_integrity(text), {
+            "verdict": "unchanged", "tests_added": 0, "tests_removed": 0,
+            "asserts_added": 0, "asserts_removed": 0,
+        })
+
+    def test_write_receipt_renders_test_integrity_strengthened(self):
+        from critic.receipt import parse_test_integrity, write_receipt
+
+        record = {"verdict": "PASS", "heuristics_version": 1}
+        ti = {"verdict": "strengthened", "tests_added": 1, "tests_removed": 0,
+              "asserts_added": 2, "asserts_removed": 0}
+        ctx_like = {"repo": self.cc, "suggestions_file": self.suggestions, "since_epoch": 0.0}
+
+        path = write_receipt(self.cc, ctx_like, [], record, "fact", test_integrity=ti)
+        text = path.read_text()
+        self.assertIn("tests: strengthened — 1 test(s) added, 2 assertion(s) added", text)
+        self.assertEqual(parse_test_integrity(text), ti)
+
+    def test_parse_test_integrity_missing_block_returns_none(self):
+        from critic.receipt import parse_test_integrity
+
+        self.assertIsNone(parse_test_integrity("# just a receipt\nno fence here\n"))
+
     def test_prune_to_fifty(self):
         from critic.receipt import write_receipt, RECEIPTS_KEEP
 
@@ -240,6 +286,40 @@ class TestReceiptTaskReviewIntegration(unittest.TestCase):
         receipts = list((self.cc / "receipts").glob("*.md"))
         self.assertEqual(len(receipts), 1)
         self.assertIn("Fix the bug", receipts[0].read_text())
+
+    def test_task_review_receipt_reflects_weakened_test_diff(self):
+        """Task 2: task_review must pass the session's batch diffs (commit +
+        latest working-tree diff, same material judge_batch screens) into
+        receipt writing so the receipt's test_integrity block reflects what
+        actually happened, not the inert default."""
+        from critic.main import task_review
+        from critic.receipt import parse_test_integrity
+
+        self._set_stub("PASS")
+        weakening_diff = (
+            "diff --git a/tests/test_foo.py b/tests/test_foo.py\n"
+            "--- a/tests/test_foo.py\n"
+            "+++ b/tests/test_foo.py\n"
+            "@@ -1,5 +1,5 @@\n"
+            "-    assert x == 1\n"
+            "-    assert y == 2\n"
+            "+    pass\n"
+        )
+        self._write_obs([{
+            "ts": "2026-01-01T00:00:00+00:00", "beat": 1, "type": "commit",
+            "payload": {"subjects": ["Simplify test_foo"], "diff": weakening_diff, "stat": ""},
+        }])
+        since = datetime.fromisoformat("2025-12-31T00:00:00+00:00").timestamp()
+        task_review(self.obs, {**self.ctx, "beat": 1, "ts": "2026-01-01T00:00:01+00:00"},
+                   since_epoch=since)
+        receipts = list((self.cc / "receipts").glob("*.md"))
+        self.assertEqual(len(receipts), 1)
+        text = receipts[0].read_text()
+        self.assertIn("tests: weakened", text)
+        ti = parse_test_integrity(text)
+        self.assertEqual(ti["verdict"], "weakened")
+        self.assertEqual(ti["asserts_removed"], 2)
+        self.assertEqual(ti["asserts_added"], 0)
 
     def test_task_review_survives_unwritable_receipts_dir(self):
         from critic.main import task_review

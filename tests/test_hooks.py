@@ -119,6 +119,30 @@ class TestFailOpen(unittest.TestCase):
             self.assertEqual(res2.stdout, "")
 
 
+    def test_end_to_end_stop_blocks_on_weakened_test_integrity(self):
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            (cc / "receipts").mkdir(parents=True)
+            receipt_text = (
+                "# receipt\n\n## Test integrity\n"
+                "- tests: weakened — 2 assertion(s) removed, 0 added\n"
+                "```test-integrity\n"
+                '{"verdict": "weakened", "tests_added": 0, "tests_removed": 0, '
+                '"asserts_added": 0, "asserts_removed": 2}\n'
+                "```\n"
+            )
+            (cc / "receipts" / "repo-20260101-000000.md").write_text(receipt_text)
+            ev = {"hook_event_name": "Stop", "cwd": td, "stop_hook_active": False}
+            res = self._run(json.dumps(ev))
+            self.assertEqual(res.returncode, 0)
+            out = json.loads(res.stdout)
+            self.assertEqual(out["decision"], "block")
+            self.assertIn("weakened its tests", out["reason"])
+            # second run: ledger persisted, not blocked again
+            res2 = self._run(json.dumps(ev))
+            self.assertEqual(res2.stdout, "")
+
+
 class TestPeerHookLocking(unittest.TestCase):
     """PostToolUse hooks run as fresh subprocesses per event, potentially from
     concurrent Claude Code sessions on the same repo. The load->decide->save
@@ -499,6 +523,98 @@ class TestReceiptAnnouncement(unittest.TestCase):
              mock.patch("pathlib.Path.iterdir", side_effect=AssertionError("decide() touched fs")), \
              mock.patch("pathlib.Path.exists", side_effect=AssertionError("decide() touched fs")):
             out = decide(post_tool_use(), [], ledger, NOW, receipts=[self._receipt()])
+        self.assertIsNotNone(out)
+
+
+def ti_receipt(name="sess-a-20260101-120000.md", verdict="weakened", asserts_removed=3,
+              asserts_added=1, tests_removed=0, tests_added=0, path=None, no_key=False):
+    row = {"name": name, "path": path or f"/tmp/.codecouncil/receipts/{name}"}
+    if not no_key:
+        row["test_integrity"] = {
+            "verdict": verdict, "asserts_removed": asserts_removed, "asserts_added": asserts_added,
+            "tests_removed": tests_removed, "tests_added": tests_added,
+        }
+    return row
+
+
+class TestDoneGateTestIntegrity(unittest.TestCase):
+    """Task 2: a session's latest receipt scoring its tests "weakened" blocks
+    Stop once, mirroring the existing high-severity block-once pattern but
+    keyed by receipt (ledger key "test_integrity") instead of suggestion id."""
+
+    def test_weakened_blocks_stop_once(self):
+        ledger = {}
+        out = decide(stop_event(), [], ledger, NOW, receipts=[ti_receipt()])
+        self.assertIsNotNone(out)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("weakened its tests", out["reason"])
+        self.assertIn("3 assertions removed", out["reason"])
+        self.assertIn("1 added", out["reason"])
+        self.assertIn("COUNCIL-REBUTTAL", out["reason"])
+
+    def test_weakened_never_blocks_twice_for_same_receipt(self):
+        ledger = {}
+        receipts = [ti_receipt()]
+        self.assertIsNotNone(decide(stop_event(), [], ledger, NOW, receipts=receipts))
+        self.assertIsNone(decide(stop_event(), [], ledger, NOW, receipts=receipts))
+
+    def test_weakened_never_blocks_twice_even_after_a_rebuttal(self):
+        """decide() has no transcript access — a COUNCIL-REBUTTAL reply is
+        graded by the Reflector, not parsed here. The block-once ledger mark
+        IS the mechanism that respects it: once blocked, Stop never re-blocks
+        for that receipt, so a session that rebuts (or fixes) and calls Stop
+        again is not interrupted a second time."""
+        ledger = {}
+        receipts = [ti_receipt()]
+        first = decide(stop_event(), [], ledger, NOW, receipts=receipts)
+        self.assertEqual(first["decision"], "block")
+        # simulate time passing after the agent replied with a rebuttal and
+        # tried to finish again
+        second = decide(stop_event(), [], ledger, NOW + 5, receipts=receipts)
+        self.assertIsNone(second)
+
+    def test_unchanged_receipt_does_not_block(self):
+        out = decide(stop_event(), [], {}, NOW, receipts=[ti_receipt(verdict="unchanged")])
+        self.assertIsNone(out)
+
+    def test_strengthened_receipt_does_not_block(self):
+        out = decide(stop_event(), [], {}, NOW, receipts=[ti_receipt(verdict="strengthened")])
+        self.assertIsNone(out)
+
+    def test_receipt_without_test_integrity_key_is_silent(self):
+        # a receipt written before this feature existed
+        out = decide(stop_event(), [], {}, NOW, receipts=[ti_receipt(no_key=True)])
+        self.assertIsNone(out)
+
+    def test_no_receipts_no_block(self):
+        self.assertIsNone(decide(stop_event(), [], {}, NOW, receipts=[]))
+
+    def test_stop_hook_active_skips_test_integrity_block(self):
+        out = decide(stop_event(active=True), [], {}, NOW, receipts=[ti_receipt()])
+        self.assertIsNone(out)
+
+    def test_high_severity_suggestion_block_takes_priority_this_turn(self):
+        rows = [suggestion()]
+        ledger = {}
+        out = decide(stop_event(), rows, ledger, NOW, receipts=[ti_receipt()])
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("a.py:3", out["reason"])  # the suggestion block, not test-integrity
+        self.assertFalse(ledger_mod.test_integrity_blocked(ledger, "sess-a-20260101-120000.md"))
+        # next Stop: suggestion already delivered, so the test-integrity
+        # block fires on this later call
+        out2 = decide(stop_event(), rows, ledger, NOW, receipts=[ti_receipt()])
+        self.assertIn("weakened its tests", out2["reason"])
+
+    def test_only_newest_receipt_considered(self):
+        receipts = [ti_receipt("new.md", verdict="unchanged"),
+                   ti_receipt("old.md", verdict="weakened")]
+        out = decide(stop_event(), [], {}, NOW, receipts=receipts)
+        self.assertIsNone(out)
+
+    def test_decide_stays_pure_for_test_integrity_gate(self):
+        with mock.patch("pathlib.Path.glob", side_effect=AssertionError("decide() touched fs")), \
+             mock.patch("pathlib.Path.read_text", side_effect=AssertionError("decide() touched fs")):
+            out = decide(stop_event(), [], {}, NOW, receipts=[ti_receipt()])
         self.assertIsNotNone(out)
 
 

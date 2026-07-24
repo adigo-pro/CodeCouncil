@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.store import read_tail_rows as read_suggestions
+from critic.receipt import parse_test_integrity
 from hooks import ledger as ledger_mod
 from hooks.logic import decide
 
@@ -79,7 +80,7 @@ def run(stdin_text: str) -> str | None:
     receipts_dir = cc / "receipts"
     if not suggestions_file.exists() and not receipts_dir.is_dir():
         return None
-    receipts = _list_receipts(receipts_dir)
+    receipts = _attach_test_integrity(_list_receipts(receipts_dir))
     ledger_path = cc / "delivered.json"
     lock_path = cc / "delivered.lock"
     with _locked(lock_path):
@@ -102,6 +103,24 @@ def _list_receipts(receipts_dir: Path) -> list[dict]:
     except OSError:
         return []
     return [{"name": p.name, "path": str(p)} for p in files]
+
+
+def _attach_test_integrity(receipts: list[dict]) -> list[dict]:
+    """Read only the newest receipt's content and parse out its
+    test_integrity block (Task 2's Stop gate needs it; older entries stay
+    name/path-only, same cost as before this feature). Fail open: any
+    read/parse error just leaves the entry without a "test_integrity" key,
+    same as a receipt written before this feature existed — decide() treats
+    that as nothing to block on."""
+    if not receipts:
+        return receipts
+    try:
+        ti = parse_test_integrity(Path(receipts[0]["path"]).read_text(encoding="utf-8"))
+    except OSError:
+        ti = None
+    if ti is None:
+        return receipts
+    return [{**receipts[0], "test_integrity": ti}, *receipts[1:]]
 
 
 def main() -> int:

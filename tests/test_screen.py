@@ -76,6 +76,70 @@ class TestTestWeakening(unittest.TestCase):
         self.assertEqual(screen.scan_test_weakening(d), [])
 
 
+class TestTestIntegrity(unittest.TestCase):
+    """Task 2: session-level verdict — strengthened/unchanged/weakened —
+    feeding the receipt and the done-gate."""
+
+    def test_empty_diff_unchanged_zeros(self):
+        self.assertEqual(screen.test_integrity(""), {
+            "verdict": "unchanged", "tests_added": 0, "tests_removed": 0,
+            "asserts_added": 0, "asserts_removed": 0,
+        })
+
+    def test_no_test_files_touched_unchanged_zeros(self):
+        d = diff("app.py", ["assert invariant, 'must hold'"], removed=["x = 1"])
+        self.assertEqual(screen.test_integrity(d), {
+            "verdict": "unchanged", "tests_added": 0, "tests_removed": 0,
+            "asserts_added": 0, "asserts_removed": 0,
+        })
+
+    def test_strengthened_asserts_added_none_removed(self):
+        d = diff("tests/test_app.py", ["assert x == 1", "assert y == 2"])
+        result = screen.test_integrity(d)
+        self.assertEqual(result["verdict"], "strengthened")
+        self.assertEqual(result["asserts_added"], 2)
+        self.assertEqual(result["asserts_removed"], 0)
+
+    def test_strengthened_new_test_function(self):
+        d = diff("tests/test_app.py", ["def test_new(self):", "    pass"])
+        result = screen.test_integrity(d)
+        self.assertEqual(result["verdict"], "strengthened")
+        self.assertEqual(result["tests_added"], 1)
+
+    def test_unchanged_refactor_equal_assert_counts(self):
+        d = diff("tests/test_app.py",
+                 ["assert result == expected", "assert other == 7"],
+                 removed=["assert x == 42", "assert y == 7"])
+        result = screen.test_integrity(d)
+        self.assertEqual(result["verdict"], "unchanged")
+        self.assertEqual(result["asserts_added"], 2)
+        self.assertEqual(result["asserts_removed"], 2)
+
+    def test_weakened_test_function_removed(self):
+        d = diff("tests/test_app.py", ["pass"], removed=["def test_edge_case(self):"])
+        result = screen.test_integrity(d)
+        self.assertEqual(result["verdict"], "weakened")
+        self.assertEqual(result["tests_removed"], 1)
+
+    def test_weakened_test_removed_even_if_another_added(self):
+        # a removed test always counts as weakened, regardless of additions
+        # elsewhere — matches scan_test_weakening's "test-removed" signal
+        d = diff("tests/test_app.py", ["def test_new(self):", "    pass"],
+                 removed=["def test_old(self):"])
+        result = screen.test_integrity(d)
+        self.assertEqual(result["verdict"], "weakened")
+        self.assertEqual(result["tests_added"], 1)
+        self.assertEqual(result["tests_removed"], 1)
+
+    def test_weakened_net_negative_assertions(self):
+        d = diff("tests/test_app.py", ["x = compute()"],
+                 removed=["assert x == 42", "assert y == 7"])
+        result = screen.test_integrity(d)
+        self.assertEqual(result["verdict"], "weakened")
+        self.assertEqual(result["asserts_removed"], 2)
+        self.assertEqual(result["asserts_added"], 0)
+
+
 class TestHallucinatedImports(unittest.TestCase):
     def test_new_import_names_parsed_from_added_python_only(self):
         d = diff("app.py", ["import requests_wrong", "from flask_fake import x"]) \

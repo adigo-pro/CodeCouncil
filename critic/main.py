@@ -236,6 +236,17 @@ def reviewed_files(latest_diff: dict | None, events: list[dict]) -> list[str]:
     return sorted(paths)
 
 
+def batch_diff_text(events: list[dict], ctx: dict) -> str:
+    """The batch's commit diffs plus the latest working-tree diff, joined —
+    everything this batch changed. Shared by judge_batch (mechanical
+    screening: security patterns, hallucinated imports, weakened tests) and
+    task_review (the receipt's test-integrity verdict) so the two never see
+    different diff material for the same session."""
+    diff_texts = [e["payload"].get("diff", "") for e in events if e["type"] == "commit"]
+    diff_texts.append(((ctx.get("latest_diff") or {}).get("payload") or {}).get("diff", ""))
+    return "\n".join(t for t in diff_texts if t)
+
+
 def judge_batch(events: list[dict], ctx: dict) -> None:
     """One model judgment over a batch. Runs on the scheduler's worker thread;
     sole writer of the suggestions file."""
@@ -244,12 +255,10 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     heuristics = ensure_heuristics(ctx["heuristics_path"])
     history = verdict_history(suggestions_file, suggestions_file.parent / "outcomes.ndjsonl")
     kb = knowledge.load(suggestions_file.parent)  # fresh every call, same pattern as heuristics
-    # mechanical screening over everything this batch changed: the batch's
-    # commit diffs plus the latest working-tree diff (documented AI-code
-    # failure modes — security patterns, hallucinated imports, weakened tests)
-    diff_texts = [e["payload"].get("diff", "") for e in events if e["type"] == "commit"]
-    diff_texts.append(((ctx.get("latest_diff") or {}).get("payload") or {}).get("diff", ""))
-    signals = screen.screen("\n".join(t for t in diff_texts if t), repo=ctx.get("repo"))
+    # mechanical screening over everything this batch changed (documented
+    # AI-code failure modes — security patterns, hallucinated imports,
+    # weakened tests)
+    signals = screen.screen(batch_diff_text(events, ctx), repo=ctx.get("repo"))
     text = prompt.build_prompt(events, ctx.get("latest_diff"), heuristics,
                                project=ctx.get("project", ""), verdict_history=history,
                                knowledge=kb, signals=signals)
@@ -485,9 +494,13 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
     # a review that already landed durably above.
     try:
         tests_fact = f"MECHANICAL FACT — {prompt.mechanical_fact(events, tests_run_sticky)}"
+        # Task 2: the same batch-diff material judge_batch screens for
+        # security/weakened-tests signals, aggregated into a session-level
+        # strengthened/unchanged/weakened verdict for the receipt + done-gate.
+        test_integrity = screen.test_integrity(batch_diff_text(events, ctx))
         receipt_path = receipt.write_receipt(
             suggestions_file.parent, {**ctx, "since_epoch": since_epoch}, events, record,
-            tests_fact)
+            tests_fact, test_integrity=test_integrity)
         print(f"critic: receipt written to {receipt_path}")
     except Exception as e:
         print(f"critic: receipt failed ({e})")

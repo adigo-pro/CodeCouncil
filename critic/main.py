@@ -30,7 +30,7 @@ from observer.transcript import tail_new_lines
 # own touched_contents derivation instead of drifting from a second copy.
 from observer.gitwatch import _touched_paths
 
-from . import agent, prompt, receipt, screen, verify
+from . import agent, deps, prompt, receipt, screen, verify
 from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
@@ -497,10 +497,14 @@ def task_review(obs_file: Path, ctx: dict, since_epoch: float) -> None:
         # Task 2: the same batch-diff material judge_batch screens for
         # security/weakened-tests signals, aggregated into a session-level
         # strengthened/unchanged/weakened verdict for the receipt + done-gate.
-        test_integrity = screen.test_integrity(batch_diff_text(events, ctx))
+        session_diff = batch_diff_text(events, ctx)
+        test_integrity = screen.test_integrity(session_diff)
+        # Task 3: dependency provenance -- new requirements*.txt / pyproject.toml
+        # / package.json lines this session added, same batch-diff material.
+        new_dependencies = deps.new_dependency_lines(session_diff)
         receipt_path = receipt.write_receipt(
             suggestions_file.parent, {**ctx, "since_epoch": since_epoch}, events, record,
-            tests_fact, test_integrity=test_integrity)
+            tests_fact, test_integrity=test_integrity, new_dependencies=new_dependencies)
         print(f"critic: receipt written to {receipt_path}")
     except Exception as e:
         print(f"critic: receipt failed ({e})")

@@ -14,8 +14,8 @@
     "subjects": [
      "f6a7b8c Add authutil.py using supersafe_crypto for password hashing"
     ],
-    "diff": "diff --git a/authutil.py b/authutil.py\nnew file mode 100644\nindex 0000000..9c0d1e2\n--- /dev/null\n+++ b/authutil.py\n@@ -0,0 +1,11 @@\n+\"\"\"Password hashing helpers.\"\"\"\n+\n+from supersafe_crypto import hash_password, verify_password\n+\n+\n+def make_hash(password):\n+    return hash_password(password)\n+\n+\n+def check_password(password, hashed):\n+    return verify_password(password, hashed)\n",
-    "stat": "authutil.py | 11 +++++++++++\n 1 file changed, 11 insertions(+)"
+    "diff": "diff --git a/authutil.py b/authutil.py\nnew file mode 100644\nindex 0000000..9c0d1e2\n--- /dev/null\n+++ b/authutil.py\n@@ -0,0 +1,12 @@\n+\"\"\"Password hashing helpers.\"\"\"\n+\n+import requsts\n+from supersafe_crypto import hash_password, verify_password\n+\n+\n+def make_hash(password):\n+    return hash_password(password)\n+\n+\n+def check_password(password, hashed):\n+    return verify_password(password, hashed)\n",
+    "stat": "authutil.py | 12 ++++++++++++\n 1 file changed, 12 insertions(+)"
    },
    "session": null,
    "ts": "2026-07-20T09:24:32-05:00"

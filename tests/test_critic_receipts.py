@@ -227,6 +227,32 @@ class TestReceiptContent(unittest.TestCase):
         self.assertIn("tests: strengthened — 1 test(s) added, 2 assertion(s) added", text)
         self.assertEqual(parse_test_integrity(text), ti)
 
+    def test_write_receipt_renders_dependencies_section_when_present(self):
+        """Task 3: new_dependency_lines results get their own section."""
+        from critic.receipt import write_receipt
+
+        record = {"verdict": "PASS", "heuristics_version": 1}
+        ctx_like = {"repo": self.cc, "suggestions_file": self.suggestions, "since_epoch": 0.0}
+
+        path = write_receipt(self.cc, ctx_like, [], record, "fact",
+                             new_dependencies=["requests==2.31.0", "flask>=2.0"])
+        text = path.read_text()
+        self.assertIn("## Dependencies added this session", text)
+        self.assertIn("- requests==2.31.0", text)
+        self.assertIn("- flask>=2.0", text)
+
+    def test_write_receipt_omits_dependencies_section_when_empty(self):
+        """Empty/None new_dependencies -> section absent, old rendering unchanged."""
+        from critic.receipt import write_receipt
+
+        record = {"verdict": "PASS", "heuristics_version": 1}
+        ctx_like = {"repo": self.cc, "suggestions_file": self.suggestions, "since_epoch": 0.0}
+
+        path_none = write_receipt(self.cc, ctx_like, [], record, "fact")
+        path_empty = write_receipt(self.cc, ctx_like, [], record, "fact", new_dependencies=[])
+        self.assertNotIn("## Dependencies added this session", path_none.read_text())
+        self.assertNotIn("## Dependencies added this session", path_empty.read_text())
+
     def test_parse_test_integrity_missing_block_returns_none(self):
         from critic.receipt import parse_test_integrity
 
@@ -320,6 +346,34 @@ class TestReceiptTaskReviewIntegration(unittest.TestCase):
         self.assertEqual(ti["verdict"], "weakened")
         self.assertEqual(ti["asserts_removed"], 2)
         self.assertEqual(ti["asserts_added"], 0)
+
+    def test_task_review_receipt_reflects_new_dependency_lines(self):
+        """Task 3: task_review must pass the session's batch diffs into
+        deps.new_dependency_lines so the receipt's dependencies section
+        reflects what this session's diffs actually added."""
+        from critic.main import task_review
+
+        self._set_stub("PASS")
+        dep_diff = (
+            "diff --git a/requirements.txt b/requirements.txt\n"
+            "--- a/requirements.txt\n"
+            "+++ b/requirements.txt\n"
+            "@@ -1,1 +1,2 @@\n"
+            " flask==2.0.0\n"
+            "+requests==2.31.0\n"
+        )
+        self._write_obs([{
+            "ts": "2026-01-01T00:00:00+00:00", "beat": 1, "type": "commit",
+            "payload": {"subjects": ["Add requests dependency"], "diff": dep_diff, "stat": ""},
+        }])
+        since = datetime.fromisoformat("2025-12-31T00:00:00+00:00").timestamp()
+        task_review(self.obs, {**self.ctx, "beat": 1, "ts": "2026-01-01T00:00:01+00:00"},
+                   since_epoch=since)
+        receipts = list((self.cc / "receipts").glob("*.md"))
+        self.assertEqual(len(receipts), 1)
+        text = receipts[0].read_text()
+        self.assertIn("## Dependencies added this session", text)
+        self.assertIn("- requests==2.31.0", text)
 
     def test_task_review_survives_unwritable_receipts_dir(self):
         from critic.main import task_review

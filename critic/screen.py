@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import deps
+
 MAX_SIGNALS = 8
 EVIDENCE_MAX_CHARS = 160
 _RESOLVE_TIMEOUT = 20
@@ -222,12 +224,22 @@ def resolve_new_imports(names: dict[str, str], repo: Path) -> list[dict]:
 
 def screen(diff_text: str, repo: Path | None = None) -> list[dict]:
     """All signals for a diff, capped. `repo=None` (eval replays) skips the
-    import-resolution subprocess so replays stay hermetic."""
+    import-resolution subprocess so replays stay hermetic; the typo-suspect
+    check is pure (no subprocess) and runs either way.
+
+    Typo-suspect runs BEFORE unresolvable-import, and a name flagged
+    typo-suspect is excluded from the unresolvable check — a typo that
+    happens to resolve (an attacker-registered slopsquat) is still suspect,
+    but each imported name gets exactly one signal, not two.
+    """
     if not diff_text:
         return []
     signals = scan_patterns(diff_text) + scan_test_weakening(diff_text)
+    names = new_import_names(diff_text)
+    signals += deps.suspicious_imports(names)
     if repo is not None:
-        signals += resolve_new_imports(new_import_names(diff_text), repo)
+        remaining = {n: f for n, f in names.items() if not deps.is_typo_suspect(n)}
+        signals += resolve_new_imports(remaining, repo)
     return signals[:MAX_SIGNALS]
 
 

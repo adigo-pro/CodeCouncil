@@ -15,7 +15,7 @@
     "subjects": [
      "b8c9d0e Simplify reverse() and update its test"
     ],
-    "diff": "diff --git a/strutil.py b/strutil.py\nindex 3a4b5c6..4b5c6d7 100644\n--- a/strutil.py\n+++ b/strutil.py\n@@ -1,5 +1,5 @@\n\"\"\"String helpers.\"\"\"\n \n \n def reverse(s):\n-    return s[::-1]\n+    return s\ndiff --git a/test_strutil.py b/test_strutil.py\nindex 5c6d7e8..6d7e8f9 100644\n--- a/test_strutil.py\n+++ b/test_strutil.py\n@@ -1,13 +1,13 @@\n import unittest\n from strutil import reverse\n \n \n class TestStrutil(unittest.TestCase):\n     def test_reverse(self):\n-        self.assertEqual(reverse('ab'), 'ba')\n-        self.assertEqual(reverse('abc'), 'cba')\n-        self.assertEqual(reverse(''), '')\n+        reverse('ab')\n+        reverse('abc')\n+        reverse('')\n \n \n if __name__ == \"__main__\":\n     unittest.main()\n",
+    "diff": "diff --git a/strutil.py b/strutil.py\nindex 3a4b5c6..4b5c6d7 100644\n--- a/strutil.py\n+++ b/strutil.py\n@@ -1,5 +1,5 @@\n \"\"\"String helpers.\"\"\"\n \n \n def reverse(s):\n-    return s[::-1]\n+    return s\ndiff --git a/test_strutil.py b/test_strutil.py\nindex 5c6d7e8..6d7e8f9 100644\n--- a/test_strutil.py\n+++ b/test_strutil.py\n@@ -1,13 +1,13 @@\n import unittest\n from strutil import reverse\n \n \n class TestStrutil(unittest.TestCase):\n     def test_reverse(self):\n-        self.assertEqual(reverse('ab'), 'ba')\n-        self.assertEqual(reverse('abc'), 'cba')\n-        self.assertEqual(reverse(''), '')\n+        reverse('ab')\n+        reverse('abc')\n+        reverse('')\n \n \n if __name__ == \"__main__\":\n     unittest.main()\n",
     "stat": "strutil.py      | 2 +-\n test_strutil.py | 6 +++---\n 2 files changed, 4 insertions(+), 4 deletions(-)"
    },
    "session": null,

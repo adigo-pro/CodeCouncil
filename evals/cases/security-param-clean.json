@@ -12,7 +12,7 @@
     "subjects": [
      "c3d4e5f Add find_orders query filtered by customer and status"
     ],
-    "diff": "diff --git a/orders.py b/orders.py\nnew file mode 100644\nindex 0000000..b2c3d4e\n--- /dev/null\n+++ b/orders.py\n@@ -0,0 +1,10 @@\n+\"\"\"Order queries.\"\"\"\n+\n+\n+def find_orders(conn, customer_id, status):\n+    cur = conn.execute(\n+        \"SELECT id, total FROM orders WHERE customer_id = %s AND status = %s\",\n+        (customer_id, status),\n+    )\n+    return cur.fetchall()\n",
+    "diff": "diff --git a/orders.py b/orders.py\nnew file mode 100644\nindex 0000000..b2c3d4e\n--- /dev/null\n+++ b/orders.py\n@@ -0,0 +1,9 @@\n+\"\"\"Order queries.\"\"\"\n+\n+\n+def find_orders(conn, customer_id, status):\n+    cur = conn.execute(\n+        \"SELECT id, total FROM orders WHERE customer_id = %s AND status = %s\",\n+        (customer_id, status),\n+    )\n+    return cur.fetchall()\n",
     "stat": "orders.py | 9 +++++++++\n 1 file changed, 9 insertions(+)"
    },
    "session": null,

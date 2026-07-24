@@ -94,13 +94,14 @@ def scan_patterns(diff_text: str) -> list[dict]:
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
+            # no break: one line can carry two distinct classes
+            # (os.system(eval(x)) is both command- and eval-injection)
             for kind, cwe, pattern in _LINE_CHECKS:
                 if pattern.search(line):
                     if kind == "sql-injection" and not _STR_BUILD_RE.search(line):
                         continue
                     signals.append({"kind": kind, "cwe": cwe, "file": path,
                                     "line": lineno, "evidence": _evidence(line)})
-                    break
     return signals
 
 

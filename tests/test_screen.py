@@ -42,6 +42,12 @@ class TestSecurityPatterns(unittest.TestCase):
         kinds = [s["kind"] for s in screen.scan_patterns(d)]
         self.assertEqual(kinds, ["eval-injection"])
 
+    def test_one_line_can_carry_two_classes(self):
+        # council catch: a break after the first match hid the second class
+        d = diff("run.py", ["os.system(eval(user_input))"])
+        kinds = sorted(s["kind"] for s in screen.scan_patterns(d))
+        self.assertEqual(kinds, ["command-injection", "eval-injection"])
+
     def test_comment_lines_ignored(self):
         d = diff("app.py", ["# cursor.execute(f\"SELECT {x}\") -- old approach"])
         self.assertEqual(screen.scan_patterns(d), [])

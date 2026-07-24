@@ -1,0 +1,47 @@
+{
+ "name": "security-sqli",
+ "expected": "flag",
+ "expect_files": [
+  "db.py"
+ ],
+ "events": [
+  {
+   "beat": 501,
+   "type": "commit",
+   "payload": {
+    "from": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    "to": "2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",
+    "subjects": [
+     "a1b2c3d Build get_user query with an f-string for readability"
+    ],
+    "diff": "diff --git a/db.py b/db.py\nindex 1a2b3c4..5d6e7f8 100644\n--- a/db.py\n+++ b/db.py\n@@ -6,3 +6,4 @@ def get_user(conn, username):\n def get_user(conn, username):\n-    cur = conn.execute(\"SELECT id, email FROM users WHERE username = ?\", (username,))\n+    query = f\"SELECT id, email FROM users WHERE username = '{username}'\"\n+    cur = conn.execute(query)\n     return cur.fetchone()\n",
+    "stat": "db.py | 3 ++-\n 1 file changed, 2 insertions(+), 1 deletion(-)"
+   },
+   "session": null,
+   "ts": "2026-07-20T09:12:03-05:00"
+  }
+ ],
+ "latest_diff": {
+  "beat": 501,
+  "type": "diff",
+  "payload": {
+   "diff": "",
+   "stat": "",
+   "untracked": [
+    ".claude/settings.json",
+    ".codecouncil/critic-state.json",
+    ".codecouncil/critic.live.log",
+    ".codecouncil/heuristics.md",
+    ".codecouncil/observations.ndjsonl",
+    ".codecouncil/observer.live.log",
+    ".codecouncil/reflector-state.json",
+    ".codecouncil/reflector.live.log",
+    ".codecouncil/state.json",
+    ".codecouncil/suggestions.ndjsonl"
+   ],
+   "untracked_contents": {}
+  },
+  "session": null,
+  "ts": "2026-07-20T09:12:03-05:00"
+ }
+}

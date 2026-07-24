@@ -1,0 +1,45 @@
+{
+ "name": "security-param-clean",
+ "expected": "pass",
+ "expect_files": [],
+ "events": [
+  {
+   "beat": 502,
+   "type": "commit",
+   "payload": {
+    "from": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+    "to": "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e",
+    "subjects": [
+     "c3d4e5f Add find_orders query filtered by customer and status"
+    ],
+    "diff": "diff --git a/orders.py b/orders.py\nnew file mode 100644\nindex 0000000..b2c3d4e\n--- /dev/null\n+++ b/orders.py\n@@ -0,0 +1,10 @@\n+\"\"\"Order queries.\"\"\"\n+\n+\n+def find_orders(conn, customer_id, status):\n+    cur = conn.execute(\n+        \"SELECT id, total FROM orders WHERE customer_id = %s AND status = %s\",\n+        (customer_id, status),\n+    )\n+    return cur.fetchall()\n",
+    "stat": "orders.py | 9 +++++++++\n 1 file changed, 9 insertions(+)"
+   },
+   "session": null,
+   "ts": "2026-07-20T09:14:41-05:00"
+  }
+ ],
+ "latest_diff": {
+  "beat": 502,
+  "type": "diff",
+  "payload": {
+   "diff": "",
+   "stat": "",
+   "untracked": [
+    ".claude/settings.json",
+    ".codecouncil/critic-state.json",
+    ".codecouncil/critic.live.log",
+    ".codecouncil/heuristics.md",
+    ".codecouncil/observations.ndjsonl",
+    ".codecouncil/observer.live.log",
+    ".codecouncil/reflector-state.json",
+    ".codecouncil/reflector.live.log",
+    ".codecouncil/state.json",
+    ".codecouncil/suggestions.ndjsonl"
+   ],
+   "untracked_contents": {}
+  },
+  "session": null,
+  "ts": "2026-07-20T09:14:41-05:00"
+ }
+}

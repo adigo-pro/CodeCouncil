@@ -2,6 +2,7 @@
 scorer that both `python3 -m evals.run` and the reflector's rewrite gate
 build on. All model calls are stubbed via CRITIC_CMD."""
 
+import json
 import os
 import stat
 import sys
@@ -11,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from evals.run import score_heuristics
+from evals.run import CASES_DIR, score_heuristics
 
 # One call per case: reply PASS for the "clean" case (matched by marker text
 # in the prompt), a suggestion JSON for the "flag" case.
@@ -62,6 +63,15 @@ class TestScoreHeuristics(unittest.TestCase):
     def test_empty_cases_scores_zero_not_crash(self):
         result = score_heuristics("version: 1\n- x\n", [])
         self.assertEqual(result, {"score": 0.0, "n": 0, "results": []})
+
+
+class TestCaseSchema(unittest.TestCase):
+    def test_failure_mode_slices_well_formed(self):
+        for p in sorted(CASES_DIR.glob("*.json")):
+            case = json.loads(p.read_text())
+            self.assertIn(case["expected"], {"flag", "pass"})
+            if case["expected"] == "flag":
+                self.assertTrue(case["expect_files"])
 
 
 if __name__ == "__main__":

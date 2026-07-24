@@ -116,7 +116,7 @@ def _attach_test_integrity(receipts: list[dict]) -> list[dict]:
         return receipts
     try:
         ti = parse_test_integrity(Path(receipts[0]["path"]).read_text(encoding="utf-8"))
-    except OSError:
+    except (OSError, ValueError):
         ti = None
     if ti is None:
         return receipts

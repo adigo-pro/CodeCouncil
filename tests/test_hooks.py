@@ -618,6 +618,29 @@ class TestDoneGateTestIntegrity(unittest.TestCase):
         self.assertIsNotNone(out)
 
 
+class TestAttachTestIntegrityMalformed(unittest.TestCase):
+    """Malformed receipt files (invalid UTF-8, parse errors) should be silently
+    skipped without losing the entire hook output."""
+
+    def test_malformed_utf8_receipt_skips_key_no_exception(self):
+        """A receipt file with invalid UTF-8 bytes should not escape; the entry
+        simply lacks a test_integrity key, same as a receipt before the feature."""
+        from hooks.peer_hook import _attach_test_integrity
+
+        with tempfile.TemporaryDirectory() as td:
+            receipt_path = Path(td) / "malformed.md"
+            # Write invalid UTF-8 bytes
+            receipt_path.write_bytes(b"\xff\xfe garbage")
+
+            receipts = [{"name": "malformed.md", "path": str(receipt_path)}]
+            result = _attach_test_integrity(receipts)
+
+            # Should return a receipt dict without test_integrity key
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["name"], "malformed.md")
+            self.assertNotIn("test_integrity", result[0])
+
+
 class TestInstall(unittest.TestCase):
     def test_fresh_install_then_idempotent(self):
         with tempfile.TemporaryDirectory() as td:

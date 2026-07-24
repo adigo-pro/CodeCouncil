@@ -30,7 +30,7 @@ from observer.transcript import tail_new_lines
 # own touched_contents derivation instead of drifting from a second copy.
 from observer.gitwatch import _touched_paths
 
-from . import agent, prompt, receipt, verify
+from . import agent, prompt, receipt, screen, verify
 from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
@@ -244,9 +244,15 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     heuristics = ensure_heuristics(ctx["heuristics_path"])
     history = verdict_history(suggestions_file, suggestions_file.parent / "outcomes.ndjsonl")
     kb = knowledge.load(suggestions_file.parent)  # fresh every call, same pattern as heuristics
+    # mechanical screening over everything this batch changed: the batch's
+    # commit diffs plus the latest working-tree diff (documented AI-code
+    # failure modes — security patterns, hallucinated imports, weakened tests)
+    diff_texts = [e["payload"].get("diff", "") for e in events if e["type"] == "commit"]
+    diff_texts.append(((ctx.get("latest_diff") or {}).get("payload") or {}).get("diff", ""))
+    signals = screen.screen("\n".join(t for t in diff_texts if t), repo=ctx.get("repo"))
     text = prompt.build_prompt(events, ctx.get("latest_diff"), heuristics,
                                project=ctx.get("project", ""), verdict_history=history,
-                               knowledge=kb)
+                               knowledge=kb, signals=signals)
     record = {
         "id": uuid.uuid4().hex[:12],
         "ts": ts,

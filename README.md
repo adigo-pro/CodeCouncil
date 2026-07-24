@@ -54,6 +54,14 @@ context** via Claude Code hooks, scoped to the session that caused them.
 
 ## What makes it different
 
+- **It screens for the failure modes research actually documents.** ~45% of
+  AI code introduces OWASP-class vulnerabilities while syntax looks perfect
+  (Veracode, 150+ models); models hallucinate nonexistent packages
+  ("slopsquatting"); agents under pressure weaken their own tests. Every diff
+  gets zero-cost mechanical screening for exactly these — SQL/command/eval
+  injection patterns, unsafe deserialization, imports that don't resolve,
+  removed tests and assertions — and the critic must confirm or dismiss each
+  signal with a reason.
 - **Findings arrive with receipts.** Before delivering, the critic writes and
   runs a repro against a staged copy of the flagged file. Refuted findings
   are never delivered; confirmed ones ship with the proof and a
@@ -185,7 +193,7 @@ here, and the critic reviews its builders):
   independent reviewers had approved.
 - Model bake-offs across 12 candidates, 7 frozen cases each, latency and
   format discipline measured: [docs/benchmarks/](docs/benchmarks/).
-- 415 tests (`python3 -m unittest discover -s tests`), CI on 3.10/3.12 +
+- 431 tests (`python3 -m unittest discover -s tests`), CI on 3.10/3.12 +
   UI build + lint + installer smoke test. Small-n caveat: the self-improvement
   curves are days old, not months. That's what running it grows.
 

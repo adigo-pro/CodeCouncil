@@ -181,7 +181,7 @@ def _render_knowledge(knowledge: str) -> list[str]:
 
 def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
                  project: str = "", verdict_history: list[dict] | None = None,
-                 knowledge: str = "") -> str:
+                 knowledge: str = "", signals: list[dict] | None = None) -> str:
     all_reasoning = [e for e in events if e["type"] == "reasoning"]
     all_tools = [e for e in events if e["type"] == "tool_call"]
     reasoning = all_reasoning[-MAX_REASONING_EVENTS:]
@@ -194,6 +194,11 @@ def build_prompt(events: list[dict], latest_diff: dict | None, heuristics: str,
     parts += [f"HEURISTICS (v{heuristics_version(heuristics)}):",
              numbered_heuristics(heuristics.strip()), ""]
     parts += _render_knowledge(knowledge)
+    if signals:
+        # mechanical screening (critic/screen.py): no `signals` -> byte-identical
+        # prompt to before screening existed, keeping eval replays hermetic
+        from . import screen as _screen
+        parts += _screen.render(signals)
 
     parts.append("CODING AGENT'S RECENT REASONING:")
     if reasoning:

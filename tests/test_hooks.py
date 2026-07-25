@@ -989,7 +989,7 @@ class TestDoneGateWait(unittest.TestCase):
             (cc / "critic-state.json").write_text(
                 json.dumps({"offset": 0, "committed_offset": 0}))
 
-            gate_seconds = 2
+            gate_seconds = 4
             env = dict(os.environ)
             env["HOME"] = home_td
             env["COUNCIL_GATE_SECONDS"] = str(gate_seconds)
@@ -1010,9 +1010,16 @@ class TestDoneGateWait(unittest.TestCase):
             elapsed = time.time() - start
 
             self.assertEqual(res2.returncode, 0)
-            self.assertLess(elapsed, gate_seconds - 0.5,
-                            "second hook call blocked behind the first's gate wait "
-                            "-- delivered.lock was held across the sleep")
+            # Threshold is a fraction of the gate duration (not a hard
+            # wall-clock constant) so CI-load subprocess-startup jitter
+            # doesn't flake this: if the lock were held across the gate's
+            # poll sleep, the second call would take roughly gate_seconds,
+            # not a fraction of it.
+            threshold = gate_seconds * 0.5
+            self.assertLess(elapsed, threshold,
+                            f"second hook call took {elapsed:.2f}s (>= {threshold:.2f}s, "
+                            f"half of the {gate_seconds}s gate) -- delivered.lock was "
+                            "held across the sleep")
 
             proc.wait(timeout=gate_seconds + 10)
             proc.stdout.close()

@@ -15,7 +15,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      # Project is stdlib-only; no pip install needed
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Project is stdlib-only; no pip install needed. Node is present so
+      # tests/test_jail.py (the path-jail security boundary) actually runs
+      # instead of self-skipping -- jail.mjs has zero npm dependencies, so
+      # a bare `node` on PATH is all it needs.
       - run: python3 -m unittest discover -s tests
 
   ui:

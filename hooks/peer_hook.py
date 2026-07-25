@@ -118,7 +118,7 @@ def _read_unjudged_events(obs_file: Path, committed_offset: int) -> list[dict]:
     return rows
 
 
-def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
+def _maybe_wait_for_critic(cc: Path, event: dict) -> bool:
     """Task 1 done-gate: optionally hold a Stop declaration open while the
     critic catches up on material it hasn't judged yet, so a finding landing
     in that window blocks like any other pending finding instead of being
@@ -130,6 +130,13 @@ def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
     function otherwise reads). At most one wait per session (ledger key
     "gate"). Any exception anywhere -> behave exactly as if the gate were
     off; this function must never be the reason the hook fails to fail open.
+
+    Returns True iff a wait was actually entered for this Stop (the gate
+    resolved on AND there was real unjudged material to wait for) — run()
+    threads this into decide()'s `gated` param so the Stop block-severity
+    floor drops to medium+ only when the gate was genuinely active this
+    turn (run-3-levers Task 1). Gate off, already spent this session, or
+    nothing pending -> False, same as any exception along the way.
 
     Locking: delivered.lock is shared with every hook call in every
     concurrent session on this repo. The poll loop below can run for up to
@@ -147,7 +154,7 @@ def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
         config_value = load_config().get("gate_seconds")
         gate_seconds = resolve_gate_seconds(env_value, config_value)
         if gate_seconds <= 0:
-            return
+            return False
         session_key = event.get("session_id") or ""
         ledger_path = cc / "delivered.json"
         lock_path = cc / "delivered.lock"
@@ -164,9 +171,9 @@ def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
         with _locked(lock_path):
             ledger = ledger_mod.load(ledger_path)
             if ledger_mod.gate_used(ledger, session_key):
-                return
+                return False
             if not _pending():
-                return
+                return False
 
         # Poll OUTSIDE any lock — see docstring above.
         deadline = time.time() + gate_seconds
@@ -177,14 +184,16 @@ def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
             ledger = ledger_mod.load(ledger_path)
             ledger_mod.mark_gate(ledger, session_key, time.time())
             ledger_mod.save(ledger_path, ledger)
+        return True  # a wait was genuinely entered this Stop
     except Exception:
-        return  # fail open: proceed exactly as if the gate were off
+        return False  # fail open: proceed exactly as if the gate were off
 
 
 def run(stdin_text: str) -> str | None:
     event = json.loads(stdin_text)
     cc = Path(event["cwd"]) / ".codecouncil"
     suggestions_file = cc / "suggestions.ndjsonl"
+    gated = False
     if event.get("hook_event_name") == "Stop" and cc.is_dir():
         # the coding agent thinks it's done — ask the critic for a task-level
         # claim review (the critic daemon debounces; writing is best-effort)
@@ -197,7 +206,12 @@ def run(stdin_text: str) -> str | None:
         # done-gate (Task 1): optionally hold "done" open while the critic
         # catches up — must run BEFORE the suggestions/receipts reads below
         # so a finding that lands during the wait is delivered this turn.
-        _maybe_wait_for_critic(cc, event)
+        # Its return says whether a wait was genuinely entered this Stop;
+        # that's threaded into decide()'s `gated` so the block-severity
+        # floor drops to medium+ only when the gate was actually active
+        # (run-3-levers Task 1) — a finished session has no later
+        # PostToolUse to deliver a medium finding through.
+        gated = _maybe_wait_for_critic(cc, event)
     receipts_dir = cc / "receipts"
     if not suggestions_file.exists() and not receipts_dir.is_dir():
         return None
@@ -207,7 +221,7 @@ def run(stdin_text: str) -> str | None:
     with _locked(lock_path):
         ledger = ledger_mod.load(ledger_path)
         output = decide(event, read_suggestions(suggestions_file), ledger, time.time(),
-                        receipts=receipts)
+                        receipts=receipts, gated=gated)
         if output is None:
             return None
         ledger_mod.save(ledger_path, ledger)  # persist only when something was delivered

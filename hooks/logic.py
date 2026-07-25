@@ -32,6 +32,14 @@ MAX_CONTEXT_ITEMS = 3
 CONTEXT_SEVERITIES = {"medium", "high"}
 BLOCK_SEVERITIES = {"high"}
 
+# Gated-mode Stop-block floor (Task 1 of run-3-levers): a finished one-shot
+# session has no later PostToolUse to inject a medium finding into, so when
+# the done-gate actually held this Stop open for the critic (peer_hook.py's
+# _maybe_wait_for_critic performed a real wait), medium findings block too —
+# same once-each ledger, same stop_hook_active override. Off (gated=False,
+# the default) is byte-identical to BLOCK_SEVERITIES above.
+GATED_BLOCK_SEVERITIES = {"medium", "high"}
+
 # Done-gate (Task 1): a Stop declaration can optionally hold while the critic
 # catches up on material it hasn't judged yet, so a finding landing in that
 # window blocks like any other pending finding instead of being missed by a
@@ -188,7 +196,7 @@ def _test_integrity_block(receipts: list[dict], ledger: dict, now: float) -> dic
 
 
 def decide(event: dict, suggestions: list[dict], ledger: dict, now: float,
-          receipts: list[dict] = ()) -> dict | None:
+          receipts: list[dict] = (), gated: bool = False) -> dict | None:
     """Returns hook output JSON (or None for silence). May mark the ledger.
 
     `receipts` is an optional, caller-supplied list of {"name", "path"} dicts
@@ -196,6 +204,11 @@ def decide(event: dict, suggestions: list[dict], ledger: dict, now: float,
     every existing call site/test is unaffected. At most one is announced
     per event, and each at most once ever (tracked in the ledger's reserved
     "receipts" key — see hooks.ledger).
+
+    `gated` (default False, byte-identical to prior behavior): True only
+    when peer_hook.py's done-gate actually held THIS Stop open waiting on
+    the critic. Only affects the Stop block-severity floor (medium+ instead
+    of high-only) — PostToolUse/UserPromptSubmit injection is untouched.
     """
     hook = event.get("hook_event_name")
     hook_session_id = event.get("session_id")
@@ -236,7 +249,8 @@ def decide(event: dict, suggestions: list[dict], ledger: dict, now: float,
     if hook == "Stop":
         if event.get("stop_hook_active"):
             return None
-        pending = _pending(suggestions, ledger, "block", BLOCK_SEVERITIES, now, hook_session_id)
+        severities = GATED_BLOCK_SEVERITIES if gated else BLOCK_SEVERITIES
+        pending = _pending(suggestions, ledger, "block", severities, now, hook_session_id)
         if pending:
             row = pending[0]  # one interruption at a time; the rest wait for the next Stop
             ledger_mod.mark(ledger, row["id"], "block", now)

@@ -329,6 +329,41 @@ class TestDecideStop(unittest.TestCase):
         self.assertIsNotNone(decide(stop_event(), rows, ledger, NOW))
 
 
+class TestDecideStopGated(unittest.TestCase):
+    """Task 1 (run-3-levers): when the done-gate held this Stop open, the
+    block-severity floor drops from high-only to medium+, since a finished
+    one-shot session has no later PostToolUse to inject a medium finding
+    into."""
+
+    def test_medium_does_not_block_when_not_gated(self):
+        # gated defaults to False -> byte-identical to today's behavior
+        self.assertIsNone(decide(stop_event(), [suggestion(severity="medium")], {}, NOW))
+        self.assertIsNone(
+            decide(stop_event(), [suggestion(severity="medium")], {}, NOW, gated=False))
+
+    def test_medium_blocks_once_when_gated(self):
+        rows = [suggestion(severity="medium")]
+        ledger = {}
+        out = decide(stop_event(), rows, ledger, NOW, gated=True)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("a.py:3", out["reason"])
+        # second identical Stop does not re-block (once-each ledger)
+        self.assertIsNone(decide(stop_event(), rows, ledger, NOW, gated=True))
+
+    def test_gated_still_respects_stop_hook_active(self):
+        out = decide(stop_event(active=True), [suggestion(severity="medium")], {}, NOW,
+                     gated=True)
+        self.assertIsNone(out)
+
+    def test_high_blocks_when_gated_false(self):
+        out = decide(stop_event(), [suggestion(severity="high")], {}, NOW, gated=False)
+        self.assertEqual(out["decision"], "block")
+
+    def test_high_blocks_when_gated_true(self):
+        out = decide(stop_event(), [suggestion(severity="high")], {}, NOW, gated=True)
+        self.assertEqual(out["decision"], "block")
+
+
 class TestSessionScopedDelivery(unittest.TestCase):
     """Task 2: a finding tagged with the session that produced it must not
     leak into an unrelated session's context/block channel."""
@@ -881,6 +916,58 @@ class TestDoneGateWait(unittest.TestCase):
             res = subprocess.run([sys.executable, str(PEER_HOOK)], input=json.dumps(ev),
                                  capture_output=True, text=True, timeout=30, env=env)
             self.assertEqual((res.returncode, res.stdout), (0, ""))
+
+    def test_gate_wait_threads_gated_true_medium_blocks(self):
+        """Integration (Task 1, run-3-levers): a gate wait was actually
+        performed for this Stop (gate resolved on, something pending), and a
+        medium-severity finding is present for the session -- the Stop
+        response must block it, since a finished session has no later
+        PostToolUse to deliver it through."""
+        import hooks.peer_hook as peer_hook
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text(
+                json.dumps(suggestion(severity="medium", session="sess-gate")) + "\n")
+            diff_line = self._diff_line()
+            (cc / "observations.ndjsonl").write_text(diff_line)
+            (cc / "critic-state.json").write_text(
+                json.dumps({"offset": 0, "committed_offset": 0}))
+
+            def catch_up(_seconds):
+                (cc / "critic-state.json").write_text(
+                    json.dumps({"offset": len(diff_line), "committed_offset": len(diff_line)}))
+
+            with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "10"}), \
+                 mock.patch.object(peer_hook.time, "sleep", side_effect=catch_up):
+                out = peer_hook.run(self._stop_event(td))
+
+            self.assertIsNotNone(out)
+            data = json.loads(out)
+            self.assertEqual(data["decision"], "block")
+            self.assertIn("bug here", data["reason"])
+
+    def test_gate_off_medium_does_not_block(self):
+        """Same medium finding, but the gate never resolves on (unset env) --
+        no wait was performed, so gated must be False and the medium finding
+        must NOT block Stop (today's unchanged behavior)."""
+        import hooks.peer_hook as peer_hook
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text(
+                json.dumps(suggestion(severity="medium", session="sess-gate")) + "\n")
+            (cc / "observations.ndjsonl").write_text(self._diff_line())
+            (cc / "critic-state.json").write_text(json.dumps({"offset": 0, "committed_offset": 0}))
+            env = dict(os.environ)
+            env.pop("COUNCIL_GATE_SECONDS", None)
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch.object(peer_hook.time, "sleep") as sleep_mock:
+                out = peer_hook.run(self._stop_event(td))
+            sleep_mock.assert_not_called()
+            self.assertIsNone(out)
 
     def test_gate_wait_does_not_hold_lock_across_sleep(self):
         """Review finding 1 (the wedge): delivered.lock is shared by every

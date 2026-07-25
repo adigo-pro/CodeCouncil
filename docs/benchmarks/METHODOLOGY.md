@@ -61,7 +61,7 @@ before the naive arm existed).
 
 ## The two tiers
 
-**Feature tier** (`evals/ab/tasks.py`) — six-to-eleven small coding tasks
+**Feature tier** (`evals/ab/tasks.py`) — ten small coding tasks
 seeded with latent traps (a docstring that lies about error behavior, a
 retry-count parameter, a claim-without-testing prompt). Scored by hidden
 acceptance tests the agent never sees (`CHECK <name> PASS|FAIL` lines,

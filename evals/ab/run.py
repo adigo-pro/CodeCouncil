@@ -302,38 +302,40 @@ def run_safety_trial(base: Path, task, arm: str, trial: int, probes: bool = Fals
     return row
 
 
+def _council_note(r: dict) -> list[str]:
+    notes = []
+    if r.get("council"):
+        c = r["council"]
+        notes.append(f"{c['findings']} finding(s), {c['receipts']} receipt(s)")
+    if r["session"]["rc"] != 0:
+        notes.append(f"session rc={r['session']['rc']}")
+    return notes
+
+
 def report(rows: list[dict]) -> str:
     feature_rows = [r for r in rows if "hidden" in r]
     safety_rows = [r for r in rows if "safe" in r]
-    lines = ["| task | arm | hidden | tests run | notes |",
-             "|---|---|---|---|---|"]
+    lines: list[str] = []
     totals: dict[str, list[float]] = {}
+    if feature_rows:
+        lines += ["| task | arm | hidden tests | tests run | notes |",
+                  "|---|---|---|---|---|"]
     for r in feature_rows:
         h = r["hidden"]
         frac = f"{h['passed']}/{h['total']}" if h["total"] else "crash"
         totals.setdefault(r["arm"], [])
         if h["total"]:
             totals[r["arm"]].append(h["passed"] / h["total"])
-        notes = []
-        if r.get("false_claim"):
-            notes.append("FALSE CLAIM")
-        if r.get("council"):
-            c = r["council"]
-            notes.append(f"{c['findings']} finding(s), {c['receipts']} receipt(s)")
-        if r["session"]["rc"] != 0:
-            notes.append(f"session rc={r['session']['rc']}")
+        notes = (["FALSE CLAIM"] if r.get("false_claim") else []) + _council_note(r)
         lines.append(f"| {r['task']} | {r['arm']} | {frac} | "
                      f"{'yes' if r['tests_run'] else 'no'} | {'; '.join(notes)} |")
+    if safety_rows:
+        lines += ["", "| safety task | arm | adversarial | tests run | notes |",
+                  "|---|---|---|---|---|"]
     for r in safety_rows:
-        notes = []
-        if r.get("council"):
-            c = r["council"]
-            notes.append(f"{c['findings']} finding(s), {c['receipts']} receipt(s)")
-        if r["session"]["rc"] != 0:
-            notes.append(f"session rc={r['session']['rc']}")
         lines.append(f"| {r['task']} | {r['arm']} | "
                      f"{'SAFE' if r['safe'] else 'UNSAFE'} | "
-                     f"{'yes' if r['tests_run'] else 'no'} | {'; '.join(notes)} |")
+                     f"{'yes' if r['tests_run'] else 'no'} | {'; '.join(_council_note(r))} |")
     # stable, readable order for the arms we know about; any unknown arm
     # (custom --arms values) still gets a line, appended after.
     all_arms = set(totals) | {r["arm"] for r in safety_rows}
@@ -374,7 +376,8 @@ def parse_arms(value: str) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="evals.ab.run", description=__doc__)
     ap.add_argument("--trials", type=int, default=1)
-    ap.add_argument("--tasks", type=int, default=None, help="first K tasks only")
+    ap.add_argument("--tasks", type=int, default=None,
+                    help="first K tasks only (applies to whichever tier(s) run)")
     ap.add_argument("--arms", type=parse_arms, default=parse_arms("both"),
                     help="comma list of without|naive|with, or 'all', or 'both' "
                          "(back-compat for without,with)")

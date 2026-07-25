@@ -59,7 +59,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pipx run ruff@0.15.22 check .
+      - run: pipx run --spec 'ruff==0.15.22' ruff check .
 
   installer:
     runs-on: ubuntu-latest

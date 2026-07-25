@@ -282,6 +282,39 @@ class TestRepoUrlSubstrate(unittest.TestCase):
         self.assertFalse(any(a[1] == "clone" for a in git_argvs))
 
 
+class TestMethodologyCommandsParse(unittest.TestCase):
+    """Task 6: docs/benchmarks/METHODOLOGY.md's reproduce commands must
+    parse via the real build_parser() — a documented flag that stops
+    existing should fail CI, not mislead a reader."""
+
+    def test_selftest_flag_parses(self):
+        args = ab_run.build_parser().parse_args(["--selftest"])
+        self.assertTrue(args.selftest)
+
+    def test_full_run_command_parses(self):
+        args = ab_run.build_parser().parse_args(
+            ["--tier", "both", "--arms", "all", "--trials", "4"])
+        self.assertEqual(args.tier, "both")
+        self.assertEqual(args.arms, ["without", "naive", "with"])
+        self.assertEqual(args.trials, 4)
+
+    def test_real_repo_run_command_parses(self):
+        args = ab_run.build_parser().parse_args([
+            "--tier", "feature", "--arms", "all", "--trials", "4",
+            "--repo-url",
+            "https://github.com/tiangolo/full-stack-fastapi-template@abc123",
+        ])
+        self.assertEqual(args.tier, "feature")
+        self.assertEqual(
+            args.repo_url,
+            ("https://github.com/tiangolo/full-stack-fastapi-template", "abc123"))
+
+    def test_rescore_module_is_importable(self):
+        # documented as `python3 -m evals.ab.rescore <run-dir>` — importing
+        # confirms the module still exists under that name.
+        from evals.ab import rescore  # noqa: F401
+
+
 class TestRepoUrlIgnoredBySafetyTier(unittest.TestCase):
     """Safety-tier trials always use their own per-task seed_files; a real
     repo has no bearing on a surgical single-function safety scenario, so

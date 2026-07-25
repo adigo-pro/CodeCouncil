@@ -193,11 +193,15 @@ here, and the critic reviews its builders):
   independent reviewers had approved.
 - Model bake-offs across 12 candidates, 7 frozen cases each, latency and
   format discipline measured: [docs/benchmarks/](docs/benchmarks/).
-- 577 tests (`python3 -m unittest discover -s tests`), CI on 3.10/3.12 +
+- 581 tests (`python3 -m unittest discover -s tests`), CI on 3.10/3.12 +
   UI build + lint + installer smoke test + bench-selftest (the A/B harness's
   safety scorers prove they discriminate good from bad, zero API spend,
   before anyone trusts a live run). Small-n caveat: the self-improvement
   curves are days old, not months. That's what running it grows.
+- The A/B harness's full method — arms, tiers, isolation, self-test gate,
+  limitations, ponytail attribution — is written up in
+  [docs/benchmarks/METHODOLOGY.md](docs/benchmarks/METHODOLOGY.md); no live
+  multi-session run has been published under it yet.
 
 ## Contributing
 

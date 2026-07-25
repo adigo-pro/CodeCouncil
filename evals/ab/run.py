@@ -17,6 +17,31 @@ in results.ndjsonl; a markdown report is printed and written at the end.
 --arms accepts a comma list of without|naive|with (e.g. "without,naive,with"),
 the alias "all" (-> without,naive,with), or the back-compat alias "both"
 (-> without,with, unchanged from before the naive arm existed).
+
+Contamination-proof arm isolation (credit: the ponytail benchmark project's
+most important finding). ponytail nearly published a false ~4% result
+because their SessionStart hook fired on EVERY arm, including the baseline
+that was supposed to be untreated — the "baseline" was secretly running the
+treatment. They caught it by passing `--setting-sources project,local` to
+the `claude` CLI, which excludes the user's global/user-level settings so
+each arm loads exactly the settings its arm intends. CodeCouncil's without/
+naive arms never call install_hooks and spawn no daemons, so they're
+isolated at the daemon level — but before this fix, run_session invoked
+`claude -p` with no --setting-sources at all, meaning it would inherit
+whatever is in the *user's* global `~/.claude/settings.json`. On a
+maintainer's machine that has council hooks installed globally (a live
+possibility here, since CodeCouncil installs its own hooks into repos it
+watches), that would silently contaminate the without/naive arms exactly the
+way ponytail's baseline was contaminated. Fix, applied uniformly to every
+arm including 'with': every claude invocation in run_session passes
+`--setting-sources project,local` (confirmed via `claude --help`, which
+lists the accepted values as user, project, local). This excludes 'user'
+(global) settings everywhere, so no global hook can ever reach a benchmark
+session. The 'with' arm still needs 'project' because that's where
+hooks.install writes its repo-local .claude/settings.json — its treatment
+is that project-local install plus the observer/critic daemons, never a
+global setting, so applying the same flag to it costs nothing and keeps the
+rule uniform (one flag, always on, no per-arm branching to get wrong).
 """
 
 from __future__ import annotations
@@ -51,6 +76,13 @@ NAIVE_REVIEW_PROMPT = (
 
 ARMS_ALL = ["without", "naive", "with"]
 _VALID_ARMS = set(ARMS_ALL)
+
+# Contamination guard (see module docstring: the ponytail lesson). Applied to
+# EVERY arm's claude invocation, unconditionally — excludes 'user' (global)
+# settings so a council hook in the maintainer's ~/.claude/settings.json can
+# never reach a benchmark session. 'project' stays included because the
+# 'with' arm's installed hooks live in the repo-local .claude/settings.json.
+ISOLATION_SETTING_SOURCES = "project,local"
 
 
 def seed_repo(repo: Path, seed_files: dict[str, str] = SEED_FILES) -> None:
@@ -89,7 +121,8 @@ def start_council(repo: Path, probes: bool = False) -> list[subprocess.Popen]:
 
 def run_session(repo: Path, instruction: str, append: str | None = None) -> dict:
     argv = ["claude", "-p", instruction, "--permission-mode", "acceptEdits",
-            "--allowedTools", "Edit", "Write", "Bash"]
+            "--allowedTools", "Edit", "Write", "Bash",
+            "--setting-sources", ISOLATION_SETTING_SOURCES]
     if append:
         argv += ["--append-system-prompt", append]
     t0 = time.time()

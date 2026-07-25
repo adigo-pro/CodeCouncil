@@ -1,5 +1,7 @@
 """A/B eval harness: the pure scoring pieces."""
 
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -128,6 +130,72 @@ class TestNaiveArm(unittest.TestCase):
         popen_count, argv = self._run_trial("without")
         self.assertEqual(popen_count, 0)
         self.assertNotIn("--append-system-prompt", argv)
+
+
+class TestSettingSourcesIsolation(unittest.TestCase):
+    """Task 3: every claude invocation excludes global/user Claude settings so
+    a council hook sitting in ~/.claude/settings.json can never reach a
+    benchmark session, regardless of arm (the ponytail contamination
+    lesson — see run.py's module docstring)."""
+
+    def test_run_session_passes_isolation_flag(self):
+        with mock.patch.object(ab_run, "sh") as sh_mock:
+            sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            ab_run.run_session(Path("/tmp/repo"), "do it.")
+        argv = sh_mock.call_args.args[0]
+        self.assertIn("--setting-sources", argv)
+        sources = argv[argv.index("--setting-sources") + 1].split(",")
+        self.assertNotIn("user", sources)
+        self.assertNotIn("global", sources)
+
+    def test_with_arm_session_still_loads_project_settings(self):
+        # The 'with' arm's treatment is the installed project hooks + daemons
+        # (start_council -> install_hooks writes .claude/settings.json in the
+        # repo), so its claude invocation must still load 'project'.
+        with mock.patch.object(ab_run, "sh") as sh_mock:
+            sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            ab_run.run_session(Path("/tmp/repo"), "do it.")
+        argv = sh_mock.call_args.args[0]
+        sources = argv[argv.index("--setting-sources") + 1].split(",")
+        self.assertIn("project", sources)
+
+    def test_isolated_arm_excludes_planted_global_marker_hook(self):
+        """Integration-flavored: plant a marker hook in a fake global settings
+        dir (simulating a maintainer's machine with council hooks installed
+        globally), run a 'without'-arm trial, and assert the constructed
+        claude argv's --setting-sources would exclude that global hook. This
+        is exactly the ponytail failure mode: a SessionStart hook reachable
+        from every arm including the untreated baseline."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp) / "fake-home"
+            claude_dir = fake_home / ".claude"
+            claude_dir.mkdir(parents=True)
+            (claude_dir / "settings.json").write_text(
+                json.dumps({"hooks": {"SessionStart": [{"hooks": [
+                    {"type": "command", "command": "echo CONTAMINATION_MARKER"}
+                ]}]}}),
+                encoding="utf-8")
+
+            base = Path(tmp) / "base"
+            with mock.patch.object(ab_run, "install_hooks"), \
+                 mock.patch.object(ab_run.subprocess, "Popen"), \
+                 mock.patch.object(ab_run, "sh") as sh_mock, \
+                 mock.patch.object(ab_run.score, "run_hidden_test",
+                                    return_value={"passed": 0, "total": 0, "all_pass": False,
+                                                  "checks": {}, "crashed": False, "output": ""}), \
+                 mock.patch.object(ab_run.score, "git_facts",
+                                    return_value={"commits": 0, "last_subject": ""}), \
+                 mock.patch.object(ab_run, "find_project_dir", return_value=None), \
+                 mock.patch.dict(os.environ, {"HOME": str(fake_home)}):
+                sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+                ab_run.run_trial(base, "task", "clean", "do the thing. Commit.",
+                                 "CHECK x PASS", "without", 1)
+            claude_calls = [c for c in sh_mock.call_args_list if c.args[0][0] == "claude"]
+            self.assertEqual(len(claude_calls), 1)
+            argv = claude_calls[0].args[0]
+            sources = argv[argv.index("--setting-sources") + 1].split(",")
+            self.assertNotIn("user", sources)
+            self.assertNotIn("global", sources)
 
 
 class TestReportThreeArms(unittest.TestCase):

@@ -42,7 +42,7 @@ def seed_repo(repo: Path) -> None:
     sh(["git", "commit", "-qm", "seed demoapp"], cwd=repo)
 
 
-def start_council(repo: Path) -> list[subprocess.Popen]:
+def start_council(repo: Path, probes: bool = False) -> list[subprocess.Popen]:
     install_hooks(repo)
     cc = repo / ".codecouncil"
     cc.mkdir(exist_ok=True)
@@ -52,8 +52,14 @@ def start_council(repo: Path) -> list[subprocess.Popen]:
         return subprocess.Popen([sys.executable, "-u", "-m", mod, str(repo), *flags],
                                 cwd=REPO_ROOT, stdout=log, stderr=log)
 
+    # eval-profile timing: round 1's --interval 10 --turn-spacing 20 left the
+    # critic too slow relative to these (short) sessions to ever get a turn
+    # in; tightened so the critic actually gets a look before the session ends.
+    critic_flags = ["--interval", "5", "--turn-spacing", "10"]
+    if probes:
+        critic_flags.append("--probes")
     return [spawn("observer", "--wait"),
-            spawn("critic", "--interval", "10", "--turn-spacing", "20")]
+            spawn("critic", *critic_flags)]
 
 
 def run_session(repo: Path, instruction: str) -> dict:
@@ -70,10 +76,10 @@ def run_session(repo: Path, instruction: str) -> dict:
 
 
 def run_trial(base: Path, name: str, category: str, instruction: str,
-              hidden: str, arm: str, trial: int) -> dict:
+              hidden: str, arm: str, trial: int, probes: bool = False) -> dict:
     repo = base / f"{name}-{arm}-t{trial}"
     seed_repo(repo)
-    daemons = start_council(repo) if arm == "with" else []
+    daemons = start_council(repo, probes=probes) if arm == "with" else []
     if daemons:
         time.sleep(3)
     try:
@@ -128,13 +134,20 @@ def report(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="evals.ab.run", description=__doc__)
     ap.add_argument("--trials", type=int, default=1)
     ap.add_argument("--tasks", type=int, default=None, help="first K tasks only")
     ap.add_argument("--arms", choices=["both", "with", "without"], default="both")
     ap.add_argument("--out", type=Path, default=None)
-    args = ap.parse_args(argv)
+    ap.add_argument("--probes", action="store_true",
+                    help="enable critic property probes on the with-council arm "
+                         "(default off)")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     tasks = TASKS[:args.tasks] if args.tasks else TASKS
     arms = ["without", "with"] if args.arms == "both" else [args.arms]
@@ -154,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[{done}/{n_total}] {name} · {arm} · trial {trial} …",
                       flush=True)
                 row = run_trial(base, name, category, instruction, hidden,
-                                arm, trial)
+                                arm, trial, probes=args.probes)
                 rows.append(row)
                 with results.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(row) + "\n")

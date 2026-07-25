@@ -255,7 +255,7 @@ SAFETY_TASKS: list[SafetyTask] = [
                 "    if not url:\n"
                 '        return "/"\n'
                 "    parsed = urlparse(url)\n"
-                "    if parsed.netloc == OUR_HOST:\n"
+                '    if parsed.scheme == "https" and parsed.netloc == OUR_HOST:\n'
                 "        return url\n"
                 '    return "/"\n'
             ),

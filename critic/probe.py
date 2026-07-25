@@ -32,6 +32,7 @@ actually there.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import shutil
 import subprocess
@@ -179,14 +180,17 @@ def build_prompt(candidate: dict, source: str, module_name: str) -> str:
 _FENCE_RE = re.compile(r"^```[a-zA-Z0-9_-]*\s*\n(.*)\n```\s*$", re.DOTALL)
 
 
-def _strip_fence(script: str) -> str:
+def strip_fence(script: str) -> str:
     """Observed live: despite the prompt explicitly saying "no markdown
     fences", the model still wraps probes in ```python ... ``` often enough
     to matter -- a fenced script is a SyntaxError as a .py file, which would
     misclassify a genuine divergence as a broken probe (the opposite of
     precision-first: it would SILENCE a real catch, not manufacture a false
     one). Defensive, not load-bearing for anything else: a script with no
-    fence passes through unchanged."""
+    fence passes through unchanged.
+
+    Shared with critic/verify.py's script-based verification -- one fence
+    convention, one place that strips it."""
     m = _FENCE_RE.match(script.strip())
     return m.group(1) if m else script
 
@@ -196,8 +200,29 @@ def _parse_probes(raw: str) -> list[str]:
     (no marker at all, or only empty bodies) yield an empty list -- callers
     treat that as "no finding", never as an error."""
     parts = _PROBE_MARKER_RE.split(raw)
-    scripts = [_strip_fence(p.strip("\n").strip()) for p in parts[1:]]
+    scripts = [strip_fence(p.strip("\n").strip()) for p in parts[1:]]
     return [s for s in scripts if s][:MAX_PROBES_PER_FUNC]
+
+
+def run_script(staging: Path, script_src: str, timeout: int,
+               filename: str = "script.py") -> subprocess.CompletedProcess:
+    """Write `script_src` to `filename` in `staging` and execute it for
+    real: python3, cwd=staging, PYTHONPATH=staging (so `import <module>`
+    finds whatever was staged alongside it), capturing stdout/stderr as
+    text. The one execution primitive shared by probe.py's probe scripts
+    and verify.py's script-based verification (Task: script-verification --
+    the model writes a script, the harness executes it instead of relying
+    on tool calls the pi/NVIDIA backend sometimes emits as inert text).
+
+    Raises subprocess.TimeoutExpired / OSError -- callers decide how to
+    classify that; neither probe nor verify treats a crashed harness as a
+    finding."""
+    script_path = staging / filename
+    script_path.write_text(script_src, encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(staging)}
+    return subprocess.run(
+        ["python3", str(script_path)], capture_output=True, text=True,
+        timeout=timeout, cwd=str(staging), env=env)
 
 
 def _execute_probe(staging: Path, probe_src: str) -> dict:
@@ -205,12 +230,8 @@ def _execute_probe(staging: Path, probe_src: str) -> dict:
     happened. A DIVERGES/CONSISTENT line is the script's own verdict on
     itself; anything else (crash, timeout, no verdict line at all) is
     "error" -- a broken probe proves nothing about the code under test."""
-    script_path = staging / "probe_script.py"
-    script_path.write_text(probe_src, encoding="utf-8")
     try:
-        res = subprocess.run(
-            ["python3", str(script_path)], capture_output=True, text=True,
-            timeout=PROBE_TIMEOUT, cwd=str(staging))
+        res = run_script(staging, probe_src, PROBE_TIMEOUT, filename="probe_script.py")
     except subprocess.TimeoutExpired:
         return {"status": "error", "note": "probe timed out"}
     except OSError as e:

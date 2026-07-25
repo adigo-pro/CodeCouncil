@@ -4,118 +4,83 @@ A suggestion that arrives with 'VERIFIED: called safe_divide(1, 0), got
 ZeroDivisionError' is a different product from a plausible guess — and a
 REFUTED finding never reaches the developer at all.
 
-The flagged file is staged into a throwaway directory and a tool-enabled pi
-turn (read + bash) writes and runs a minimal repro there.
+The flagged file is staged into a throwaway directory and a NO-TOOLS pi turn
+is asked to write ONE self-contained Python script that reproduces the
+claimed issue (or demonstrates it's false). The harness -- not the model --
+then executes that script for real against the staged file. This mirrors
+critic/probe.py's approach (script + shared execution primitive), and
+replaces an earlier tool-enabled turn (read+bash) that asked the model to
+run its own repro and report back a status line: the NVIDIA/pi backend
+frequently emitted those tool calls as literal, never-executed text, which
+made verification land "inconclusive" and withheld true findings. A script
+the harness executes itself has no such failure mode.
 """
 
 from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
 from core.redact import redact
 
 from . import agent
+from .probe import run_script, strip_fence
 
-# labels are about the FINDING, phrased so they cannot be read as being about
-# the code's claim (a real 'refuted' once suppressed a true finding)
-STATUSES = {
-    "CONFIRMED": "verified", "FALSE-ALARM": "refuted", "INCONCLUSIVE": "inconclusive",
-    "VERIFIED": "verified", "REFUTED": "refuted",  # legacy labels still parse
-}
-# Two accepted shapes for a status line: "[LABEL] <note>" (brackets — the
-# separator after the bracket is optional) or "LABEL: <note>" (bare label —
-# here the "[:—–-]" separator is REQUIRED, or a sentence like "Confirmed by
-# reading the file, this is fine" would false-positive as a status line).
-# Observed live: the verifier model replied "[CONFIRMED] ..." with no colon
-# at all, which the old colon-only regex missed — a genuinely confirmed
-# finding was stored "inconclusive".
-_LINE_RE = re.compile(
-    r"^(?:\[(CONFIRMED|FALSE-ALARM|INCONCLUSIVE|VERIFIED|REFUTED)\]"
-    r"|(CONFIRMED|FALSE-ALARM|INCONCLUSIVE|VERIFIED|REFUTED)\s*[:—–-])\s*(.+)$",
-    re.MULTILINE | re.IGNORECASE)
+VERIFY_EXEC_TIMEOUT = 60  # seconds -- a hanging verification script must never wedge a beat
 
-# A verified finding is delivered to a coding AGENT, not a human — a plain
-# repro command it can run itself is worth more than another sentence of
-# prose. Same bracket-tolerant two-form shape as _LINE_RE above: "[REPRO]
-# <cmd>" (bracket, no separator required) or "REPRO: <cmd>" (bare label,
-# separator required so ordinary prose mentioning "repro" doesn't match).
-_REPRO_RE = re.compile(
-    r"^(?:\[REPRO\]|REPRO\s*[:—–-])\s*(.+)$",
-    re.MULTILINE | re.IGNORECASE)
+# The repro delivered to a coding agent is now the executed script itself
+# (previously a single shell command) -- long enough to need the same
+# "… [N chars total]" capping discipline as every other prompt/finding sink
+# in this repo (observer/transcript.py, observer/gitwatch.py, critic/prompt.py).
+REPRO_MAX_CHARS = 2000
 
-# Delivered inline in hook-injected text (hooks/logic.py's _describe) — kept
-# short for the same reason the status note is capped, using the same
-# "… [N chars total]" marker as the rest of the codebase (observer/gitwatch.py,
-# observer/transcript.py, critic/prompt.py).
-REPRO_MAX_CHARS = 200
-
-VERIFY_TOOLS = "read,bash,write,ls"
-
-# The repro command is model-authored, built from a turn that read semi-
-# trusted file content (the flagged file itself), and is delivered to a
-# coding agent as something it will likely run verbatim in the real repo
-# (hooks/logic.py's "[suggested repro ...]" text). safe_repro() is a coarse
-# allowlist, not a sandbox: it only screens out the shapes that let one
-# command smuggle a second (pipes, substitution, redirection, chaining) and
-# restricts the first token to known-benign dev-tool invocations. Anything
-# it rejects is simply never delivered — see verify_finding below.
-REPRO_ALLOWED_PREFIXES = frozenset({
-    "python3", "python", "pytest", "node", "npm", "go", "cargo", "make",
-})
-REPRO_UNSAFE_SUBSTRINGS = ("|", ";", "&", "$(", "`", ">", "<", "&&", "\n")
-
-
-def safe_repro(cmd: str) -> bool:
-    """True only when `cmd` starts with an allowlisted dev-tool token AND
-    contains none of the shell metacharacters that could chain in a second
-    command."""
-    stripped = cmd.strip()
-    if not stripped:
-        return False
-    first_token = stripped.split()[0]
-    if first_token not in REPRO_ALLOWED_PREFIXES:
-        return False
-    return not any(bad in stripped for bad in REPRO_UNSAFE_SUBSTRINGS)
+# Exactly one marker line, matched anywhere in the executed script's stdout.
+# "First marker wins" for the note text (re.search finds the first match);
+# BOTH markers present is treated as a contradictory script, not a verdict.
+_CONFIRMED_RE = re.compile(r"^CONFIRMED:\s*(.+)$", re.MULTILINE)
+_REFUTED_RE = re.compile(r"^REFUTED:\s*(.+)$", re.MULTILINE)
 
 
 # Proof-by-exploit (Task 4): a plain SAST tool stops at "this pattern looks
 # dangerous". When the judge's confirmed finding traces back to one of these
 # mechanical screening signals (critic/screen.py's kind/cwe, linked by
 # screen.match_signal), the verification turn is told to DEMONSTRATE the
-# vulnerability class — not just re-read the code — before it may reply
-# CONFIRMED. Keep each addendum short (<=6 lines); module-level so the CWE
-# set is easy to extend alongside screen.py's _LINE_CHECKS.
+# vulnerability class in its script -- not just re-read the code -- before
+# it may print CONFIRMED. Keep each addendum short (<=6 lines); module-level
+# so the CWE set is easy to extend alongside screen.py's _LINE_CHECKS.
 EXPLOIT_ADDENDA: dict[str, str] = {
     "CWE-89": (
-        "SECURITY CLASS: SQL injection (CWE-89). You must DEMONSTRATE the "
-        "exploit — a repro that only re-reads the code is NOT verification.\n"
+        "SECURITY CLASS: SQL injection (CWE-89). Your script must "
+        "DEMONSTRATE the exploit — a script that only re-reads the code is "
+        "NOT verification.\n"
         "Craft an input that changes the query's STRUCTURE — e.g. `1 OR "
         "1=1` or a trailing `--` — and print the assembled query string so "
         "it visibly differs from the parameterized intent."
     ),
     "CWE-78": (
-        "SECURITY CLASS: command injection (CWE-78). You must DEMONSTRATE "
-        "the exploit — a repro that only re-reads the code is NOT "
-        "verification.\nCraft an input with a shell metacharacter — e.g. "
-        "`; touch /tmp/pwned` or `$(id)` — and show it runs as a SEPARATE "
-        "command beyond the one the code intended."
+        "SECURITY CLASS: command injection (CWE-78). Your script must "
+        "DEMONSTRATE the exploit — a script that only re-reads the code is "
+        "NOT verification.\nCraft an input with a shell metacharacter — "
+        "e.g. `; touch /tmp/pwned` or `$(id)` — and show it runs as a "
+        "SEPARATE command beyond the one the code intended."
     ),
     "CWE-95": (
-        "SECURITY CLASS: code injection via eval/exec (CWE-95). You must "
-        "DEMONSTRATE the exploit — a repro that only re-reads the code is "
-        "NOT verification.\nCraft an input that executes attacker code "
-        "through the eval/exec call — e.g. `__import__('os').system('id')` "
-        "— and show it runs beyond the intended expression."
+        "SECURITY CLASS: code injection via eval/exec (CWE-95). Your "
+        "script must DEMONSTRATE the exploit — a script that only re-reads "
+        "the code is NOT verification.\nCraft an input that executes "
+        "attacker code through the eval/exec call — e.g. "
+        "`__import__('os').system('id')` — and show it runs beyond the "
+        "intended expression."
     ),
     "CWE-502": (
-        "SECURITY CLASS: unsafe deserialization (CWE-502). You must "
-        "DEMONSTRATE the exploit — a repro that only re-reads the code is "
-        "NOT verification.\nCraft a malicious pickle/yaml/marshal payload "
-        "for the deserializer and show it executes attacker-controlled "
-        "behavior when loaded."
+        "SECURITY CLASS: unsafe deserialization (CWE-502). Your script "
+        "must DEMONSTRATE the exploit — a script that only re-reads the "
+        "code is NOT verification.\nCraft a malicious pickle/yaml/marshal "
+        "payload for the deserializer and show it executes "
+        "attacker-controlled behavior when loaded."
     ),
 }
 
@@ -127,13 +92,18 @@ def build_prompt(suggestion: dict, staged_path: str, screen_signal: dict | None 
         f"FINDING: [{suggestion['severity'].upper()}] {loc} — {suggestion['issue']}\n"
         f"Rationale: {suggestion.get('rationale', '')}\n\n"
         f"The file under review is at: {staged_path}\n\n"
-        "Write and RUN a minimal script that tests this finding against that "
-        "file, then reply with exactly one line:\n"
-        "CONFIRMED: <observed proof> — the problem is REAL (you reproduced the bad behavior)\n"
-        "FALSE-ALARM: <why> — the code actually behaves correctly; the finding is wrong\n"
-        "INCONCLUSIVE: <why> — cannot be tested in isolation\n\n"
-        "If CONFIRMED, add a second line:\n"
-        "REPRO: <one shell command, runnable from the repo root, that demonstrates the problem>"
+        "Write ONE self-contained Python script that tests this finding "
+        "against that file. Reply with ONLY the script -- no explanation, "
+        "no status line, just code (a single ```python fenced block or "
+        "bare source, either is fine). Do not use any tool -- the script "
+        "will be executed FOR you, with the staged file present and the "
+        "script's own directory as its working directory.\n\n"
+        "The script must print exactly one final line:\n"
+        "CONFIRMED: <one-line evidence> -- if running it reproduces the "
+        "claimed problem (the bad behavior actually happens)\n"
+        "REFUTED: <one-line evidence> -- if running it demonstrates the "
+        "finding is wrong (the code behaves correctly)\n"
+        "If the finding cannot be tested this way, print neither line."
     )
     addendum = EXPLOIT_ADDENDA.get((screen_signal or {}).get("cwe", ""))
     if addendum:
@@ -151,28 +121,34 @@ def localize_repro(repro: str, staging: Path) -> str:
     """Best-effort: the verifier only ever sees the throwaway staging copy of
     the file (an absolute tempdir path meaningless outside that sandbox), so
     rewrite any mention of the staging dir back to a repo-root-relative '.'
-    — the repro command a receiving agent copy-pastes must run from the
-    repo it's actually working in."""
+    — a script that embeds the absolute path it was told about should read
+    naturally once shown to whoever's looking at the actual repo."""
     return repro.replace(str(staging), ".")
 
 
-def parse(raw: str) -> dict:
-    stripped = raw.strip()
-    matches = _LINE_RE.findall(stripped)
-    if matches:
-        bracket_label, colon_label, note = matches[-1]
-        status = (bracket_label or colon_label).upper()
-        result = {"status": STATUSES[status], "note": redact(note.strip())[:300]}
-    else:
-        result = {"status": "inconclusive", "note": f"unparseable verify reply: {raw[:200]}"}
-    # A repro is only ever meaningful (and only ever delivered) for a
-    # confirmed finding — dropping it here for refuted/inconclusive replies
-    # means no dead repro key ever lands in those rows.
-    if result["status"] == "verified":
-        repro_matches = _REPRO_RE.findall(stripped)
-        if repro_matches:
-            result["repro"] = _cap(redact(repro_matches[-1].strip()), REPRO_MAX_CHARS)
-    return result
+def _classify(stdout: str, stderr: str) -> dict:
+    """Classify one executed verification script's captured output. A
+    CONFIRMED/REFUTED line is the script's OWN verdict on itself (it ran for
+    real, against the staged file) -- anything else (crash, no verdict line,
+    both lines at once) can never become a verified/refuted finding; a
+    broken or contradictory script proves nothing."""
+    confirmed = _CONFIRMED_RE.search(stdout)
+    refuted = _REFUTED_RE.search(stdout)
+    if confirmed and refuted:
+        return {"status": "inconclusive",
+                "note": "verification script printed both CONFIRMED and REFUTED"}
+    if confirmed:
+        return {"status": "verified", "note": redact(confirmed.group(1).strip())[:300]}
+    if refuted:
+        return {"status": "refuted", "note": redact(refuted.group(1).strip())[:300]}
+    diag = (stderr or stdout).strip()
+    note = "verification script printed no CONFIRMED/REFUTED marker"
+    if diag:
+        # a traceback's most useful line (the exception itself) is its
+        # LAST line, so truncate from the front when it's long rather than
+        # the back -- the opposite of this codebase's usual head-cap.
+        note += f": {diag if len(diag) <= 200 else '…' + diag[-200:]}"
+    return {"status": "inconclusive", "note": note}
 
 
 def verify_finding(repo: Path, suggestion: dict, system: str | None = None,
@@ -194,19 +170,24 @@ def verify_finding(repo: Path, suggestion: dict, system: str | None = None,
     try:
         staged = staging / local.name
         shutil.copyfile(local, staged)
-        reply = agent.ask(build_prompt(suggestion, str(staged), screen_signal), system=system,
-                          tools=VERIFY_TOOLS, cwd=str(staging))
-    except agent.AgentError as e:
-        return {"status": "error", "note": str(e)[:200]}
+        try:
+            reply = agent.ask(build_prompt(suggestion, str(staged), screen_signal), system=system)
+        except agent.AgentError as e:
+            return {"status": "error", "note": str(e)[:200]}
+        script = strip_fence(reply.strip())
+        if not script:
+            return {"status": "inconclusive", "note": "empty verify reply"}
+        try:
+            res = run_script(staging, script, VERIFY_EXEC_TIMEOUT, filename="verify_script.py")
+        except subprocess.TimeoutExpired:
+            return {"status": "inconclusive",
+                    "note": f"verification script timed out after {VERIFY_EXEC_TIMEOUT}s"}
+        except OSError as e:
+            return {"status": "inconclusive",
+                    "note": f"verification script failed to run: {str(e)[:150]}"}
+        result = _classify(res.stdout or "", res.stderr or "")
+        if result["status"] == "verified":
+            result["repro"] = _cap(redact(localize_repro(script, staging)), REPRO_MAX_CHARS)
+        return result
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-    result = parse(reply)
-    if "repro" in result:
-        result["repro"] = localize_repro(result["repro"], staging)
-        # The repro is model-authored from semi-trusted file content and is
-        # delivered to a coding agent as something worth running verbatim
-        # (hooks/logic.py) — an unsafe shape (pipes, substitution, chaining)
-        # is dropped here rather than shipped. The finding + note survive.
-        if not safe_repro(result["repro"]):
-            del result["repro"]
-    return result

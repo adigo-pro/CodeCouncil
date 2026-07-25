@@ -483,14 +483,18 @@ class TestScreenSignalThreading(unittest.TestCase):
     demonstrate the vulnerability class, not just re-read the code."""
 
     def _stub(self, repo: Path, judge_reply: str) -> Path:
+        # Task: script-based verification -- a TASK: VERIFY reply is now a
+        # script the harness executes, not a status line it trusts, so the
+        # stub must hand back a valid Python print() statement rather than
+        # echoing "CONFIRMED: ..." as bare (unparseable) text.
         stub = repo / "stub.sh"
         stub.write_text(
             "#!/bin/sh\n"
             "if grep -q 'TASK: VERIFY' \"$1\"; then\n"
             "  if grep -q 'DEMONSTRATE' \"$1\"; then\n"
-            "    echo 'CONFIRMED: exploit demonstrated, saw addendum'\n"
+            "    printf 'print(\"CONFIRMED: exploit demonstrated, saw addendum\")'\n"
             "  else\n"
-            "    echo 'CONFIRMED: no addendum seen'\n"
+            "    printf 'print(\"CONFIRMED: no addendum seen\")'\n"
             "  fi\n"
             "else\n"
             f"  cat <<'PROMPTEOF'\n{judge_reply}\nPROMPTEOF\n"

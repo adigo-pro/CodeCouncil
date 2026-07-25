@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from hooks import ledger as ledger_mod
 from hooks.install import install
-from hooks.logic import TTL_SECONDS, decide
+from hooks.logic import TTL_SECONDS, decide, gate_pending, resolve_gate_seconds
 
 PEER_HOOK = Path(__file__).resolve().parents[1] / "hooks" / "peer_hook.py"
 
@@ -639,6 +640,179 @@ class TestAttachTestIntegrityMalformed(unittest.TestCase):
             self.assertEqual(len(result), 1)
             self.assertEqual(result[0]["name"], "malformed.md")
             self.assertNotIn("test_integrity", result[0])
+
+
+class TestGatePending(unittest.TestCase):
+    """Task 1: pure truth table for whether the critic still has unjudged
+    material relative to the current observation log."""
+
+    def test_critic_behind_is_pending(self):
+        self.assertTrue(gate_pending(100, 50, False))
+
+    def test_critic_caught_up_not_pending(self):
+        self.assertFalse(gate_pending(100, 100, False))
+
+    def test_critic_offset_past_size_not_pending(self):
+        self.assertFalse(gate_pending(100, 150, False))
+
+    def test_inflight_batch_pending_even_when_offset_caught_up(self):
+        self.assertTrue(gate_pending(100, 100, True))
+
+    def test_zero_size_zero_offset_not_pending(self):
+        self.assertFalse(gate_pending(0, 0, False))
+
+
+class TestResolveGateSeconds(unittest.TestCase):
+    """Task 1: gate is opt-in and OFF by default; env wins over config; a
+    resolved value clamps to [1, 120]."""
+
+    def test_unset_is_off(self):
+        self.assertEqual(resolve_gate_seconds(None, None), 0)
+
+    def test_env_plain_value(self):
+        self.assertEqual(resolve_gate_seconds("30", None), 30)
+
+    def test_env_zero_is_off(self):
+        self.assertEqual(resolve_gate_seconds("0", None), 0)
+
+    def test_env_negative_is_off(self):
+        self.assertEqual(resolve_gate_seconds("-5", None), 0)
+
+    def test_env_clamped_to_max(self):
+        self.assertEqual(resolve_gate_seconds("999", None), 120)
+
+    def test_env_malformed_is_off(self):
+        self.assertEqual(resolve_gate_seconds("junk", None), 0)
+
+    def test_config_fallback_when_env_unset(self):
+        self.assertEqual(resolve_gate_seconds(None, 30), 30)
+
+    def test_env_beats_config(self):
+        self.assertEqual(resolve_gate_seconds("45", 99), 45)
+
+    def test_config_value_clamped_too(self):
+        self.assertEqual(resolve_gate_seconds(None, 999), 120)
+
+
+class TestDoneGateWait(unittest.TestCase):
+    """Task 1 integration: the Stop path can hold a "done" declaration open
+    while the critic catches up, so a finding that lands during the wait is
+    delivered in the same Stop response. Exercised in-process (not via the
+    subprocess helper used by TestFailOpen) so time.sleep can be monkeypatched
+    and the critic's on-disk state can be mutated mid-wait."""
+
+    def _stop_event(self, td, session_id="sess-gate"):
+        return json.dumps({"hook_event_name": "Stop", "cwd": td, "stop_hook_active": False,
+                           "session_id": session_id})
+
+    def test_gate_off_by_default_never_sleeps(self):
+        import hooks.peer_hook as peer_hook
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text("")
+            (cc / "observations.ndjsonl").write_text("x" * 50)
+            (cc / "critic-state.json").write_text(json.dumps({"offset": 10, "committed_offset": 0}))
+            env = dict(os.environ)
+            env.pop("COUNCIL_GATE_SECONDS", None)
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch.object(peer_hook.time, "sleep") as sleep_mock:
+                peer_hook.run(self._stop_event(td))
+            sleep_mock.assert_not_called()
+
+    def test_gate_waits_and_delivers_finding_that_lands_during_wait(self):
+        import hooks.peer_hook as peer_hook
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text("")
+            (cc / "observations.ndjsonl").write_text("x" * 100)
+            (cc / "critic-state.json").write_text(
+                json.dumps({"offset": 100, "committed_offset": 20}))
+
+            calls = {"n": 0}
+
+            def fake_sleep(_seconds):
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    # the critic catches up mid-wait AND a finding lands
+                    (cc / "critic-state.json").write_text(
+                        json.dumps({"offset": 100, "committed_offset": 100}))
+                    (cc / "suggestions.ndjsonl").write_text(json.dumps(suggestion()) + "\n")
+
+            with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "10"}), \
+                 mock.patch.object(peer_hook.time, "sleep", side_effect=fake_sleep):
+                out = peer_hook.run(self._stop_event(td))
+
+            self.assertEqual(calls["n"], 2)  # stopped polling once caught up
+            self.assertIsNotNone(out)
+            data = json.loads(out)
+            self.assertEqual(data["decision"], "block")
+            self.assertIn("bug here", data["reason"])
+
+    def test_gate_runs_at_most_once_per_session(self):
+        import hooks.peer_hook as peer_hook
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text("")
+            (cc / "observations.ndjsonl").write_text("x" * 100)
+            (cc / "critic-state.json").write_text(
+                json.dumps({"offset": 100, "committed_offset": 20}))
+
+            def catch_up(_seconds):
+                (cc / "critic-state.json").write_text(
+                    json.dumps({"offset": 100, "committed_offset": 100}))
+
+            with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "10"}), \
+                 mock.patch.object(peer_hook.time, "sleep", side_effect=catch_up) as sleep1:
+                peer_hook.run(self._stop_event(td, session_id="sess-once"))
+            self.assertEqual(sleep1.call_count, 1)
+
+            # new unjudged material appears again for the SAME session
+            (cc / "observations.ndjsonl").write_text("x" * 200)
+            (cc / "critic-state.json").write_text(
+                json.dumps({"offset": 100, "committed_offset": 100}))
+
+            with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "10"}), \
+                 mock.patch.object(peer_hook.time, "sleep") as sleep2:
+                peer_hook.run(self._stop_event(td, session_id="sess-once"))
+            sleep2.assert_not_called()
+
+    def test_gate_state_read_raising_still_fails_open(self):
+        import hooks.peer_hook as peer_hook
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text(json.dumps(suggestion()) + "\n")
+            (cc / "observations.ndjsonl").write_text("x" * 10)
+            with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "5"}), \
+                 mock.patch.object(peer_hook, "_read_critic_state",
+                                    side_effect=RuntimeError("boom")), \
+                 mock.patch.object(peer_hook.time, "sleep") as sleep_mock:
+                out = peer_hook.run(self._stop_event(td))
+            sleep_mock.assert_not_called()
+            # decide() still runs normally against the existing suggestion
+            self.assertIsNotNone(out)
+            data = json.loads(out)
+            self.assertEqual(data["decision"], "block")
+
+    def test_gate_end_to_end_via_subprocess_stays_fail_open_when_off(self):
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text("")
+            ev = {"hook_event_name": "Stop", "cwd": td, "stop_hook_active": False,
+                  "session_id": "sess-sub"}
+            env = dict(os.environ)
+            env.pop("COUNCIL_GATE_SECONDS", None)
+            res = subprocess.run([sys.executable, str(PEER_HOOK)], input=json.dumps(ev),
+                                 capture_output=True, text=True, timeout=30, env=env)
+            self.assertEqual((res.returncode, res.stdout), (0, ""))
 
 
 class TestInstall(unittest.TestCase):

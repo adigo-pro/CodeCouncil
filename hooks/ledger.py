@@ -2,13 +2,16 @@
 
 Shape: {"<suggestion-id>": {"context": <epoch>, "block": <epoch>}}
 
-Two keys are reserved for other kinds of delivery, each holding
-{"<receipt-filename>": <epoch>}: RECEIPTS_KEY tracks announced receipts,
-TEST_INTEGRITY_KEY tracks which receipt already blocked Stop once for a
-"weakened" test-integrity verdict (Task 2). Suggestion ids are always 12 hex
-chars (uuid4().hex[:12] in critic.main); "receipts" (8 chars) and
-"test_integrity" (14 chars) are not valid hex of those lengths, so neither
-can ever collide with a real suggestion id.
+Three keys are reserved for other kinds of delivery. RECEIPTS_KEY and
+TEST_INTEGRITY_KEY each hold {"<receipt-filename>": <epoch>}: RECEIPTS_KEY
+tracks announced receipts, TEST_INTEGRITY_KEY tracks which receipt already
+blocked Stop once for a "weakened" test-integrity verdict (Task 2). GATE_KEY
+holds {"<session-id>": <epoch>}: which sessions already spent their one
+done-gate wait (Task 1 — peer_hook.py polls at most once per session while
+Stop is held open for the critic to catch up). Suggestion ids are always 12
+hex chars (uuid4().hex[:12] in critic.main); "receipts" (8 chars),
+"test_integrity" (14 chars) and "gate" (4 chars) are not valid hex of those
+lengths, so none can ever collide with a real suggestion id.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from pathlib import Path
 
 RECEIPTS_KEY = "receipts"
 TEST_INTEGRITY_KEY = "test_integrity"
+GATE_KEY = "gate"
 
 
 def load(path: Path) -> dict:
@@ -55,3 +59,11 @@ def test_integrity_blocked(ledger: dict, filename: str) -> bool:
 
 def mark_test_integrity(ledger: dict, filename: str, now: float) -> None:
     ledger.setdefault(TEST_INTEGRITY_KEY, {})[filename] = now
+
+
+def gate_used(ledger: dict, session_key: str) -> bool:
+    return session_key in ledger.get(GATE_KEY, {})
+
+
+def mark_gate(ledger: dict, session_key: str, now: float) -> None:
+    ledger.setdefault(GATE_KEY, {})[session_key] = now

@@ -13,16 +13,18 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core.config import load_config
 from core.store import read_tail_rows as read_suggestions
 from critic.receipt import parse_test_integrity
 from hooks import ledger as ledger_mod
-from hooks.logic import decide
+from hooks.logic import decide, gate_pending, resolve_gate_seconds
 
 
 @contextlib.contextmanager
@@ -64,6 +66,71 @@ def _locked(lock_path: Path):
                 pass
 
 
+def _read_critic_state(path: Path) -> dict | None:
+    """Tolerant read of critic-state.json's persisted fields, mirroring the
+    tolerant parsing critic.main.load_state does (not imported directly:
+    peer_hook only shares small cross-loop utilities, per CLAUDE.md). Returns
+    None on anything short of a clean dict — missing file, unreadable, or
+    malformed JSON — so the done-gate's poll loop can treat that as "critic
+    state unknown" and stop waiting rather than guess at offsets."""
+    try:
+        if not path.exists():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
+    """Task 1 done-gate: optionally hold a Stop declaration open while the
+    critic catches up on material it hasn't judged yet, so a finding landing
+    in that window blocks like any other pending finding instead of being
+    missed by a session that finishes in under one judge cycle.
+
+    Off by default (COUNCIL_GATE_SECONDS env, or "gate_seconds" in the
+    user-level ~/.codecouncil/config.json — core.config is a small shared
+    cross-loop utility, unlike the watched repo's own .codecouncil/ that this
+    function otherwise reads). At most one wait per session (ledger key
+    "gate"). Any exception anywhere -> behave exactly as if the gate were
+    off; this function must never be the reason the hook fails to fail open.
+    """
+    try:
+        env_value = os.environ.get("COUNCIL_GATE_SECONDS")
+        config_value = load_config().get("gate_seconds")
+        gate_seconds = resolve_gate_seconds(env_value, config_value)
+        if gate_seconds <= 0:
+            return
+        session_key = event.get("session_id") or ""
+        ledger_path = cc / "delivered.json"
+        lock_path = cc / "delivered.lock"
+        obs_file = cc / "observations.ndjsonl"
+        state_path = cc / "critic-state.json"
+
+        def _pending() -> bool:
+            state = _read_critic_state(state_path)
+            if state is None:
+                return False  # unknown critic state -> treat as caught up
+            obs_size = obs_file.stat().st_size if obs_file.exists() else 0
+            committed = state.get("committed_offset", 0)
+            current = state.get("offset", 0)
+            return gate_pending(obs_size, committed, current > committed)
+
+        with _locked(lock_path):
+            ledger = ledger_mod.load(ledger_path)
+            if ledger_mod.gate_used(ledger, session_key):
+                return
+            if not _pending():
+                return
+            deadline = time.time() + gate_seconds
+            while _pending() and time.time() < deadline:
+                time.sleep(1)
+            ledger_mod.mark_gate(ledger, session_key, time.time())
+            ledger_mod.save(ledger_path, ledger)
+    except Exception:
+        return  # fail open: proceed exactly as if the gate were off
+
+
 def run(stdin_text: str) -> str | None:
     event = json.loads(stdin_text)
     cc = Path(event["cwd"]) / ".codecouncil"
@@ -77,6 +144,10 @@ def run(stdin_text: str) -> str | None:
                                     "session": event.get("session_id", "")}) + "\n")
         except OSError:
             pass
+        # done-gate (Task 1): optionally hold "done" open while the critic
+        # catches up — must run BEFORE the suggestions/receipts reads below
+        # so a finding that lands during the wait is delivered this turn.
+        _maybe_wait_for_critic(cc, event)
     receipts_dir = cc / "receipts"
     if not suggestions_file.exists() and not receipts_dir.is_dir():
         return None

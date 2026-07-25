@@ -31,6 +31,38 @@ MAX_CONTEXT_ITEMS = 3
 CONTEXT_SEVERITIES = {"medium", "high"}
 BLOCK_SEVERITIES = {"high"}
 
+# Done-gate (Task 1): a Stop declaration can optionally hold while the critic
+# catches up on material it hasn't judged yet, so a finding landing in that
+# window blocks like any other pending finding instead of being missed by a
+# session that finishes faster than one judge cycle. Off by default — see
+# resolve_gate_seconds. Both helpers are pure; peer_hook.py owns the actual
+# filesystem polling loop.
+GATE_SECONDS_MIN = 1
+GATE_SECONDS_MAX = 120
+
+
+def gate_pending(observations_size: int, critic_offset: int, inflight: bool) -> bool:
+    """True iff the critic has unjudged material: its durably-committed read
+    offset trails the observation log's current size, or a batch has been
+    read but not yet landed (inflight)."""
+    return critic_offset < observations_size or bool(inflight)
+
+
+def resolve_gate_seconds(env_value, config_value) -> int:
+    """0 (gate off) unless a positive int resolves from env_value (wins) or,
+    failing that, config_value. Malformed/unset -> 0. A resolved value is
+    clamped to [GATE_SECONDS_MIN, GATE_SECONDS_MAX] (e.g. "999" -> 120)."""
+    raw = env_value if env_value is not None else config_value
+    if raw is None:
+        return 0
+    try:
+        seconds = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    if seconds <= 0:
+        return 0
+    return min(seconds, GATE_SECONDS_MAX)
+
 
 def _age_ok(row: dict, now: float) -> bool:
     try:

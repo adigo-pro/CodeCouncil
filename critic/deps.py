@@ -73,7 +73,8 @@ def _within_one_edit(a: str, b: str) -> bool:
 
 
 def _nearest_known(name: str) -> str | None:
-    for known in _KNOWN:
+    # Iterate sorted to ensure deterministic evidence for reproducible receipts/prompts
+    for known in sorted(_KNOWN):
         if _within_one_edit(name, known):
             return known
     return None
@@ -97,6 +98,9 @@ def suspicious_imports(names: dict[str, str]) -> list[dict]:
     signals = []
     for name, path in names.items():
         if name in _KNOWN or name in sys.stdlib_module_names:
+            continue
+        # Don't flag as typo of external package if it's a typo of stdlib
+        if any(_within_one_edit(name, stdlib) for stdlib in sys.stdlib_module_names):
             continue
         known = _nearest_known(name)
         if known:

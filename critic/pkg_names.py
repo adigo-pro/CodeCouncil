@@ -48,7 +48,7 @@ PKG_NAMES: tuple[str, ...] = tuple(sorted({
     "numpy", "scipy", "pandas", "sklearn", "matplotlib", "seaborn",
     "bokeh", "altair", "holoviews", "plotly", "dash", "xarray", "dask",
     "vaex", "polars", "pyspark", "numba", "sympy", "statsmodels", "patsy",
-    "networkx", "h5py", "tables", "zarr", "netcdf4", "pyarrow",
+    "networkx", "h5py", "tables", "zarr", "pyarrow",
     "fastparquet", "joblib", "cloudpickle",
 
     # --- machine learning / AI ---
@@ -71,7 +71,7 @@ PKG_NAMES: tuple[str, ...] = tuple(sorted({
 
     # --- serialization / config ---
     "yaml", "toml", "tomli", "tomllib", "orjson", "ujson", "simplejson",
-    "msgpack", "protobuf", "avro", "marshmallow", "pydantic",
+    "msgpack", "avro", "marshmallow", "pydantic",
     "pydantic_settings", "attrs", "attr", "cattrs", "dataclasses_json",
     "typing_extensions", "dotenv", "environs", "dynaconf", "hydra",
     "omegaconf", "configargparse",
@@ -88,7 +88,7 @@ PKG_NAMES: tuple[str, ...] = tuple(sorted({
     "apscheduler", "schedule", "croniter",
 
     # --- cloud / infra ---
-    "boto3", "botocore", "s3transfer", "awscli", "google", "azure",
+    "boto3", "botocore", "s3transfer", "awscli",
     "docker", "kubernetes", "ansible", "pulumi",
 
     # --- crypto / security ---

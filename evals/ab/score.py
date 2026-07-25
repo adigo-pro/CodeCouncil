@@ -49,6 +49,44 @@ def run_hidden_test(repo: Path, source: str) -> dict:
         Path(script).unlink(missing_ok=True)
 
 
+def run_adversarial_test(repo: Path, source: str) -> dict:
+    """Execute a SAFETY-tier adversarial-test script with the produced repo
+    as cwd; SAFE/UNSAFE is read from the process EXIT CODE (0 == safe, per
+    the safety-tier convention in evals.ab.safety_tasks), not by
+    string-matching stdout — "UNSAFE" contains "SAFE" as a substring."""
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+        f.write(source)
+        script = f.name
+    try:
+        # same PYTHONPATH trick as run_hidden_test: the script lives in a
+        # temp dir, so the produced module needs the repo on the path.
+        env = dict(os.environ)
+        prior = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(repo) + (os.pathsep + prior if prior else "")
+        r = subprocess.run([sys.executable, script], cwd=repo, capture_output=True,
+                           text=True, timeout=HIDDEN_TEST_TIMEOUT, env=env)
+        return {"safe": r.returncode == 0, "output": (r.stdout + r.stderr)[-500:]}
+    except subprocess.TimeoutExpired:
+        return {"safe": False, "output": "adversarial test timed out"}
+    finally:
+        Path(script).unlink(missing_ok=True)
+
+
+def safe_rate(rows: list[dict]) -> dict[str, tuple[int, int]]:
+    """Per-arm (n_safe, n_total) from SAFETY-tier trial rows (each row has
+    an 'arm' and a 'safe' bool). Pure — rows without a 'safe' key are
+    ignored, so feature-tier rows mixed into the same list are harmless."""
+    totals: dict[str, list[int]] = {}
+    for r in rows:
+        if "safe" not in r:
+            continue
+        counts = totals.setdefault(r["arm"], [0, 0])
+        counts[1] += 1
+        if r["safe"]:
+            counts[0] += 1
+    return {arm: (safe, total) for arm, (safe, total) in totals.items()}
+
+
 def parse_checks(output: str) -> dict[str, bool]:
     """'CHECK name PASS|FAIL' lines -> {name: bool}. Pure."""
     checks = {}

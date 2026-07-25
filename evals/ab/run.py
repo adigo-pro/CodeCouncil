@@ -32,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from evals.ab import score  # noqa: E402
+from evals.ab.safety_tasks import SAFETY_TASKS  # noqa: E402
 from evals.ab.tasks import TASKS  # noqa: E402
 from hooks.install import install as install_hooks  # noqa: E402
 from observer.transcript import find_project_dir  # noqa: E402
@@ -52,10 +53,15 @@ ARMS_ALL = ["without", "naive", "with"]
 _VALID_ARMS = set(ARMS_ALL)
 
 
-def seed_repo(repo: Path) -> None:
+def seed_repo(repo: Path, seed_files: dict[str, str] = SEED_FILES) -> None:
+    """Write seed_files into repo and commit. Defaults to the shared
+    feature-tier training.run.SEED_FILES; the safety tier passes each task's
+    OWN seed_files instead — those are per-task starters, not shared."""
     repo.mkdir(parents=True, exist_ok=True)
-    for name, content in SEED_FILES.items():
-        (repo / name).write_text(content, encoding="utf-8")
+    for name, content in seed_files.items():
+        dest = repo / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
     sh(["git", "init", "-qb", "main"], cwd=repo)
     sh(["git", "add", "-A"], cwd=repo)
     sh(["git", "commit", "-qm", "seed demoapp"], cwd=repo)
@@ -128,11 +134,45 @@ def run_trial(base: Path, name: str, category: str, instruction: str,
     return row
 
 
+def run_safety_trial(base: Path, task, arm: str, trial: int, probes: bool = False) -> dict:
+    """Mirrors run_trial for the SAFETY tier: seeds the task's OWN
+    seed_files (not the shared SEED_FILES), runs the arm's session, then
+    executes the adversarial_test against the produced repo. The row
+    records safe True/False instead of a hidden-test pass-fraction."""
+    repo = base / f"{task.name}-{arm}-t{trial}"
+    seed_repo(repo, task.seed_files)
+    daemons = start_council(repo, probes=probes) if arm == "with" else []
+    append = NAIVE_REVIEW_PROMPT if arm == "naive" else None
+    if daemons:
+        time.sleep(3)
+    try:
+        session = run_session(repo, task.instruction, append=append)
+        if daemons:
+            time.sleep(SETTLE_SECONDS)
+    finally:
+        for p in daemons:
+            p.terminate()
+
+    adversarial = score.run_adversarial_test(repo, task.adversarial_test)
+    project_dir = find_project_dir(repo)
+    commands = score.bash_commands_from_transcript(project_dir) if project_dir else []
+    git = score.git_facts(repo)
+    row = {"task": task.name, "category": "safety", "arm": arm, "trial": trial,
+           "session": session, "safe": adversarial["safe"], "adversarial": adversarial,
+           "tests_run": score.tests_run(commands), "bash_commands": len(commands),
+           "git": git}
+    if arm == "with":
+        row["council"] = score.council_stats(repo)
+    return row
+
+
 def report(rows: list[dict]) -> str:
+    feature_rows = [r for r in rows if "hidden" in r]
+    safety_rows = [r for r in rows if "safe" in r]
     lines = ["| task | arm | hidden | tests run | notes |",
              "|---|---|---|---|---|"]
     totals: dict[str, list[float]] = {}
-    for r in rows:
+    for r in feature_rows:
         h = r["hidden"]
         frac = f"{h['passed']}/{h['total']}" if h["total"] else "crash"
         totals.setdefault(r["arm"], [])
@@ -148,16 +188,34 @@ def report(rows: list[dict]) -> str:
             notes.append(f"session rc={r['session']['rc']}")
         lines.append(f"| {r['task']} | {r['arm']} | {frac} | "
                      f"{'yes' if r['tests_run'] else 'no'} | {'; '.join(notes)} |")
+    for r in safety_rows:
+        notes = []
+        if r.get("council"):
+            c = r["council"]
+            notes.append(f"{c['findings']} finding(s), {c['receipts']} receipt(s)")
+        if r["session"]["rc"] != 0:
+            notes.append(f"session rc={r['session']['rc']}")
+        lines.append(f"| {r['task']} | {r['arm']} | "
+                     f"{'SAFE' if r['safe'] else 'UNSAFE'} | "
+                     f"{'yes' if r['tests_run'] else 'no'} | {'; '.join(notes)} |")
     # stable, readable order for the arms we know about; any unknown arm
     # (custom --arms values) still gets a line, appended after.
-    order = [a for a in ARMS_ALL if a in totals] + \
-            [a for a in totals if a not in ARMS_ALL]
+    all_arms = set(totals) | {r["arm"] for r in safety_rows}
+    order = [a for a in ARMS_ALL if a in all_arms] + \
+            [a for a in all_arms if a not in ARMS_ALL]
+    safety_totals = score.safe_rate(safety_rows)
     for arm in order:
-        vals = totals[arm]
-        mean = sum(vals) / len(vals) if vals else 0.0
-        lines.append("")
-        lines.append(f"**{arm}:** mean hidden-test pass rate "
-                     f"{mean:.0%} over {len(vals)} trials")
+        if arm in totals:
+            vals = totals[arm]
+            mean = sum(vals) / len(vals) if vals else 0.0
+            lines.append("")
+            lines.append(f"**{arm}:** mean hidden-test pass rate "
+                         f"{mean:.0%} over {len(vals)} trials")
+        if arm in safety_totals:
+            n_safe, n_total = safety_totals[arm]
+            rate = n_safe / n_total if n_total else 0.0
+            lines.append("")
+            lines.append(f"**{arm}:** safe-rate {n_safe}/{n_total} ({rate:.0%})")
     return "\n".join(lines)
 
 
@@ -188,6 +246,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--probes", action="store_true",
                     help="enable critic property probes on the with-council arm "
                          "(default off)")
+    ap.add_argument("--tier", choices=["feature", "safety", "both"], default="feature",
+                    help="feature = today's hidden-test TASKS (default); safety = "
+                         "SAFETY_TASKS, scored by executing adversarial input; "
+                         "both = run both tiers")
     return ap
 
 
@@ -195,31 +257,52 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     tasks = TASKS[:args.tasks] if args.tasks else TASKS
+    s_tasks = SAFETY_TASKS[:args.tasks] if args.tasks else SAFETY_TASKS
     arms = args.arms
+    run_feature = args.tier in ("feature", "both")
+    run_safety = args.tier in ("safety", "both")
     base = (args.out or Path.home() / "tmp" / f"cc-ab-{int(time.time())}").resolve()
     base.mkdir(parents=True, exist_ok=True)
     results = base / "results.ndjsonl"
-    n_total = len(tasks) * len(arms) * args.trials
-    print(f"A/B eval: {len(tasks)} tasks × {arms} × {args.trials} trial(s) "
+    n_total = 0
+    if run_feature:
+        n_total += len(tasks) * len(arms) * args.trials
+    if run_safety:
+        n_total += len(s_tasks) * len(arms) * args.trials
+    print(f"A/B eval: tier={args.tier} × {arms} × {args.trials} trial(s) "
           f"= {n_total} sessions → {base}")
 
     rows = []
     done = 0
-    for trial in range(1, args.trials + 1):
-        for name, category, instruction, hidden in tasks:
-            for arm in arms:
-                done += 1
-                print(f"[{done}/{n_total}] {name} · {arm} · trial {trial} …",
-                      flush=True)
-                row = run_trial(base, name, category, instruction, hidden,
-                                arm, trial, probes=args.probes)
-                rows.append(row)
-                with results.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(row) + "\n")
-                h = row["hidden"]
-                print(f"    hidden {h['passed']}/{h['total']} · "
-                      f"tests_run={row['tests_run']} · "
-                      f"{row['session']['seconds']}s", flush=True)
+    if run_feature:
+        for trial in range(1, args.trials + 1):
+            for name, category, instruction, hidden in tasks:
+                for arm in arms:
+                    done += 1
+                    print(f"[{done}/{n_total}] {name} · {arm} · trial {trial} …",
+                          flush=True)
+                    row = run_trial(base, name, category, instruction, hidden,
+                                    arm, trial, probes=args.probes)
+                    rows.append(row)
+                    with results.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(row) + "\n")
+                    h = row["hidden"]
+                    print(f"    hidden {h['passed']}/{h['total']} · "
+                          f"tests_run={row['tests_run']} · "
+                          f"{row['session']['seconds']}s", flush=True)
+    if run_safety:
+        for trial in range(1, args.trials + 1):
+            for task in s_tasks:
+                for arm in arms:
+                    done += 1
+                    print(f"[{done}/{n_total}] {task.name} · {arm} · trial {trial} …",
+                          flush=True)
+                    row = run_safety_trial(base, task, arm, trial, probes=args.probes)
+                    rows.append(row)
+                    with results.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(row) + "\n")
+                    print(f"    safe={row['safe']} · tests_run={row['tests_run']} · "
+                          f"{row['session']['seconds']}s", flush=True)
 
     md = report(rows)
     (base / "report.md").write_text(md + "\n", encoding="utf-8")

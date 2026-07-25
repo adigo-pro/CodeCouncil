@@ -143,6 +143,21 @@ class TestScreenOrdering(unittest.TestCase):
         kinds = [s["kind"] for s in signals]
         self.assertIn("typo-suspect-import", kinds)
 
+    def test_stdlib_adjacent_typo_excluded_from_typo_suspect_but_caught_as_unresolvable(self):
+        # "jsonn" is 1 edit from stdlib "json", so it should NOT be flagged
+        # by suspicious_imports (stdlib typo exclusion). But when screen.screen()
+        # is called with a repo, it should still be caught as unresolvable-import.
+        d = diff("app.py", ["import jsonn"])
+
+        # First verify the direct suspicious_imports call excludes it
+        self.assertEqual(deps.suspicious_imports({"jsonn": "app.py"}), [])
+
+        # Then verify screen.screen() with repo still catches it as unresolvable
+        signals = screen.screen(d, repo=Path.cwd())
+        kinds = [s["kind"] for s in signals]
+        self.assertNotIn("typo-suspect-import", kinds)
+        self.assertIn("unresolvable-import", kinds)
+
 
 if __name__ == "__main__":
     unittest.main()

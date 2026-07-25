@@ -146,6 +146,69 @@ class TestRedact(unittest.TestCase):
         out = redact.redact(text)
         self.assertEqual(out, text)
 
+    def test_github_oauth_token(self):
+        # gh[ousr]_ — GitHub's non-classic first-party token shapes
+        # (oauth/user-to-server/server-to-server/refresh).
+        secret = "gho_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0"
+        out = redact.redact(secret)
+        self.assertNotIn(secret, out)
+        self.assertIn("«REDACTED:github-token»", out)
+
+    def test_groq_key(self):
+        secret = "gsk_" + "a1B2c3D4e5F6g7H8i9J0k1L2"
+        out = redact.redact(f"GROQ_API_KEY={secret}")
+        self.assertNotIn(secret, out)
+        self.assertIn("«REDACTED:groq-key»", out)
+
+    def test_stripe_live_secret_key(self):
+        secret = "sk_live_" + "a1B2c3D4e5F6g7H8i9J0k1L2"
+        out = redact.redact(f"STRIPE_SECRET_KEY={secret}")
+        self.assertNotIn(secret, out)
+        self.assertIn("«REDACTED:stripe-key»", out)
+
+    def test_stripe_live_restricted_key(self):
+        secret = "rk_live_" + "a1B2c3D4e5F6g7H8i9J0k1L2"
+        out = redact.redact(secret)
+        self.assertNotIn(secret, out)
+        self.assertIn("«REDACTED:stripe-key»", out)
+
+    def test_google_api_key(self):
+        secret = "AIza" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R"
+        self.assertEqual(len(secret), 39)
+        out = redact.redact(f'GOOGLE_API_KEY = "{secret}"')
+        self.assertNotIn(secret, out)
+        self.assertIn("«REDACTED:google-key»", out)
+
+    def test_bare_jwt(self):
+        jwt = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ."
+            "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        out = redact.redact(f"Authorization: Bearer {jwt}")
+        self.assertNotIn(jwt, out)
+        self.assertIn("«REDACTED:jwt»", out)
+
+    def test_url_with_password_redacted(self):
+        secret = "hunter2pass"
+        text = f"postgres://dbuser:{secret}@db.example.com:5432/prod"
+        out = redact.redact(text)
+        self.assertNotIn(secret, out)
+        self.assertIn("postgres://dbuser:", out)
+        self.assertIn("«REDACTED:url-credential»@db.example.com", out)
+
+    def test_normal_url_without_credentials_untouched(self):
+        text = "See https://example.com/docs/setup for details."
+        out = redact.redact(text)
+        self.assertEqual(out, text)
+
+    def test_url_with_bare_username_no_password_untouched(self):
+        # user@host with no ":password" segment must not be treated as a
+        # credential URL.
+        text = "git clone ssh://git@github.com/foo/bar.git"
+        out = redact.redact(text)
+        self.assertEqual(out, text)
+
 
 if __name__ == "__main__":
     unittest.main()

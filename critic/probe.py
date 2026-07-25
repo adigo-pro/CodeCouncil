@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 from pathlib import Path
@@ -207,21 +208,44 @@ def _parse_probes(raw: str) -> list[str]:
 def run_script(staging: Path, script_src: str, timeout: int,
                filename: str = "script.py") -> subprocess.CompletedProcess:
     """Write `script_src` to `filename` in `staging` and execute it for
-    real: python3, cwd=staging, PYTHONPATH=staging (so `import <module>`
-    finds whatever was staged alongside it), capturing stdout/stderr as
-    text. The one execution primitive shared by probe.py's probe scripts
-    and verify.py's script-based verification (Task: script-verification --
-    the model writes a script, the harness executes it instead of relying
-    on tool calls the pi/NVIDIA backend sometimes emits as inert text).
+    real: sys.executable, cwd=staging, PYTHONPATH=staging (so `import
+    <module>` finds whatever was staged alongside it), capturing
+    stdout/stderr as text. The one execution primitive shared by probe.py's
+    probe scripts and verify.py's script-based verification (Task:
+    script-verification -- the model writes a script, the harness executes
+    it instead of relying on tool calls the pi/NVIDIA backend sometimes
+    emits as inert text).
+
+    The script is model-authored -- untrusted -- so its environment is a
+    MINIMAL ALLOWLIST built from scratch, never `{**os.environ, ...}`: no
+    API keys, no cloud creds, nothing sensitive reaches the child. HOME is
+    redirected into `staging`, so `os.path.expanduser("~/.codecouncil/env")`
+    and `~/.ssh` resolve INSIDE staging (nonexistent) rather than the real
+    home -- a large risk reduction with zero dependencies. This is a
+    credential-exposure mitigation, not a full sandbox: a malicious script
+    can still read absolute filesystem paths or make network calls (see
+    SECURITY.md's trust-boundary note); a full OS sandbox is roadmap.
+
+    Uses sys.executable rather than a hardcoded "python3" so a venv/pyenv
+    interpreter mismatch can't make staged imports fail spuriously -- with
+    the scrubbed env still passing through the real PATH, sys.executable
+    is an absolute path anyway, so this works regardless.
 
     Raises subprocess.TimeoutExpired / OSError -- callers decide how to
     classify that; neither probe nor verify treats a crashed harness as a
     finding."""
     script_path = staging / filename
     script_path.write_text(script_src, encoding="utf-8")
-    env = {**os.environ, "PYTHONPATH": str(staging)}
+    env = {
+        "PYTHONPATH": str(staging),
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(staging),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", ""),
+    }
+    env = {k: v for k, v in env.items() if v}
     return subprocess.run(
-        ["python3", str(script_path)], capture_output=True, text=True,
+        [sys.executable, str(script_path)], capture_output=True, text=True,
         timeout=timeout, cwd=str(staging), env=env)
 
 

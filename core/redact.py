@@ -33,9 +33,34 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     ("openai-key", re.compile(r"sk-[A-Za-z0-9_-]{20,}")),
     (
         "github-token",
-        re.compile(r"(?:ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"),
+        # ghp_ (classic PAT) and github_pat_ (fine-grained) were the
+        # original coverage; gh[ousr]_ adds GitHub's other first-party
+        # token shapes -- oauth (gho_), user-to-server (ghu_),
+        # server-to-server (ghs_), refresh (ghr_) -- all sharing the same
+        # kind label since they're all GitHub-issued tokens.
+        re.compile(
+            r"(?:ghp_[A-Za-z0-9]{30,}"
+            r"|gh[ousr]_[A-Za-z0-9]{36,}"
+            r"|github_pat_[A-Za-z0-9_]{30,})"
+        ),
     ),
     ("slack-token", re.compile(r"xox[bpoas]-[A-Za-z0-9-]{10,}")),
+    ("groq-key", re.compile(r"gsk_[A-Za-z0-9]{20,}")),
+    (
+        "stripe-key",
+        re.compile(r"(?:sk_live_|rk_live_)[A-Za-z0-9]{20,}"),
+    ),
+    ("google-key", re.compile(r"AIza[A-Za-z0-9_-]{35}")),
+    (
+        "jwt",
+        # A bare JWT (no assignment context -- e.g. inline in an
+        # "Authorization: Bearer <token>" line) isn't caught by the
+        # "assignment" pattern below, which requires a key/secret/token/
+        # password-named variable immediately before it.
+        re.compile(
+            r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
+        ),
+    ),
     (
         "assignment",
         re.compile(
@@ -52,6 +77,20 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
             # tail of the secret exposed past the marker.
             r"[A-Za-z0-9+/_=-]{" + str(ASSIGNMENT_MIN_VALUE_LEN) + r",}[^\s'\"]*",
         ),
+    ),
+    (
+        "url-credential",
+        # scheme://user:PASSWORD@host — a connection string embedding a
+        # password in the URL itself (Postgres/Mongo/redis DSNs, git remote
+        # URLs, curl one-liners). Only the password segment is redacted;
+        # the scheme, username, and host are left visible, and the pattern
+        # requires the literal ":...@" userinfo shape so a plain
+        # "https://example.com/path" (no credentials) never matches. Run
+        # last so an already-redacted key-shaped password (e.g. a
+        # github-token used as a URL password) doesn't get relabeled: the
+        # password class excludes "«" so a run that already begins with a
+        # marker is left as-is rather than re-matched.
+        re.compile(r"(?P<prefix>[a-z]+://[^:\s/]+:)[^@\s/«]+(?P<suffix>@)"),
     ),
 ]
 

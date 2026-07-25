@@ -58,6 +58,33 @@ floor, not a guarantee against every exotic secret format. Review
 - The Claude Code hook (`hooks/peer_hook.py`) is **fail-open**: any internal
   error exits silently rather than breaking your session.
 
+## Model-authored code execution
+
+The Critic's verification (`critic/verify.py`) and opt-in probe
+(`critic/probe.py`) features ask the model to write a short repro/probe
+script, which CodeCouncil then **executes on your machine** — in a
+throwaway staging directory, never in your repo — to prove a finding real
+before it's ever delivered.
+
+That execution is not credential-blind by accident: the child process's
+environment is a minimal allowlist built from scratch (`PATH`, `HOME`,
+`LANG`/`LC_ALL`, plus `PYTHONPATH` pointed at the staging copy), never a
+copy of the parent's real environment. Your API keys — whether real
+environment variables or values loaded from `~/.codecouncil/env` — are not
+in that allowlist, so model-authored code cannot read them. `HOME` is also
+redirected to point inside the staging directory, so `~/.codecouncil/env`
+and `~/.ssh` resolve to a nonexistent path for that script rather than your
+real home.
+
+**This is a credential-exposure mitigation, not a full OS sandbox.** A
+malicious or prompt-injected script running in staging can still read any
+absolute filesystem path it's given, and can still make outbound network
+calls — neither of those is blocked. Run CodeCouncil only on repositories
+(and against coding-agent output) you would already be willing to execute
+code from. A full syscall-level sandbox (e.g. seccomp/landlock, a
+container, or a no-network jail) is on the roadmap but not implemented
+today.
+
 ## Reporting a vulnerability
 
 Open a GitHub security advisory on this repository (Security → Advisories →

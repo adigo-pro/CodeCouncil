@@ -465,6 +465,40 @@ else:
                              "candidate was suppressed after a transient error")
 
 
+class TestRunScriptEnvScrub(unittest.TestCase):
+    """Fix 1/2 (security hardening): run_script must never hand the model's
+    script the parent's real environment (API keys, cloud creds) or its
+    real HOME (~/.codecouncil/env, ~/.ssh) -- and must invoke the same
+    interpreter running this test (sys.executable), not a hardcoded
+    "python3" that may not exist / may be a different interpreter."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.staging = Path(self.td.name)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_env_scrubbed_and_home_redirected_into_staging(self):
+        os.environ["SECRET_XYZ"] = "top-secret-value-should-not-leak"
+        try:
+            script = (
+                "import os\n"
+                "print('SAW:', os.environ.get('SECRET_XYZ', 'none'))\n"
+                "print('HOME:', os.environ.get('HOME'))\n"
+            )
+            res = probe.run_script(self.staging, script, timeout=10)
+        finally:
+            del os.environ["SECRET_XYZ"]
+        self.assertIn("SAW: none", res.stdout)
+        self.assertIn(f"HOME: {self.staging}", res.stdout)
+
+    def test_uses_sys_executable(self):
+        script = "import sys\nprint('EXE:', sys.executable)\n"
+        res = probe.run_script(self.staging, script, timeout=10)
+        self.assertIn(f"EXE: {sys.executable}", res.stdout)
+
+
 class TestResolveProbes(unittest.TestCase):
     def test_flag_true_enables(self):
         from critic.main import resolve_probes

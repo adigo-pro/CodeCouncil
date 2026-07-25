@@ -109,6 +109,31 @@ class TestNewDependencyLines(unittest.TestCase):
         self.assertEqual(deps.new_dependency_lines(""), [])
 
 
+class TestSocketerRegression(unittest.TestCase):
+    """Regression: stdlib-adjacent typos (within 1 edit of both a known
+    package AND a stdlib module) must be caught as unresolvable-import,
+    not silently dropped. socker is 1 edit from docker (known package) and
+    socket (stdlib module)."""
+
+    def test_socker_not_typo_suspect_due_to_stdlib_adjacency(self):
+        # is_typo_suspect must exclude socker because it's within 1 edit
+        # of stdlib "socket", even though it's also within 1 edit of "docker"
+        self.assertFalse(deps.is_typo_suspect("socker"))
+
+    def test_socker_not_flagged_by_suspicious_imports(self):
+        # suspicious_imports must exclude socker (stdlib typo exclusion)
+        self.assertEqual(deps.suspicious_imports({"socker": "app.py"}), [])
+
+    def test_socker_caught_as_unresolvable_import_with_repo(self):
+        # With repo, socker should be caught by resolve_new_imports
+        # (not excluded by is_typo_suspect, not flagged by suspicious_imports)
+        d = diff("app.py", ["import socker"])
+        signals = screen.screen(d, repo=Path.cwd())
+        kinds = [s["kind"] for s in signals]
+        self.assertNotIn("typo-suspect-import", kinds)
+        self.assertIn("unresolvable-import", kinds)
+
+
 class TestScreenOrdering(unittest.TestCase):
     """Typo-suspect runs before, and instead of, unresolvable-import for the
     same name — one signal per name (brief's ordering requirement)."""

@@ -81,26 +81,33 @@ def _nearest_known(name: str) -> str | None:
 
 
 def is_typo_suspect(name: str) -> bool:
-    """True if `name` is not itself a known package but is exactly one edit
-    from one. Shared by suspicious_imports (signal text) and
-    screen.screen (excluding a typo-suspect name from the separate
-    unresolvable-import check — one signal per name, per the brief)."""
-    return name not in _KNOWN and _nearest_known(name) is not None
+    """True if `name` is not itself a known package, is not a stdlib module,
+    and is exactly one edit from a known package. Shared by suspicious_imports
+    (signal text) and screen.screen (excluding a typo-suspect name from the
+    separate unresolvable-import check — one signal per name, per the brief).
+
+    Stdlib-adjacent names are excluded: a name within 1 edit of a stdlib
+    module is more likely a typo of stdlib (which resolves) than a suspicious
+    external package, so it skips the typo-suspect signal and falls through
+    to the unresolvable-import check instead."""
+    if name in _KNOWN:
+        return False
+    if any(_within_one_edit(name, stdlib) for stdlib in sys.stdlib_module_names):
+        return False
+    return _nearest_known(name) is not None
 
 
 def suspicious_imports(names: dict[str, str]) -> list[dict]:
-    """For each imported top-level name that is NOT a known package and NOT
-    stdlib: if it's within edit-distance 1 of a known package name, emit a
-    typo-suspect-import signal naming the near-miss. A name exactly IN the
-    known list emits nothing — it's legitimate. `names` is
-    screen.new_import_names' output (name -> first file it was imported in).
+    """For each imported top-level name that is typo-suspect (within
+    edit-distance 1 of a known package, not in known packages, and not
+    stdlib-adjacent), emit a typo-suspect-import signal naming the near-miss.
+    Uses is_typo_suspect as the single source of truth for the skip decision.
+    `names` is screen.new_import_names' output (name -> first file it was
+    imported in).
     """
     signals = []
     for name, path in names.items():
-        if name in _KNOWN or name in sys.stdlib_module_names:
-            continue
-        # Don't flag as typo of external package if it's a typo of stdlib
-        if any(_within_one_edit(name, stdlib) for stdlib in sys.stdlib_module_names):
+        if not is_typo_suspect(name):
             continue
         known = _nearest_known(name)
         if known:

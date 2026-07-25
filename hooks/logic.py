@@ -9,6 +9,9 @@ Delivery rules:
   - medium/high suggestions -> injected as context after an edit (once each)
   - high suggestions        -> block completion at Stop (once each, never
                                when stop_hook_active is set)
+  - when the done-gate held this Stop (decide(gated=True)) the block floor
+    drops to medium+ — a finished one-shot session has no later edit to
+    inject a medium finding into, so Stop is its only channel
   - suggestions older than TTL_SECONDS are never delivered
   - the newest receipt's test_integrity verdict == "weakened" -> block
     completion at Stop once (ledger key "test_integrity", keyed by receipt

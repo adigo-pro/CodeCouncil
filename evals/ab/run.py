@@ -50,6 +50,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -97,6 +98,48 @@ def seed_repo(repo: Path, seed_files: dict[str, str] = SEED_FILES) -> None:
     sh(["git", "init", "-qb", "main"], cwd=repo)
     sh(["git", "add", "-A"], cwd=repo)
     sh(["git", "commit", "-qm", "seed demoapp"], cwd=repo)
+
+
+def materialize(files: dict[str, str], root: Path) -> None:
+    """Write a full file tree (e.g. a SafetyTask's good/bad reference) into
+    root — no git, no session, just files on disk for a scorer to run
+    against. Shared by selftest_safety() and tests/test_ab_safety.py's
+    discrimination test so there's one copy of this logic."""
+    for path, content in files.items():
+        dest = root / path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+
+
+def selftest_safety() -> tuple[bool, list[str]]:
+    """Ponytail's `--selftest` lesson: prove every safety scorer can tell
+    good from bad BEFORE spending any API budget on it. For each
+    SAFETY_TASKS entry, materializes the task's `good` reference into a
+    tempdir and runs its adversarial_test (must report safe==True), then
+    does the same for `bad` (must report safe==False) — zero `claude`
+    calls, filesystem tempdirs only. Returns (all_discriminate, report
+    lines), one line per task, so main() and tests can both use it."""
+    all_ok = True
+    lines = []
+    for task in SAFETY_TASKS:
+        with tempfile.TemporaryDirectory() as tmp:
+            materialize(task.good, Path(tmp))
+            good = score.run_adversarial_test(Path(tmp), task.adversarial_test)
+        with tempfile.TemporaryDirectory() as tmp:
+            materialize(task.bad, Path(tmp))
+            bad = score.run_adversarial_test(Path(tmp), task.adversarial_test)
+        good_ok, bad_ok = good["safe"], not bad["safe"]
+        if good_ok and bad_ok:
+            lines.append(f"{task.name}: DISCRIMINATES")
+        else:
+            all_ok = False
+            problems = []
+            if not good_ok:
+                problems.append("good=UNSAFE")
+            if not bad_ok:
+                problems.append("bad=SAFE")
+            lines.append(f"{task.name}: BROKEN ({', '.join(problems)})")
+    return all_ok, lines
 
 
 def start_council(repo: Path, probes: bool = False) -> list[subprocess.Popen]:
@@ -283,11 +326,25 @@ def build_parser() -> argparse.ArgumentParser:
                     help="feature = today's hidden-test TASKS (default); safety = "
                          "SAFETY_TASKS, scored by executing adversarial input; "
                          "both = run both tiers")
+    ap.add_argument("--selftest", action="store_true",
+                    help="run ONLY the zero-API scorer self-test: prove every "
+                         "safety scorer discriminates its good ref (SAFE) from "
+                         "its bad ref (UNSAFE); exit nonzero if any doesn't")
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.selftest:
+        ok, lines = selftest_safety()
+        print("A/B self-test: safety scorers, zero API spend "
+              f"({len(SAFETY_TASKS)} task(s))")
+        for line in lines:
+            print(f"  {line}")
+        print("\nALL SCORERS DISCRIMINATE" if ok else
+              "\nBROKEN SCORER(S) — fix before spending API budget on a live run")
+        return 0 if ok else 1
 
     tasks = TASKS[:args.tasks] if args.tasks else TASKS
     s_tasks = SAFETY_TASKS[:args.tasks] if args.tasks else SAFETY_TASKS

@@ -10,37 +10,30 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from evals.ab import run as ab_run
 from evals.ab import score
-from evals.ab.safety_tasks import SAFETY_TASKS
+from evals.ab.safety_tasks import SafetyTask, SAFETY_TASKS
 
-
-def materialize(files: dict[str, str], root: Path) -> None:
-    for path, content in files.items():
-        dest = root / path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
+# Reused by both the discrimination test below and evals.ab.run.selftest_safety
+# — one copy of "write a file tree into a tempdir", not two.
+materialize = ab_run.materialize
 
 
 class TestDiscrimination(unittest.TestCase):
     """The heart of Task 2: each adversarial_test must pass its task's good
-    reference and fail its bad reference, run directly — no API calls."""
+    reference and fail its bad reference, run directly — no API calls. Task
+    4 wraps this exact check as evals.ab.run.selftest_safety(); reuse it here
+    instead of re-running the good/bad loop by hand, so the discrimination
+    proof and the --selftest gate can never drift apart."""
 
     def test_good_ref_is_safe_and_bad_ref_is_unsafe(self):
+        all_ok, lines = ab_run.selftest_safety()
+        self.assertTrue(all_ok, f"scorer(s) failed to discriminate: {lines}")
+        self.assertEqual(len(lines), len(SAFETY_TASKS))
         for task in SAFETY_TASKS:
-            with self.subTest(task=task.name, ref="good"), \
-                    tempfile.TemporaryDirectory() as tmp:
-                materialize(task.good, Path(tmp))
-                result = score.run_adversarial_test(Path(tmp), task.adversarial_test)
-                self.assertTrue(result["safe"],
-                                 f"{task.name} good ref flagged UNSAFE: {result['output']}")
-            with self.subTest(task=task.name, ref="bad"), \
-                    tempfile.TemporaryDirectory() as tmp:
-                materialize(task.bad, Path(tmp))
-                result = score.run_adversarial_test(Path(tmp), task.adversarial_test)
-                self.assertFalse(result["safe"],
-                                  f"{task.name} bad ref flagged SAFE: {result['output']}")
+            self.assertIn(f"{task.name}: DISCRIMINATES", lines)
 
 
 class TestTaskSchema(unittest.TestCase):
@@ -129,6 +122,57 @@ class TestSafeRate(unittest.TestCase):
 
     def test_empty_rows(self):
         self.assertEqual(score.safe_rate([]), {})
+
+
+class TestSelftest(unittest.TestCase):
+    """Task 4: `--selftest` proves every safety scorer discriminates good
+    from bad BEFORE any API spend. Test 3 (test_selftest_safety_catches_a_
+    broken_scorer) is the important one — a scorer that can't tell good
+    from bad must fail the gate, not silently pass."""
+
+    def test_selftest_flag_parses_and_defaults_off(self):
+        self.assertFalse(ab_run.build_parser().parse_args([]).selftest)
+        self.assertTrue(ab_run.build_parser().parse_args(["--selftest"]).selftest)
+
+    def test_selftest_safety_discriminates_on_shipped_tasks(self):
+        ok, lines = ab_run.selftest_safety()
+        self.assertTrue(ok, lines)
+        self.assertEqual(len(lines), len(SAFETY_TASKS))
+        self.assertTrue(all("DISCRIMINATES" in line for line in lines))
+
+    def test_selftest_safety_catches_a_broken_scorer(self):
+        # adversarial_test always reports SAFE regardless of which reference
+        # is under test — good passes (fine) but bad also passes (BROKEN):
+        # a scorer that can't tell good from bad must not report clean.
+        broken = SafetyTask(
+            name="broken-always-safe",
+            seed_files={"m.py": "x = 1\n"},
+            instruction="irrelevant to the self-test",
+            adversarial_test="import sys\nprint('SAFE')\nsys.exit(0)\n",
+            good={"m.py": "x = 1\n"},
+            bad={"m.py": "x = 1\n"},
+        )
+        with mock.patch.object(ab_run, "SAFETY_TASKS", [broken]):
+            ok, lines = ab_run.selftest_safety()
+            self.assertFalse(ok)
+            self.assertIn("BROKEN", lines[0])
+            self.assertIn("bad=SAFE", lines[0])
+
+            rc = ab_run.main(["--selftest"])
+        self.assertNotEqual(rc, 0)
+
+    def test_main_selftest_returns_zero_and_spawns_no_sessions(self):
+        # selftest_safety() DOES use subprocess (to execute each adversarial
+        # test locally, scoring only) — that's not what's being asserted
+        # here. What must never happen is a coding-agent session or a
+        # council daemon, so assert the higher-level entry points for those
+        # are never reached.
+        with mock.patch.object(ab_run, "start_council") as start_council, \
+                mock.patch.object(ab_run, "run_session") as run_session:
+            rc = ab_run.main(["--selftest"])
+        self.assertEqual(rc, 0)
+        start_council.assert_not_called()
+        run_session.assert_not_called()
 
 
 if __name__ == "__main__":

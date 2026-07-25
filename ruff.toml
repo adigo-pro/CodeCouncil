@@ -5,5 +5,9 @@ line-length = 100
 extend-exclude = ["ui", "demo", ".codecouncil"]
 
 [lint]
-# Defaults (E4/E7/E9 + F) — correctness-flavored, low-churn. Widen later
-# only with a reason per rule.
+# Explicit select — the correctness-flavored core, pinned so a future ruff
+# release that broadens its *implicit* defaults can't silently start failing
+# CI on rules this project deliberately doesn't use (e.g. BLE001 blind-except
+# and S112 try-except-continue, which flag the load-bearing fail-open / daemon
+# -never-dies patterns). Widen only with a reason per rule.
+select = ["E4", "E7", "E9", "F"]

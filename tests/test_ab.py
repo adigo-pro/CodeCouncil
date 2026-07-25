@@ -198,6 +198,97 @@ class TestSettingSourcesIsolation(unittest.TestCase):
             self.assertNotIn("global", sources)
 
 
+class TestGateWiring(unittest.TestCase):
+    """Task 2: --gate SECONDS (default 45) turns the done-gate on for the
+    with-council arm only, by threading COUNCIL_GATE_SECONDS into the
+    claude subprocess's own environment (not the harness's os.environ)."""
+
+    def test_argparse_default_is_45(self):
+        self.assertEqual(ab_run.build_parser().parse_args([]).gate, 45)
+
+    def test_argparse_flag_parses(self):
+        self.assertEqual(ab_run.build_parser().parse_args(["--gate", "10"]).gate, 10)
+
+    def _claude_env(self, arm: str, gate: int = 45):
+        """Runs run_trial for the given arm+gate and returns the env dict
+        (or None) passed to the claude sh() call. Daemons/sleeps are mocked
+        out so a 'with'-arm trial doesn't actually wait ~28s."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            with mock.patch.object(ab_run, "install_hooks"), \
+                 mock.patch.object(ab_run.subprocess, "Popen") as popen, \
+                 mock.patch.object(ab_run, "sh") as sh_mock, \
+                 mock.patch.object(ab_run.time, "sleep"), \
+                 mock.patch.object(ab_run.score, "run_hidden_test",
+                                    return_value={"passed": 0, "total": 0, "all_pass": False,
+                                                  "checks": {}, "crashed": False, "output": ""}), \
+                 mock.patch.object(ab_run.score, "git_facts",
+                                    return_value={"commits": 0, "last_subject": ""}), \
+                 mock.patch.object(ab_run.score, "council_stats",
+                                    return_value={"findings": 0, "passes": 0,
+                                                  "receipts": 0, "delivered": 0}), \
+                 mock.patch.object(ab_run, "find_project_dir", return_value=None):
+                popen.return_value = mock.Mock()
+                sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+                ab_run.run_trial(base, "task", "clean", "do the thing. Commit.",
+                                 "CHECK x PASS", arm, 1, gate=gate)
+            claude_calls = [c for c in sh_mock.call_args_list if c.args[0][0] == "claude"]
+            self.assertEqual(len(claude_calls), 1)
+            return claude_calls[0].kwargs.get("env")
+
+    def test_with_arm_env_carries_gate_seconds(self):
+        env = self._claude_env("with", gate=45)
+        self.assertIsNotNone(env)
+        self.assertEqual(env.get("COUNCIL_GATE_SECONDS"), "45")
+
+    def test_without_arm_env_has_no_gate_var(self):
+        env = self._claude_env("without", gate=45)
+        self.assertTrue(env is None or "COUNCIL_GATE_SECONDS" not in env)
+
+    def test_naive_arm_env_has_no_gate_var(self):
+        env = self._claude_env("naive", gate=45)
+        self.assertTrue(env is None or "COUNCIL_GATE_SECONDS" not in env)
+
+    def test_gate_zero_disables_for_with_arm(self):
+        env = self._claude_env("with", gate=0)
+        self.assertTrue(env is None or "COUNCIL_GATE_SECONDS" not in env)
+
+
+class TestCouncilStatsDelivered(unittest.TestCase):
+    """Task 2: council_stats()['delivered'] counts real suggestion ids in
+    delivered.json, excluding the reserved channel keys."""
+
+    def test_delivered_counts_non_reserved_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            cc = repo / ".codecouncil"
+            cc.mkdir()
+            (cc / "delivered.json").write_text(json.dumps({
+                "abc123def456": {"context": 1.0},
+                "fed654cba321": {"block": 2.0},
+                "receipts": {"r1.md": 1.0},
+                "gate": {"sess-1": 1.0},
+            }), encoding="utf-8")
+            stats = score.council_stats(repo)
+            self.assertEqual(stats["delivered"], 2)
+
+    def test_missing_ledger_is_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / ".codecouncil").mkdir()
+            stats = score.council_stats(repo)
+            self.assertEqual(stats["delivered"], 0)
+
+    def test_corrupt_ledger_is_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            cc = repo / ".codecouncil"
+            cc.mkdir()
+            (cc / "delivered.json").write_text("not json", encoding="utf-8")
+            stats = score.council_stats(repo)
+            self.assertEqual(stats["delivered"], 0)
+
+
 class TestReportThreeArms(unittest.TestCase):
     """Task 1: report() generalizes to whichever arms are actually present in rows."""
 

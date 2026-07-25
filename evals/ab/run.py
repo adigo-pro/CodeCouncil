@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -82,6 +83,7 @@ from training.run import SEED_FILES, sh  # noqa: E402
 
 SESSION_TIMEOUT = 420
 SETTLE_SECONDS = 25  # let the critic judge the session's final diff
+GATE_SECONDS_DEFAULT = 45  # Task 1's done-gate; --gate 0 disables
 
 # The naive-control arm's entire "treatment": one generic sentence a user
 # might paste themselves, appended via the CLI's --append-system-prompt. Not
@@ -211,15 +213,28 @@ def start_council(repo: Path, probes: bool = False) -> list[subprocess.Popen]:
             spawn("critic", *critic_flags)]
 
 
-def run_session(repo: Path, instruction: str, append: str | None = None) -> dict:
+def run_session(repo: Path, instruction: str, append: str | None = None,
+                 gate_seconds: int = 0) -> dict:
+    """gate_seconds > 0 injects COUNCIL_GATE_SECONDS into the claude
+    subprocess's own environment (not the harness's os.environ, which stays
+    untouched) — the Stop hook (hooks/peer_hook.py, Task 1) reads that var
+    from its parent process, which is this claude session, so it must reach
+    argv's subprocess env, not just this Python process. gate_seconds<=0
+    (the without/naive arms, or --gate 0) leaves env unset entirely (None ->
+    sh() inherits the ambient environment exactly as before this parameter
+    existed), so those arms' sessions can never see the var."""
     argv = ["claude", "-p", instruction, "--permission-mode", "acceptEdits",
             "--allowedTools", "Edit", "Write", "Bash",
             "--setting-sources", ISOLATION_SETTING_SOURCES]
     if append:
         argv += ["--append-system-prompt", append]
+    env = None
+    if gate_seconds > 0:
+        env = dict(os.environ)
+        env["COUNCIL_GATE_SECONDS"] = str(gate_seconds)
     t0 = time.time()
     for attempt in (1, 2):
-        r = sh(argv, cwd=repo, timeout=SESSION_TIMEOUT)
+        r = sh(argv, cwd=repo, timeout=SESSION_TIMEOUT, env=env)
         if r.returncode == 0:
             break
         time.sleep(30 * attempt)
@@ -229,7 +244,8 @@ def run_session(repo: Path, instruction: str, append: str | None = None) -> dict
 
 def run_trial(base: Path, name: str, category: str, instruction: str,
               hidden: str, arm: str, trial: int, probes: bool = False,
-              repo_url: tuple[str, str] | None = None) -> dict:
+              repo_url: tuple[str, str] | None = None,
+              gate: int = GATE_SECONDS_DEFAULT) -> dict:
     """repo_url, when given, is a (url, sha) pair (see parse_repo_url): the
     feature-tier workspace is cloned+pinned from a real OSS repo instead of
     the synthetic SEED_FILES. Unset (the default) is unchanged — synthetic,
@@ -244,10 +260,11 @@ def run_trial(base: Path, name: str, category: str, instruction: str,
         seed_repo(repo)
     daemons = start_council(repo, probes=probes) if arm == "with" else []
     append = NAIVE_REVIEW_PROMPT if arm == "naive" else None
+    gate_seconds = gate if arm == "with" else 0
     if daemons:
         time.sleep(3)
     try:
-        session = run_session(repo, instruction, append=append)
+        session = run_session(repo, instruction, append=append, gate_seconds=gate_seconds)
         if daemons:
             time.sleep(SETTLE_SECONDS)
     finally:
@@ -270,7 +287,8 @@ def run_trial(base: Path, name: str, category: str, instruction: str,
     return row
 
 
-def run_safety_trial(base: Path, task, arm: str, trial: int, probes: bool = False) -> dict:
+def run_safety_trial(base: Path, task, arm: str, trial: int, probes: bool = False,
+                     gate: int = GATE_SECONDS_DEFAULT) -> dict:
     """Mirrors run_trial for the SAFETY tier: seeds the task's OWN
     seed_files (not the shared SEED_FILES), runs the arm's session, then
     executes the adversarial_test against the produced repo. The row
@@ -279,10 +297,11 @@ def run_safety_trial(base: Path, task, arm: str, trial: int, probes: bool = Fals
     seed_repo(repo, task.seed_files)
     daemons = start_council(repo, probes=probes) if arm == "with" else []
     append = NAIVE_REVIEW_PROMPT if arm == "naive" else None
+    gate_seconds = gate if arm == "with" else 0
     if daemons:
         time.sleep(3)
     try:
-        session = run_session(repo, task.instruction, append=append)
+        session = run_session(repo, task.instruction, append=append, gate_seconds=gate_seconds)
         if daemons:
             time.sleep(SETTLE_SECONDS)
     finally:
@@ -306,7 +325,8 @@ def _council_note(r: dict) -> list[str]:
     notes = []
     if r.get("council"):
         c = r["council"]
-        notes.append(f"{c['findings']} finding(s), {c['receipts']} receipt(s)")
+        notes.append(f"{c['findings']} finding(s), {c['receipts']} receipt(s), "
+                     f"{c.get('delivered', 0)} delivered")
     if r["session"]["rc"] != 0:
         notes.append(f"session rc={r['session']['rc']}")
     return notes
@@ -385,6 +405,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--probes", action="store_true",
                     help="enable critic property probes on the with-council arm "
                          "(default off)")
+    ap.add_argument("--gate", type=int, default=GATE_SECONDS_DEFAULT,
+                    help="done-gate seconds for the with-council arm's Stop hook "
+                         "(COUNCIL_GATE_SECONDS) — lets the critic finish judging "
+                         "before a short session's 'done' goes through; without/"
+                         "naive arms never see this var, gate or no gate. "
+                         f"Default {GATE_SECONDS_DEFAULT}s; 0 disables.")
     ap.add_argument("--tier", choices=["feature", "safety", "both"], default="feature",
                     help="feature = today's hidden-test TASKS (default); safety = "
                          "SAFETY_TASKS, scored by executing adversarial input; "
@@ -452,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
                           flush=True)
                     row = run_trial(base, name, category, instruction, hidden,
                                     arm, trial, probes=args.probes,
-                                    repo_url=args.repo_url)
+                                    repo_url=args.repo_url, gate=args.gate)
                     rows.append(row)
                     with results.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(row) + "\n")
@@ -467,7 +493,8 @@ def main(argv: list[str] | None = None) -> int:
                     done += 1
                     print(f"[{done}/{n_total}] {task.name} · {arm} · trial {trial} …",
                           flush=True)
-                    row = run_safety_trial(base, task, arm, trial, probes=args.probes)
+                    row = run_safety_trial(base, task, arm, trial, probes=args.probes,
+                                           gate=args.gate)
                     rows.append(row)
                     with results.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(row) + "\n")

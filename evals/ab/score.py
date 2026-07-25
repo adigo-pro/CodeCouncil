@@ -18,7 +18,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+from hooks import ledger as ledger_mod
+
 HIDDEN_TEST_TIMEOUT = 60
+# Reserved delivered.json top-level keys that are never a suggestion id (see
+# hooks/ledger.py's module docstring) — everything else in the ledger is a
+# real delivered suggestion id.
+_RESERVED_LEDGER_KEYS = {ledger_mod.RECEIPTS_KEY, ledger_mod.TEST_INTEGRITY_KEY,
+                         ledger_mod.GATE_KEY}
 _TEST_CMD_RE = re.compile(r"\b(unittest|pytest|python3? -m pytest|python3? test_)")
 
 
@@ -147,4 +154,15 @@ def council_stats(repo: Path) -> dict:
             elif row.get("verdict") == "PASS":
                 passes += 1
     receipts = len(list((cc / "receipts").glob("*.md"))) if (cc / "receipts").is_dir() else 0
-    return {"findings": findings, "passes": passes, "receipts": receipts}
+    delivered = count_delivered(cc / "delivered.json")
+    return {"findings": findings, "passes": passes, "receipts": receipts, "delivered": delivered}
+
+
+def count_delivered(ledger_path: Path) -> int:
+    """Did the agent actually SEE anything? Count of delivered suggestion
+    ids in delivered.json — every top-level key except the reserved channel
+    keys is a real suggestion id (hooks/ledger.py). ledger_mod.load()
+    already tolerates a missing/corrupt file (returns {}), so a fresh or
+    broken ledger just counts as 0 rather than crashing the row."""
+    ledger = ledger_mod.load(ledger_path)
+    return sum(1 for key in ledger if key not in _RESERVED_LEDGER_KEYS)

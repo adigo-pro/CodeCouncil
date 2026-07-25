@@ -132,8 +132,14 @@ WAVE_SEEDS: dict[int, dict[str, str]] = {
 }
 
 
-def sh(cmd: list[str], cwd: Path | None = None, timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+def sh(cmd: list[str], cwd: Path | None = None, timeout: int = 60,
+       env: dict | None = None) -> subprocess.CompletedProcess:
+    """env=None (default) inherits the current process environment, exactly
+    as subprocess.run does natively — unchanged for every existing caller.
+    Callers that need a modified environment (e.g. evals.ab.run's done-gate
+    wiring) pass an explicit dict."""
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                          timeout=timeout, env=env)
 
 
 def setup_repo(repo: Path, wave: int) -> None:

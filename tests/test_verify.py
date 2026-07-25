@@ -384,5 +384,16 @@ class TestDeliveryPolicy(unittest.TestCase):
         self.assertIn("[suggested repro (review before running): python3 repro.py]", out["reason"])
 
 
+
+
+class TestPromptContract(unittest.TestCase):
+    def test_prompt_forbids_refuted_on_unexpected_error(self):
+        """Run-4 hazard: a script crashed on a wrong signature and its own
+        error handler printed REFUTED, suppressing a true finding. The prompt
+        must forbid marker output from unexpected errors."""
+        text = verify.build_prompt({"file": "x.py", "issue": "i", "severity": "high"}, "content")
+        self.assertIn("UNEXPECTED error", text)
+        self.assertIn("never print REFUTED from a general", text)
+
 if __name__ == "__main__":
     unittest.main()

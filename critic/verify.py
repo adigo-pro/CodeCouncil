@@ -101,9 +101,14 @@ def build_prompt(suggestion: dict, staged_path: str, screen_signal: dict | None 
         "The script must print exactly one final line AND exit with code 0:\n"
         "CONFIRMED: <one-line evidence> -- if running it reproduces the "
         "claimed problem (the bad behavior actually happens)\n"
-        "REFUTED: <one-line evidence> -- if running it demonstrates the "
-        "finding is wrong (the code behaves correctly)\n"
-        "If the finding cannot be tested this way, print neither line and exit 0."
+        "REFUTED: <one-line evidence> -- ONLY if running it demonstrates the "
+        "finding is wrong (the code demonstrably behaves correctly)\n"
+        "If the finding cannot be tested this way, print neither line and exit 0.\n"
+        "CRITICAL: if your script hits an UNEXPECTED error (wrong function "
+        "signature, import failure, your own bug), print NEITHER marker -- a "
+        "broken test script is not evidence about the finding. Wrap only the "
+        "SPECIFIC call you are probing; never print REFUTED from a general "
+        "exception handler."
     )
     addendum = EXPLOIT_ADDENDA.get((screen_signal or {}).get("cwe", ""))
     if addendum:

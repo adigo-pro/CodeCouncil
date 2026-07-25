@@ -6,13 +6,19 @@ self-review nudge, on identical tasks with hidden acceptance tests.
 Paired design: every (task, trial) runs once per arm in its own fresh scratch
 repo seeded with the same latent-trap files (training.run.SEED_FILES). The
 'with' arm gets hooks + observer + critic (the delivery loop — the
-treatment); 'without' is a bare repo; 'naive' is also a bare repo (no
-daemons) but the session's system prompt gets one generic self-review
-sentence appended (NAIVE_REVIEW_PROMPT), via the `claude` CLI's
-`--append-system-prompt` flag — the control that isolates whether
-CodeCouncil's verified review beats the agent simply nagging itself. Hidden
-tests (evals.ab.tasks) score the result; the agent never sees them. Rows land
-in results.ndjsonl; a markdown report is printed and written at the end.
+treatment), council mode enabled by default via --prober
+openrouter/openai/gpt-5-mini (the bake-off's measured high-recall catcher,
+4-of-4 vs the precision-anchored primary's 2-of-4 — round 2 saw only 2
+findings across 15 with-sessions running the primary alone), and its Stop
+hook's done-gate raised to --gate 90s (was 45s; a verified finding was
+measured landing ~9s after the old cap already released); 'without' is a
+bare repo; 'naive' is also a bare repo (no daemons) but the session's system
+prompt gets one generic self-review sentence appended
+(NAIVE_REVIEW_PROMPT), via the `claude` CLI's `--append-system-prompt` flag
+— the control that isolates whether CodeCouncil's verified review beats the
+agent simply nagging itself. Hidden tests (evals.ab.tasks) score the
+result; the agent never sees them. Rows land in results.ndjsonl; a markdown
+report is printed and written at the end.
 
 --arms accepts a comma list of without|naive|with (e.g. "without,naive,with"),
 the alias "all" (-> without,naive,with), or the back-compat alias "both"
@@ -74,6 +80,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from critic import agent  # noqa: E402
 from evals.ab import score  # noqa: E402
 from evals.ab.safety_tasks import SAFETY_TASKS  # noqa: E402
 from evals.ab.tasks import TASKS  # noqa: E402
@@ -83,7 +90,16 @@ from training.run import SEED_FILES, sh  # noqa: E402
 
 SESSION_TIMEOUT = 420
 SETTLE_SECONDS = 25  # let the critic judge the session's final diff
-GATE_SECONDS_DEFAULT = 45  # Task 1's done-gate; --gate 0 disables
+# Task 1's done-gate; --gate 0 disables. Raised 45 -> 90 (run-3): a verified
+# finding was measured landing ~9s after the old 45s cap already released —
+# 90s covers judge+verify with headroom instead of shaving it razor-thin.
+GATE_SECONDS_DEFAULT = 90
+
+# run-3: council mode's high-recall prober (docs/benchmarks/ bake-off: 4-of-4
+# catches vs the precision-anchored primary's 2-of-4) on the with-arm only —
+# round 2 saw just 2 findings across 15 with-sessions running the primary
+# alone. '--prober off'/'none' disables (parse_prober below).
+PROBER_DEFAULT = "openrouter/openai/gpt-5-mini"
 
 # The naive-control arm's entire "treatment": one generic sentence a user
 # might paste themselves, appended via the CLI's --append-system-prompt. Not
@@ -193,7 +209,35 @@ def selftest_safety() -> tuple[bool, list[str]]:
     return all_ok, lines
 
 
-def start_council(repo: Path, probes: bool = False) -> list[subprocess.Popen]:
+def parse_prober(value: str) -> str | None:
+    """--prober MODEL / --prober off (or 'none', case-insensitive) -> None,
+    disabling council mode entirely. Mirrors critic/main.py's own --prober
+    semantics; the harness owns the eval-profile default (PROBER_DEFAULT),
+    critic/main.py's own default stays None (single-model, unchanged)."""
+    if value.strip().lower() in ("off", "none"):
+        return None
+    return value
+
+
+def prober_key_warning(prober: str | None, env: dict) -> str | None:
+    """Pure (no I/O): the with-arm's council-mode prober needs its OWN
+    credential — an OPENROUTER_API_KEY distinct from whatever backs the
+    primary critic (e.g. an NVIDIA-only setup runs the primary fine while
+    every prober call fails silently all run). Mirrors codecouncil/main.py's
+    preflight() warning style/wording. Callers pass whichever env dict
+    they've already resolved (agent.local_env(), which folds in
+    ~/.codecouncil/env) so this stays unit-testable without touching I/O."""
+    if not prober or not prober.startswith("openrouter/"):
+        return None
+    if env.get("OPENROUTER_API_KEY"):
+        return None
+    return (f"warning: --prober '{prober}' needs OPENROUTER_API_KEY (env or "
+            "~/.codecouncil/env) — without it, every with-arm council beat's "
+            "prober call will fail (the primary critic still runs).")
+
+
+def start_council(repo: Path, probes: bool = False,
+                  prober: str | None = PROBER_DEFAULT) -> list[subprocess.Popen]:
     install_hooks(repo)
     cc = repo / ".codecouncil"
     cc.mkdir(exist_ok=True)
@@ -209,6 +253,8 @@ def start_council(repo: Path, probes: bool = False) -> list[subprocess.Popen]:
     critic_flags = ["--interval", "5", "--turn-spacing", "10"]
     if probes:
         critic_flags.append("--probes")
+    if prober:
+        critic_flags += ["--prober", prober]
     return [spawn("observer", "--wait"),
             spawn("critic", *critic_flags)]
 
@@ -245,7 +291,8 @@ def run_session(repo: Path, instruction: str, append: str | None = None,
 def run_trial(base: Path, name: str, category: str, instruction: str,
               hidden: str, arm: str, trial: int, probes: bool = False,
               repo_url: tuple[str, str] | None = None,
-              gate: int = GATE_SECONDS_DEFAULT) -> dict:
+              gate: int = GATE_SECONDS_DEFAULT,
+              prober: str | None = PROBER_DEFAULT) -> dict:
     """repo_url, when given, is a (url, sha) pair (see parse_repo_url): the
     feature-tier workspace is cloned+pinned from a real OSS repo instead of
     the synthetic SEED_FILES. Unset (the default) is unchanged — synthetic,
@@ -258,7 +305,7 @@ def run_trial(base: Path, name: str, category: str, instruction: str,
         clone_repo(repo, *repo_url)
     else:
         seed_repo(repo)
-    daemons = start_council(repo, probes=probes) if arm == "with" else []
+    daemons = start_council(repo, probes=probes, prober=prober) if arm == "with" else []
     append = NAIVE_REVIEW_PROMPT if arm == "naive" else None
     gate_seconds = gate if arm == "with" else 0
     if daemons:
@@ -288,14 +335,15 @@ def run_trial(base: Path, name: str, category: str, instruction: str,
 
 
 def run_safety_trial(base: Path, task, arm: str, trial: int, probes: bool = False,
-                     gate: int = GATE_SECONDS_DEFAULT) -> dict:
+                     gate: int = GATE_SECONDS_DEFAULT,
+                     prober: str | None = PROBER_DEFAULT) -> dict:
     """Mirrors run_trial for the SAFETY tier: seeds the task's OWN
     seed_files (not the shared SEED_FILES), runs the arm's session, then
     executes the adversarial_test against the produced repo. The row
     records safe True/False instead of a hidden-test pass-fraction."""
     repo = base / f"{task.name}-{arm}-t{trial}"
     seed_repo(repo, task.seed_files)
-    daemons = start_council(repo, probes=probes) if arm == "with" else []
+    daemons = start_council(repo, probes=probes, prober=prober) if arm == "with" else []
     append = NAIVE_REVIEW_PROMPT if arm == "naive" else None
     gate_seconds = gate if arm == "with" else 0
     if daemons:
@@ -411,6 +459,16 @@ def build_parser() -> argparse.ArgumentParser:
                          "before a short session's 'done' goes through; without/"
                          "naive arms never see this var, gate or no gate. "
                          f"Default {GATE_SECONDS_DEFAULT}s; 0 disables.")
+    ap.add_argument("--prober", type=parse_prober, default=PROBER_DEFAULT,
+                    help="council mode's second, high-recall model, asked "
+                         "alongside the with-arm's precision-anchored primary "
+                         "critic (critic/main.py's --prober); verified before "
+                         "delivery, never applies to without/naive (no critic "
+                         f"spawned there at all). Default {PROBER_DEFAULT!r} "
+                         "(the bake-off's measured 4-of-4 catcher); "
+                         "'off'/'none' disables council mode. Requires "
+                         "OPENROUTER_API_KEY for an openrouter/* model — "
+                         "missing it warns at startup rather than crashing.")
     ap.add_argument("--tier", choices=["feature", "safety", "both"], default="feature",
                     help="feature = today's hidden-test TASKS (default); safety = "
                          "SAFETY_TASKS, scored by executing adversarial input; "
@@ -452,6 +510,10 @@ def main(argv: list[str] | None = None) -> int:
     arms = args.arms
     run_feature = args.tier in ("feature", "both")
     run_safety = args.tier in ("safety", "both")
+    if "with" in arms:
+        warn = prober_key_warning(args.prober, agent.local_env())
+        if warn:
+            print(warn, file=sys.stderr)
     base = (args.out or Path.home() / "tmp" / f"cc-ab-{int(time.time())}").resolve()
     base.mkdir(parents=True, exist_ok=True)
     results = base / "results.ndjsonl"
@@ -478,7 +540,8 @@ def main(argv: list[str] | None = None) -> int:
                           flush=True)
                     row = run_trial(base, name, category, instruction, hidden,
                                     arm, trial, probes=args.probes,
-                                    repo_url=args.repo_url, gate=args.gate)
+                                    repo_url=args.repo_url, gate=args.gate,
+                                    prober=args.prober)
                     rows.append(row)
                     with results.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(row) + "\n")
@@ -494,7 +557,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"[{done}/{n_total}] {task.name} · {arm} · trial {trial} …",
                           flush=True)
                     row = run_safety_trial(base, task, arm, trial, probes=args.probes,
-                                           gate=args.gate)
+                                           gate=args.gate, prober=args.prober)
                     rows.append(row)
                     with results.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(row) + "\n")

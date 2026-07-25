@@ -1,7 +1,9 @@
 """A/B eval harness: the pure scoring pieces."""
 
+import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -199,12 +201,14 @@ class TestSettingSourcesIsolation(unittest.TestCase):
 
 
 class TestGateWiring(unittest.TestCase):
-    """Task 2: --gate SECONDS (default 45) turns the done-gate on for the
-    with-council arm only, by threading COUNCIL_GATE_SECONDS into the
-    claude subprocess's own environment (not the harness's os.environ)."""
+    """Task 2 (run-3): --gate SECONDS (default 90, raised from 45 — a
+    verified finding was measured landing ~9s after the old 45s cap gave
+    up) turns the done-gate on for the with-council arm only, by threading
+    COUNCIL_GATE_SECONDS into the claude subprocess's own environment (not
+    the harness's os.environ)."""
 
-    def test_argparse_default_is_45(self):
-        self.assertEqual(ab_run.build_parser().parse_args([]).gate, 45)
+    def test_argparse_default_is_90(self):
+        self.assertEqual(ab_run.build_parser().parse_args([]).gate, 90)
 
     def test_argparse_flag_parses(self):
         self.assertEqual(ab_run.build_parser().parse_args(["--gate", "10"]).gate, 10)
@@ -252,6 +256,154 @@ class TestGateWiring(unittest.TestCase):
     def test_gate_zero_disables_for_with_arm(self):
         env = self._claude_env("with", gate=0)
         self.assertTrue(env is None or "COUNCIL_GATE_SECONDS" not in env)
+
+
+class TestProberWiring(unittest.TestCase):
+    """Task 2 (run-3): --prober MODEL turns council mode on for the
+    with-council arm's critic spawn (critic/main.py already accepts
+    --prober). Default is the measured high-recall prober
+    (openrouter/openai/gpt-5-mini); 'off'/'none' disables; without/naive
+    never see it because they never spawn a critic at all."""
+
+    def test_argparse_default_is_gpt5mini(self):
+        args = ab_run.build_parser().parse_args([])
+        self.assertEqual(args.prober, "openrouter/openai/gpt-5-mini")
+
+    def test_argparse_off_disables(self):
+        self.assertIsNone(ab_run.build_parser().parse_args(["--prober", "off"]).prober)
+
+    def test_argparse_none_disables(self):
+        self.assertIsNone(ab_run.build_parser().parse_args(["--prober", "none"]).prober)
+
+    def test_argparse_custom_model(self):
+        args = ab_run.build_parser().parse_args(["--prober", "some/model"])
+        self.assertEqual(args.prober, "some/model")
+
+    def _critic_argv(self, prober):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            with mock.patch.object(ab_run, "install_hooks"), \
+                 mock.patch.object(ab_run.subprocess, "Popen") as popen:
+                popen.return_value = mock.Mock()
+                ab_run.start_council(repo, prober=prober)
+            self.assertEqual(popen.call_count, 2)
+            return popen.call_args_list[1].args[0]
+
+    def test_start_council_includes_prober_by_default(self):
+        argv = self._critic_argv("openrouter/openai/gpt-5-mini")
+        self.assertIn("--prober", argv)
+        self.assertEqual(argv[argv.index("--prober") + 1], "openrouter/openai/gpt-5-mini")
+
+    def test_start_council_includes_custom_prober(self):
+        argv = self._critic_argv("some/model")
+        self.assertIn("--prober", argv)
+        self.assertEqual(argv[argv.index("--prober") + 1], "some/model")
+
+    def test_start_council_omits_prober_when_off(self):
+        argv = self._critic_argv(None)
+        self.assertNotIn("--prober", argv)
+
+    def _run_trial_argv(self, arm: str, prober):
+        """without/naive never call start_council at all (no daemons), so
+        --prober can never appear anywhere in their path regardless of the
+        harness-level --prober setting."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            with mock.patch.object(ab_run, "install_hooks"), \
+                 mock.patch.object(ab_run.subprocess, "Popen") as popen, \
+                 mock.patch.object(ab_run, "sh") as sh_mock, \
+                 mock.patch.object(ab_run.score, "run_hidden_test",
+                                    return_value={"passed": 0, "total": 0, "all_pass": False,
+                                                  "checks": {}, "crashed": False, "output": ""}), \
+                 mock.patch.object(ab_run.score, "git_facts",
+                                    return_value={"commits": 0, "last_subject": ""}), \
+                 mock.patch.object(ab_run, "find_project_dir", return_value=None):
+                sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+                ab_run.run_trial(base, "task", "clean", "do the thing. Commit.",
+                                 "CHECK x PASS", arm, 1, prober=prober)
+            return popen.call_count
+
+    def test_without_arm_never_spawns_critic(self):
+        self.assertEqual(
+            self._run_trial_argv("without", "openrouter/openai/gpt-5-mini"), 0)
+
+    def test_naive_arm_never_spawns_critic(self):
+        self.assertEqual(
+            self._run_trial_argv("naive", "openrouter/openai/gpt-5-mini"), 0)
+
+
+class TestProberKeyWarning(unittest.TestCase):
+    """Task 2 (run-3): missing OPENROUTER_API_KEY is a warning, never a
+    crash — mirrors codecouncil/main.py's preflight() warning style."""
+
+    def test_warns_when_prober_on_and_key_absent(self):
+        msg = ab_run.prober_key_warning("openrouter/openai/gpt-5-mini", {})
+        self.assertIsNotNone(msg)
+        self.assertIn("OPENROUTER_API_KEY", msg)
+
+    def test_no_warning_when_key_present(self):
+        msg = ab_run.prober_key_warning(
+            "openrouter/openai/gpt-5-mini", {"OPENROUTER_API_KEY": "sk-x"})
+        self.assertIsNone(msg)
+
+    def test_no_warning_when_prober_off(self):
+        self.assertIsNone(ab_run.prober_key_warning(None, {}))
+
+    def test_no_warning_for_non_openrouter_prober(self):
+        self.assertIsNone(ab_run.prober_key_warning("nvidia-nim/some/model", {}))
+
+    def test_main_prints_warning_to_stderr_when_with_arm_and_key_absent(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(ab_run, "install_hooks"), \
+             mock.patch.object(ab_run.subprocess, "Popen") as popen, \
+             mock.patch.object(ab_run, "sh") as sh_mock, \
+             mock.patch.object(ab_run.time, "sleep"), \
+             mock.patch.object(ab_run.score, "run_hidden_test",
+                                return_value={"passed": 0, "total": 0, "all_pass": False,
+                                              "checks": {}, "crashed": False, "output": ""}), \
+             mock.patch.object(ab_run.score, "git_facts",
+                                return_value={"commits": 0, "last_subject": ""}), \
+             mock.patch.object(ab_run.score, "run_adversarial_test",
+                                return_value={"safe": True}), \
+             mock.patch.object(ab_run.score, "council_stats",
+                                return_value={"findings": 0, "passes": 0,
+                                              "receipts": 0, "delivered": 0}), \
+             mock.patch.object(ab_run, "find_project_dir", return_value=None), \
+             mock.patch.object(ab_run.agent, "local_env", return_value={}):
+            popen.return_value = mock.Mock()
+            sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            buf = io.StringIO()
+            with mock.patch.object(sys, "stderr", buf):
+                ab_run.main(["--tier", "safety", "--tasks", "1", "--arms", "with",
+                            "--out", tmp])
+        self.assertIn("OPENROUTER_API_KEY", buf.getvalue())
+
+    def test_main_no_warning_when_key_present(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(ab_run, "install_hooks"), \
+             mock.patch.object(ab_run.subprocess, "Popen") as popen, \
+             mock.patch.object(ab_run, "sh") as sh_mock, \
+             mock.patch.object(ab_run.time, "sleep"), \
+             mock.patch.object(ab_run.score, "run_hidden_test",
+                                return_value={"passed": 0, "total": 0, "all_pass": False,
+                                              "checks": {}, "crashed": False, "output": ""}), \
+             mock.patch.object(ab_run.score, "git_facts",
+                                return_value={"commits": 0, "last_subject": ""}), \
+             mock.patch.object(ab_run.score, "run_adversarial_test",
+                                return_value={"safe": True}), \
+             mock.patch.object(ab_run.score, "council_stats",
+                                return_value={"findings": 0, "passes": 0,
+                                              "receipts": 0, "delivered": 0}), \
+             mock.patch.object(ab_run, "find_project_dir", return_value=None), \
+             mock.patch.object(ab_run.agent, "local_env",
+                                return_value={"OPENROUTER_API_KEY": "sk-x"}):
+            popen.return_value = mock.Mock()
+            sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            buf = io.StringIO()
+            with mock.patch.object(sys, "stderr", buf):
+                ab_run.main(["--tier", "safety", "--tasks", "1", "--arms", "with",
+                            "--out", tmp])
+        self.assertNotIn("OPENROUTER_API_KEY", buf.getvalue())
 
 
 class TestCouncilStatsDelivered(unittest.TestCase):

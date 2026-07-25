@@ -155,10 +155,15 @@ class TestHallucinatedImports(unittest.TestCase):
 
 
 class TestMatchSignal(unittest.TestCase):
-    """Task 4: linking a judge's SUGGESTION back to the screening signal that
-    likely prompted it — same basename + (kind named in the issue text OR
-    line within 3). Ambiguous (more than one distinct signal matches) means
-    attach nothing."""
+    """Task 4 (review fix): linking a judge's SUGGESTION back to the
+    screening signal that likely prompted it — CONSERVATIVE matching, same
+    basename + kind (or a synonym) named in the issue text. Line proximity
+    ALONE is never sufficient — that was the bug (a topically-unrelated
+    suggestion could inherit a nearby signal's CWE). Attaching is further
+    gated to the four exploit CWEs (CWE-89/78/95/502) verify.py knows how to
+    demonstrate; a reward-hacking/slopsquatting match attaches nothing.
+    Ambiguous (more than one distinct exploit-CWE signal topically matches)
+    means attach nothing."""
 
     def test_matches_basename_and_kind_named_in_issue(self):
         sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
@@ -168,12 +173,51 @@ class TestMatchSignal(unittest.TestCase):
         self.assertEqual(screen.match_signal(suggestion, sig),
                          {"kind": "sql-injection", "cwe": "CWE-89"})
 
-    def test_matches_basename_and_line_proximity(self):
+    def test_proximity_alone_is_not_sufficient(self):
+        # review catch: line-proximity alone used to attach a signal's CWE
+        # to a topically-unrelated suggestion. A nearby sql-injection signal
+        # must NOT attach to a suggestion whose issue text never names it.
         sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
                 "line": 10, "evidence": "..."}]
         suggestion = {"file": "app.py", "line": 12, "issue": "bad query building"}
+        self.assertIsNone(screen.match_signal(suggestion, sig))
+
+    def test_unrelated_suggestion_near_sqli_signal_not_matched(self):
+        # the exact repro from the live review catch: a "variable name not
+        # descriptive" suggestion at line 13 must not inherit CWE-89 just
+        # because a real SQLi signal sits one line above at line 12.
+        sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
+                "line": 12, "evidence": "cursor.execute(f'...')"}]
+        suggestion = {"file": "app.py", "line": 13,
+                      "issue": "variable name not descriptive"}
+        self.assertIsNone(screen.match_signal(suggestion, sig))
+
+    def test_reward_hacking_signal_never_attaches_even_when_named(self):
+        # non-exploit CWEs (reward-hacking, slopsquatting) never attach,
+        # even proximity + topical match — verification routing only
+        # demonstrates the four exploit CWEs.
+        sig = [{"kind": "test-removed", "cwe": "reward-hacking", "file": "app.py",
+                "line": 13, "evidence": "def test_edge_case(self):"}]
+        suggestion = {"file": "app.py", "line": 13,
+                      "issue": "a test was removed here"}
+        self.assertIsNone(screen.match_signal(suggestion, sig))
+
+    def test_genuine_sqli_suggestion_matches(self):
+        sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
+                "line": 12, "evidence": "cursor.execute(f'...')"}]
+        suggestion = {"file": "app.py", "line": 12,
+                      "issue": "SQL injection via f-string in the query"}
         self.assertEqual(screen.match_signal(suggestion, sig),
                          {"kind": "sql-injection", "cwe": "CWE-89"})
+
+    def test_two_different_exploit_cwes_named_no_attach(self):
+        sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
+                "line": 3, "evidence": "..."},
+               {"kind": "command-injection", "cwe": "CWE-78", "file": "app.py",
+                "line": 4, "evidence": "..."}]
+        suggestion = {"file": "app.py", "line": 3,
+                      "issue": "possible SQL injection or command injection here"}
+        self.assertIsNone(screen.match_signal(suggestion, sig))
 
     def test_no_match_different_basename(self):
         sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "other.py",

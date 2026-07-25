@@ -243,16 +243,50 @@ def screen(diff_text: str, repo: Path | None = None) -> list[dict]:
     return signals[:MAX_SIGNALS]
 
 
+# The four CWEs verify.py has an EXPLOIT_ADDENDA template for. Verification
+# routing only ever cares about these — a matched reward-hacking/slopsquatting
+# signal (test-removed, assertions-weakened, unresolvable-import,
+# typo-suspect-import) has no exploit to demonstrate, so match_signal never
+# attaches it: those failure modes already surface via the screening signals
+# in the judgment prompt, not via exploit verification.
+_EXPLOIT_CWES = frozenset({"CWE-89", "CWE-78", "CWE-95", "CWE-502"})
+
+# kind -> synonym terms checked against the model's issue text (lowercased,
+# substring match). Falls back to the kind's own words (hyphens -> spaces)
+# for any kind not listed here, so a new screen.py check doesn't need a
+# matching entry to be topically matchable.
+_KIND_TERMS: dict[str, tuple[str, ...]] = {
+    "sql-injection": ("sql", "injection"),
+    "command-injection": ("command", "injection", "shell"),
+    "eval-injection": ("eval", "exec"),
+    "unsafe-deserialization": ("pickle", "yaml", "deserial"),
+    "test-removed": ("test", "assert"),
+    "assertions-weakened": ("test", "assert"),
+    "unresolvable-import": ("import", "package", "depend"),
+    "typo-suspect-import": ("import", "package", "depend"),
+}
+
+
+def _kind_named(kind: str, issue: str) -> bool:
+    terms = _KIND_TERMS.get(kind, (kind.replace("-", " "),))
+    return any(term in issue for term in terms)
+
+
 def match_signal(suggestion: dict, signals: list[dict]) -> dict | None:
     """Link a judge's SUGGESTION back to the screening signal that likely
     prompted it (Task 4: proof-by-exploit verification needs to know WHICH
     CWE class to demonstrate). Pure.
 
-    Deliberately simple matching rule: a signal is a candidate when it
-    shares the suggestion's file basename AND either (a) the signal's kind
-    (e.g. "sql-injection" -> "sql injection") is named in the model's issue
-    text, or (b) the signal's line is within 3 of the suggestion's line (a
-    signal with no line, i.e. line 0, never proximity-matches). If more than
+    CONSERVATIVE matching rule: a signal is a candidate only when it shares
+    the suggestion's file basename AND is topically related — the signal's
+    kind (or a synonym of it, see `_KIND_TERMS`) must be named in the
+    model's issue text. Line proximity alone is NEVER sufficient (that was
+    the bug: a same-file, nearby-but-unrelated suggestion could inherit an
+    exploit CWE it had nothing to do with) and is not consulted at all.
+    A candidate is also dropped unless its cwe is one of the four exploit
+    CWEs verify.py knows how to demonstrate (`_EXPLOIT_CWES`) — a
+    reward-hacking/slopsquatting match attaches nothing, keeping those
+    records byte-identical to before screen_signal existed. If more than
     one DISTINCT (kind, cwe) pair ends up a candidate, the link is
     ambiguous and nothing is attached — a wrong exploit class in the
     verification prompt is worse than no addendum at all.
@@ -260,19 +294,18 @@ def match_signal(suggestion: dict, signals: list[dict]) -> dict | None:
     sugg_base = Path(suggestion.get("file") or "").name
     if not sugg_base:
         return None
-    sugg_line = suggestion.get("line")
     issue = (suggestion.get("issue") or "").lower()
     candidates: set[tuple[str, str]] = set()
     for s in signals:
         if Path(s.get("file") or "").name != sugg_base:
             continue
         kind = s.get("kind", "")
-        kind_named = bool(kind) and kind.replace("-", " ") in issue
-        sig_line = s.get("line") or 0
-        near_line = (isinstance(sugg_line, int) and sig_line > 0
-                     and abs(sig_line - sugg_line) <= 3)
-        if kind_named or near_line:
-            candidates.add((kind, s.get("cwe", "")))
+        if not kind or not _kind_named(kind, issue):
+            continue
+        cwe = s.get("cwe", "")
+        if cwe not in _EXPLOIT_CWES:
+            continue
+        candidates.add((kind, cwe))
     if len(candidates) != 1:
         return None
     kind, cwe = next(iter(candidates))

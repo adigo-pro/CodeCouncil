@@ -1,14 +1,22 @@
-"""A/B evaluation: Claude Code WITH CodeCouncil vs WITHOUT, on identical tasks
-with hidden acceptance tests.
+"""A/B evaluation: Claude Code WITH CodeCouncil vs WITHOUT vs a naive
+self-review nudge, on identical tasks with hidden acceptance tests.
 
-    python3 -m evals.ab.run [--trials N] [--tasks K] [--arms both|with|without]
+    python3 -m evals.ab.run [--trials N] [--tasks K] [--arms all]
 
 Paired design: every (task, trial) runs once per arm in its own fresh scratch
 repo seeded with the same latent-trap files (training.run.SEED_FILES). The
-'with' arm gets hooks + observer + critic (the delivery loop — the treatment);
-the 'without' arm is a bare repo. Hidden tests (evals.ab.tasks) score the
-result; the agent never sees them. Rows land in results.ndjsonl; a markdown
-report is printed and written at the end.
+'with' arm gets hooks + observer + critic (the delivery loop — the
+treatment); 'without' is a bare repo; 'naive' is also a bare repo (no
+daemons) but the session's system prompt gets one generic self-review
+sentence appended (NAIVE_REVIEW_PROMPT), via the `claude` CLI's
+`--append-system-prompt` flag — the control that isolates whether
+CodeCouncil's verified review beats the agent simply nagging itself. Hidden
+tests (evals.ab.tasks) score the result; the agent never sees them. Rows land
+in results.ndjsonl; a markdown report is printed and written at the end.
+
+--arms accepts a comma list of without|naive|with (e.g. "without,naive,with"),
+the alias "all" (-> without,naive,with), or the back-compat alias "both"
+(-> without,with, unchanged from before the naive arm existed).
 """
 
 from __future__ import annotations
@@ -31,6 +39,17 @@ from training.run import SEED_FILES, sh  # noqa: E402
 
 SESSION_TIMEOUT = 420
 SETTLE_SECONDS = 25  # let the critic judge the session's final diff
+
+# The naive-control arm's entire "treatment": one generic sentence a user
+# might paste themselves, appended via the CLI's --append-system-prompt. Not
+# a mini-CodeCouncil — no verification, no repo-specific facts, no tools.
+NAIVE_REVIEW_PROMPT = (
+    "Before you finish, review your own code for bugs, security issues, and "
+    "unhandled edge cases, and fix any you find."
+)
+
+ARMS_ALL = ["without", "naive", "with"]
+_VALID_ARMS = set(ARMS_ALL)
 
 
 def seed_repo(repo: Path) -> None:
@@ -62,12 +81,14 @@ def start_council(repo: Path, probes: bool = False) -> list[subprocess.Popen]:
             spawn("critic", *critic_flags)]
 
 
-def run_session(repo: Path, instruction: str) -> dict:
+def run_session(repo: Path, instruction: str, append: str | None = None) -> dict:
+    argv = ["claude", "-p", instruction, "--permission-mode", "acceptEdits",
+            "--allowedTools", "Edit", "Write", "Bash"]
+    if append:
+        argv += ["--append-system-prompt", append]
     t0 = time.time()
     for attempt in (1, 2):
-        r = sh(["claude", "-p", instruction, "--permission-mode", "acceptEdits",
-                "--allowedTools", "Edit", "Write", "Bash"], cwd=repo,
-               timeout=SESSION_TIMEOUT)
+        r = sh(argv, cwd=repo, timeout=SESSION_TIMEOUT)
         if r.returncode == 0:
             break
         time.sleep(30 * attempt)
@@ -80,10 +101,11 @@ def run_trial(base: Path, name: str, category: str, instruction: str,
     repo = base / f"{name}-{arm}-t{trial}"
     seed_repo(repo)
     daemons = start_council(repo, probes=probes) if arm == "with" else []
+    append = NAIVE_REVIEW_PROMPT if arm == "naive" else None
     if daemons:
         time.sleep(3)
     try:
-        session = run_session(repo, instruction)
+        session = run_session(repo, instruction, append=append)
         if daemons:
             time.sleep(SETTLE_SECONDS)
     finally:
@@ -109,10 +131,11 @@ def run_trial(base: Path, name: str, category: str, instruction: str,
 def report(rows: list[dict]) -> str:
     lines = ["| task | arm | hidden | tests run | notes |",
              "|---|---|---|---|---|"]
-    totals: dict[str, list[float]] = {"with": [], "without": []}
+    totals: dict[str, list[float]] = {}
     for r in rows:
         h = r["hidden"]
         frac = f"{h['passed']}/{h['total']}" if h["total"] else "crash"
+        totals.setdefault(r["arm"], [])
         if h["total"]:
             totals[r["arm"]].append(h["passed"] / h["total"])
         notes = []
@@ -125,20 +148,42 @@ def report(rows: list[dict]) -> str:
             notes.append(f"session rc={r['session']['rc']}")
         lines.append(f"| {r['task']} | {r['arm']} | {frac} | "
                      f"{'yes' if r['tests_run'] else 'no'} | {'; '.join(notes)} |")
-    for arm in ("without", "with"):
+    # stable, readable order for the arms we know about; any unknown arm
+    # (custom --arms values) still gets a line, appended after.
+    order = [a for a in ARMS_ALL if a in totals] + \
+            [a for a in totals if a not in ARMS_ALL]
+    for arm in order:
         vals = totals[arm]
         mean = sum(vals) / len(vals) if vals else 0.0
         lines.append("")
-        lines.append(f"**{arm} council:** mean hidden-test pass rate "
+        lines.append(f"**{arm}:** mean hidden-test pass rate "
                      f"{mean:.0%} over {len(vals)} trials")
     return "\n".join(lines)
+
+
+def parse_arms(value: str) -> list[str]:
+    """'without,naive,with' -> list; 'all' -> all three; 'both' -> without,with
+    (kept as a back-compat alias for the pre-naive-arm --arms both)."""
+    if value == "all":
+        return list(ARMS_ALL)
+    if value == "both":
+        return ["without", "with"]
+    arms = value.split(",")
+    for arm in arms:
+        if arm not in _VALID_ARMS:
+            raise argparse.ArgumentTypeError(
+                f"invalid arm {arm!r} (choose from {sorted(_VALID_ARMS)}, "
+                f"'all', or 'both')")
+    return arms
 
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="evals.ab.run", description=__doc__)
     ap.add_argument("--trials", type=int, default=1)
     ap.add_argument("--tasks", type=int, default=None, help="first K tasks only")
-    ap.add_argument("--arms", choices=["both", "with", "without"], default="both")
+    ap.add_argument("--arms", type=parse_arms, default=parse_arms("both"),
+                    help="comma list of without|naive|with, or 'all', or 'both' "
+                         "(back-compat for without,with)")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--probes", action="store_true",
                     help="enable critic property probes on the with-council arm "
@@ -150,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     tasks = TASKS[:args.tasks] if args.tasks else TASKS
-    arms = ["without", "with"] if args.arms == "both" else [args.arms]
+    arms = args.arms
     base = (args.out or Path.home() / "tmp" / f"cc-ab-{int(time.time())}").resolve()
     base.mkdir(parents=True, exist_ok=True)
     results = base / "results.ndjsonl"

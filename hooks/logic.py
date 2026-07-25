@@ -1,8 +1,9 @@
 """Pure decision logic for the peer-review hook.
 
 `decide()` sees one Claude Code hook event plus the current suggestions and
-delivery ledger, and returns (output-JSON-or-None, mutated ledger). No I/O —
-everything here is unit-testable without a filesystem or a session.
+delivery ledger, mutates that ledger in place to mark what it delivered, and
+returns the output JSON (or None). No I/O — everything here is unit-testable
+without a filesystem or a session.
 
 Delivery rules:
   - medium/high suggestions -> injected as context after an edit (once each)

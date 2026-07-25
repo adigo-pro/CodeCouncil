@@ -399,14 +399,17 @@ def probe_pass(events: list[dict], ctx: dict, heuristics_version: int) -> None:
                         candidate.get("promise", ""))
         if key in already_probed or key in newly_probed:
             continue
-        budget -= 1
-        # Recorded now (probed), not after checking for a finding below —
-        # a non-diverging candidate must never re-probe next beat either.
-        newly_probed.append(key)
+        budget -= 1  # a failed call still spent, so it consumes this beat's budget
         try:
             finding = probe.run_probes(candidate, repo, ask)
         except Exception:
-            continue  # a broken probe pipeline must never cost the beat
+            # transient failure: DON'T record the key, so the candidate is
+            # retried next beat (bounded by the per-beat budget) rather than
+            # suppressed forever on a one-off model/staging hiccup.
+            continue
+        # Probed to a conclusion (a finding, or a clean no-divergence) — record
+        # the key so a non-diverging candidate never re-probes next beat either.
+        newly_probed.append(key)
         if not finding:
             continue
         record = {

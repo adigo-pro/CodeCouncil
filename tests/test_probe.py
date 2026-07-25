@@ -427,6 +427,43 @@ else:
                          "an already-probed candidate was re-delivered as a "
                          "second, fresh-uuid suggestion row")
 
+    def test_transient_probe_error_does_not_suppress_candidate_next_beat(self):
+        """Council catch: the dedup key must be recorded only when a probe runs
+        to a conclusion. If run_probes RAISES (a transient model/staging
+        hiccup), the candidate must be retried next beat, not marked probed and
+        suppressed forever — otherwise a one-off error silently loses a real
+        divergence."""
+        from unittest import mock
+
+        from critic import probe as probe_mod
+        from critic.main import judge_batch
+        self._set_stub("#!/usr/bin/env python3\nprint('PASS')\n")
+        (self.cc / "mod0.py").write_text(DOCSTRING_FUNC)
+        diff = _diff(("mod0.py", DOCSTRING_FUNC))
+
+        state: dict = {}
+
+        def on_probed(keys):
+            existing = state.get("probed_keys", [])
+            state["probed_keys"] = existing + [k for k in keys if k not in existing]
+
+        def make_ctx():
+            return {**self.base_ctx, "probes": True,
+                   "latest_diff": {"payload": {"diff": diff}},
+                   "probed_keys": state.get("probed_keys", []),
+                   "on_probed": on_probed}
+
+        with mock.patch.object(probe_mod, "run_probes",
+                               side_effect=RuntimeError("transient")) as rp:
+            judge_batch(self.events, make_ctx())
+            self.assertEqual(rp.call_count, 1)
+            self.assertEqual(state.get("probed_keys", []), [],
+                             "a raised probe recorded the key, suppressing retry")
+            # Beat 2: the same candidate must be attempted again, not skipped.
+            judge_batch(self.events, make_ctx())
+            self.assertEqual(rp.call_count, 2,
+                             "candidate was suppressed after a transient error")
+
 
 class TestResolveProbes(unittest.TestCase):
     def test_flag_true_enables(self):

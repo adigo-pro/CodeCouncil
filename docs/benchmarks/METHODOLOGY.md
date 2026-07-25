@@ -1,13 +1,22 @@
 # Benchmark methodology
 
-**Status: harness complete, no live multi-session run published yet.** This
-document describes what the `evals/ab/` harness measures and how to
-reproduce it. It intentionally contains **no result numbers** — running a
-real multi-session experiment costs real API money, and that's a maintainer
-decision made in the open, not a thing to fake to fill a table. When a real
-run lands, its raw rows go in this directory next to this file, exactly like
-[`2026-07-23-ab-pilot.md`](2026-07-23-ab-pilot.md) — which already published
-a null result rather than dress one up.
+**Status: four live safety-tier runs published, each tying within noise.**
+This document describes what the `evals/ab/` harness measures and how to
+reproduce it. Four real 45-session runs have been published in this
+directory — [run 1](2026-07-25-safety-run1.md), [run 2](2026-07-25-safety-run2.md),
+[run 3](2026-07-25-safety-run3.md), [run 4](2026-07-25-safety-run4.md) — and
+every one of them tied the with-council arm against the controls at n=15.
+That is not a hidden negative result: each run used its tie to *diagnose*
+the next real bottleneck (run 1: the critic couldn't judge before ~15s
+sessions ended; run 2: a done-gate fixed timing but delivery was still
+zero; run 3: a prober fixed recall but verification reliability capped
+delivery; run 4: script-based verification fixed that, leaving model
+discipline on one hard case as the residual) and the *next* run verified
+the fix held. Small-n ties are not proof of no effect — they're proof the
+harness surfaces a real bottleneck every time it's run, which is what
+"harness proven end-to-end" means here. Earlier pilot:
+[`2026-07-23-ab-pilot.md`](2026-07-23-ab-pilot.md), which published a null
+result rather than dress one up.
 
 ## What we measure, and why
 
@@ -169,12 +178,19 @@ real repo has no bearing on it.
 Writing these down plainly so this can't be the next thing someone
 debunks:
 
-- **No live run has been published under this methodology yet.** Everything
-  above describes the harness, not a result. The one prior pilot
+- **Four live safety-tier runs are published, and every one tied.** Runs
+  [1](2026-07-25-safety-run1.md)–[4](2026-07-25-safety-run4.md) (45 sessions
+  each) never showed a safe-rate difference outside noise at n=15 between
+  the with-council arm and the controls. Each run's value was diagnostic,
+  not a headline number: it located the next bottleneck (timing, then
+  delivery, then verification reliability) which the following run then
+  fixed and confirmed fixed. Read all four before trusting any future
+  headline from this harness — none of them supports a "council makes code
+  safer" claim yet, and none claims to. The prior pilot
   ([2026-07-23-ab-pilot.md](2026-07-23-ab-pilot.md)) predates the naive
   arm, the safety tier, and the isolation fix, and it published a null
   result (no measurable outcome difference, plus an identified latency
-  mismatch) — read it before trusting any future headline from this harness.
+  mismatch) — read it too.
 - **Small n by construction.** A handful of tasks × a handful of trials is
   enough to catch a broken scorer or a gross effect, not enough for a
   confidence interval worth quoting. `--trials` should be ≥3 per cell before

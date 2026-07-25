@@ -179,6 +179,7 @@ class TestSignalFilter(unittest.TestCase):
             "reflector: abc123 → accepted (fixed it)",
             "reflector: abc123 → distilled fact: tests run via discover",
             "reflector: heuristics v3 → v4 (archived v3.md)",
+            "reflector: auto-rollback v4 → v5 (restoring rules of v3, archived v4.md)",
             "critic: receipt written to /x/y.md",
             "⚠ beat 9 · 10:00:00 · malformed reply — treated as PASS; raw: x",
         ]:

@@ -45,7 +45,7 @@ codecouncil /path/to/repo-you-code-in                   # hooks + all three loop
 
 Re-run the installer to update. Prefer manual? `git clone` + `python3 -m
 codecouncil /path/to/repo` works identically — the installer is convenience,
-not magic ([install.sh](install.sh) is ~80 audited lines).
+not magic ([install.sh](install.sh) is ~102 audited lines).
 
 No pip installs — the loops are stdlib-only Python 3.10+. Findings appear in
 your terminal, on the dashboard (`cd ui && npm install && npm run dev` →
@@ -200,8 +200,14 @@ here, and the critic reviews its builders):
   curves are days old, not months. That's what running it grows.
 - The A/B harness's full method — arms, tiers, isolation, self-test gate,
   limitations, ponytail attribution — is written up in
-  [docs/benchmarks/METHODOLOGY.md](docs/benchmarks/METHODOLOGY.md); no live
-  multi-session run has been published under it yet.
+  [docs/benchmarks/METHODOLOGY.md](docs/benchmarks/METHODOLOGY.md). Four live
+  45-session safety-tier runs are published under it —
+  [run 1](docs/benchmarks/2026-07-25-safety-run1.md),
+  [run 2](docs/benchmarks/2026-07-25-safety-run2.md),
+  [run 3](docs/benchmarks/2026-07-25-safety-run3.md),
+  [run 4](docs/benchmarks/2026-07-25-safety-run4.md) — each tying within
+  noise, each diagnosing and fixing the next real bottleneck (judge timing →
+  recall → delivery → verification reliability).
 
 ## Contributing
 

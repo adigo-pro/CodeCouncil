@@ -21,7 +21,8 @@ reading the diff to check. CodeCouncil is the second pair of eyes that does.
 
 Think of it as four simple programs passing notes through files:
 
-1. **Observer** (every 3 seconds): reads the coding agent's session transcript
+1. **Observer** (event-driven, fires as soon as the transcript grows, with a
+   10-second fallback floor so it never fully idles): reads the coding agent's session transcript
    (what it *said* it's doing) and the git diff + commits (what *actually*
    changed). Writes both streams to a log. Pairing intent with reality is the
    core trick — that pairing is what no linter has.
@@ -59,8 +60,8 @@ charts.
    rules-version that produced it; we chart what fraction were accepted, per
    version. Cross-checked by a model-free signal (did the flagged file
    actually change afterward?).
-2. **Frozen eval set (controlled):** 7 real cases with known right answers
-   (4 bugs it must catch, 3 clean changes it must pass). Every rules version
+2. **Frozen eval set (controlled):** 15 real cases with known right answers
+   (8 bugs it must catch, 7 clean changes it must pass). Every rules version
    is replayed against the *same* cases — same inputs, only the learned rules
    differ. This catches regressions too: our first rewrite got better at the
    two categories it was trained on and *worse* at one other — visible in the
@@ -102,8 +103,9 @@ Reflector grades real outcomes and rewrites that file, version by version. The
 peer-review product is the substrate; the thing being improved is the agent's
 own instructions, by the agent, from measured results.
 
-**Q: What's the heartbeat here?** Three, actually: the Observer ticks every
-3s, the Critic every 10s, the Reflector every few minutes. The whole system is
+**Q: What's the heartbeat here?** Three, actually: the Observer is
+event-driven (fires when the transcript grows, 10s fallback floor), the
+Critic every 10s, the Reflector every few minutes. The whole system is
 autonomous once started — no human prompts it.
 
 **Q: Why not just a linter / CI / tests?** Those check code against rules or

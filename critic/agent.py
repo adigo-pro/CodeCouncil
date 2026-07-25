@@ -1,7 +1,9 @@
 """One non-interactive turn of the pi coding agent (https://pi.dev). Stdlib only.
 
-Judgment turns run with no tools (pure text verdicts); verification turns get
-read/bash so the agent can actually run a repro in a staging directory. Every
+Judgment turns run with no tools (pure text verdicts); verification turns also
+run with no tools — the model instead writes a self-contained repro script,
+which the harness (not the model) executes for real in a staging directory
+(critic/verify.py). Every
 turn is ephemeral (--no-session) and stripped of pi's discovery machinery, so
 the persona passed via --system-prompt is the whole identity.
 

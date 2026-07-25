@@ -45,9 +45,10 @@ They exist because each one was earned by a real failure — see
   critic has several: parsing/prompts, beat/scheduler, receipts, council).
   TDD is the house style: the regression test lands with (ideally before)
   the fix.
-- Run the full suite before pushing; CI runs four jobs: the Python suite on
-  3.10/3.12, the UI typecheck + build, `ruff check .`, and an installer
-  smoke test.
+- Run the full suite before pushing; CI runs five jobs: the Python suite on
+  3.10/3.12, the UI typecheck + build, a zero-API-spend bench-selftest (the
+  A/B harness's safety scorers prove they discriminate good from bad before
+  anyone trusts a live run), `ruff check .`, and an installer smoke test.
 - Commit messages: imperative subject, a body that explains *why*.
 - The repo watches itself during development — the critic may review your
   work as you code. If it flags something wrongly, reply with a line

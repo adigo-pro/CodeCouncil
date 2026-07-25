@@ -18,6 +18,22 @@ in results.ndjsonl; a markdown report is printed and written at the end.
 the alias "all" (-> without,naive,with), or the back-compat alias "both"
 (-> without,with, unchanged from before the naive arm existed).
 
+Real-repo substrate (--repo-url URL@sha, opt-in). Default: every trial's
+workspace is the synthetic seed (training.run.SEED_FILES) written by
+seed_repo — offline, hermetic, no network, unchanged from before this
+option existed. Pass --repo-url to instead clone a real, pinned OSS repo
+(adapted from ponytail's tiangolo/full-stack-fastapi-template benchmark)
+into each FEATURE-tier workspace via clone_repo: `git clone --depth 1`,
+then fetch+checkout the pinned sha. This is feature-tier only — safety-tier
+trials always seed from their own per-task seed_files (run_safety_trial has
+no repo_url parameter at all) because a safety task is a surgical
+single-function scenario; a real repo has no bearing on it. A sha is
+required (URL@sha) since an unpinned benchmark isn't reproducible as the
+upstream repo moves. Using this flag means the shipped TASKS' instructions
+and hidden tests (written against the synthetic seed's file layout) no
+longer apply as-is — a real run needs tasks/hidden tests written against
+that repo's actual structure/tickets.
+
 Contamination-proof arm isolation (credit: the ponytail benchmark project's
 most important finding). ponytail nearly published a false ~4% result
 because their SessionStart hook fired on EVERY arm, including the baseline
@@ -84,6 +100,39 @@ _VALID_ARMS = set(ARMS_ALL)
 # never reach a benchmark session. 'project' stays included because the
 # 'with' arm's installed hooks live in the repo-local .claude/settings.json.
 ISOLATION_SETTING_SOURCES = "project,local"
+
+
+def parse_repo_url(value: str) -> tuple[str, str]:
+    """Parse '--repo-url URL@sha' into (url, sha). A sha is required for
+    reproducibility — an unpinned benchmark can silently drift as the
+    upstream repo moves (ponytail pins to a commit for exactly this
+    reason). Splits on the LAST '@' so ssh-style URLs like
+    git@github.com:owner/repo still work once a sha is appended."""
+    if "@" not in value:
+        raise argparse.ArgumentTypeError(
+            f"--repo-url requires a pinned sha for reproducibility: {value!r} "
+            "(expected URL@sha, e.g. "
+            "https://github.com/tiangolo/full-stack-fastapi-template@<sha>)")
+    url, sha = value.rsplit("@", 1)
+    if not url or not sha:
+        raise argparse.ArgumentTypeError(
+            f"--repo-url requires both a URL and a sha: {value!r} (expected URL@sha)")
+    return url, sha
+
+
+def clone_repo(repo: Path, url: str, sha: str) -> None:
+    """Seed a feature-tier workspace from a real, pinned OSS repo instead of
+    the synthetic SEED_FILES — the credible-numbers path (adapted from
+    ponytail's tiangolo/full-stack-fastapi-template benchmark). A `--depth 1`
+    clone only fetches the tip commit, which usually isn't `sha`, so the
+    pinned commit is fetched explicitly before checkout. The real .git is
+    kept (not re-init'd): the agent works and commits on top of it, and the
+    existing scoring (git_facts, council_stats) already measures the
+    session's own commits the normal way."""
+    repo.parent.mkdir(parents=True, exist_ok=True)
+    sh(["git", "clone", "--depth", "1", url, str(repo)])
+    sh(["git", "fetch", "--depth", "1", "origin", sha], cwd=repo)
+    sh(["git", "checkout", sha], cwd=repo)
 
 
 def seed_repo(repo: Path, seed_files: dict[str, str] = SEED_FILES) -> None:
@@ -179,9 +228,20 @@ def run_session(repo: Path, instruction: str, append: str | None = None) -> dict
 
 
 def run_trial(base: Path, name: str, category: str, instruction: str,
-              hidden: str, arm: str, trial: int, probes: bool = False) -> dict:
+              hidden: str, arm: str, trial: int, probes: bool = False,
+              repo_url: tuple[str, str] | None = None) -> dict:
+    """repo_url, when given, is a (url, sha) pair (see parse_repo_url): the
+    feature-tier workspace is cloned+pinned from a real OSS repo instead of
+    the synthetic SEED_FILES. Unset (the default) is unchanged — synthetic,
+    offline, hermetic. This substrate is feature-tier only; run_safety_trial
+    has no repo_url parameter at all, because a safety task is a surgical
+    single-function scenario against its own seed_files — a real repo has
+    no bearing on it (see module docstring / task-5-brief)."""
     repo = base / f"{name}-{arm}-t{trial}"
-    seed_repo(repo)
+    if repo_url:
+        clone_repo(repo, *repo_url)
+    else:
+        seed_repo(repo)
     daemons = start_council(repo, probes=probes) if arm == "with" else []
     append = NAIVE_REVIEW_PROMPT if arm == "naive" else None
     if daemons:
@@ -330,6 +390,18 @@ def build_parser() -> argparse.ArgumentParser:
                     help="run ONLY the zero-API scorer self-test: prove every "
                          "safety scorer discriminates its good ref (SAFE) from "
                          "its bad ref (UNSAFE); exit nonzero if any doesn't")
+    ap.add_argument("--repo-url", type=parse_repo_url, default=None,
+                    metavar="URL@SHA",
+                    help="clone a real OSS repo pinned to SHA for feature-tier "
+                         "workspaces instead of the synthetic seed (credible, "
+                         "ponytail-style numbers; adapted from their "
+                         "tiangolo/full-stack-fastapi-template benchmark). "
+                         "Requires network and a sha (unpinned isn't "
+                         "reproducible). Default (unset) is unchanged: synthetic, "
+                         "offline, hermetic. Safety-tier trials always use their "
+                         "own per-task seed_files and ignore this flag — a real "
+                         "repo has no bearing on a surgical single-function "
+                         "safety scenario.")
     return ap
 
 
@@ -361,6 +433,10 @@ def main(argv: list[str] | None = None) -> int:
         n_total += len(s_tasks) * len(arms) * args.trials
     print(f"A/B eval: tier={args.tier} × {arms} × {args.trials} trial(s) "
           f"= {n_total} sessions → {base}")
+    if args.repo_url:
+        url, sha = args.repo_url
+        print(f"  feature-tier workspaces: clone of {url} pinned to {sha} "
+              "(network required); safety-tier trials ignore --repo-url")
 
     rows = []
     done = 0
@@ -372,7 +448,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"[{done}/{n_total}] {name} · {arm} · trial {trial} …",
                           flush=True)
                     row = run_trial(base, name, category, instruction, hidden,
-                                    arm, trial, probes=args.probes)
+                                    arm, trial, probes=args.probes,
+                                    repo_url=args.repo_url)
                     rows.append(row)
                     with results.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(row) + "\n")

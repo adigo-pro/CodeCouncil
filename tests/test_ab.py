@@ -218,5 +218,93 @@ class TestReportThreeArms(unittest.TestCase):
         self.assertEqual(md.count("mean hidden-test pass rate"), 3)
 
 
+class TestRepoUrlParsing(unittest.TestCase):
+    """Task 5: --repo-url URL@sha, opt-in real-OSS-repo substrate."""
+
+    def test_parses_url_and_sha(self):
+        args = ab_run.build_parser().parse_args(
+            ["--repo-url", "https://github.com/tiangolo/full-stack-fastapi-template@abc123"])
+        self.assertEqual(
+            args.repo_url,
+            ("https://github.com/tiangolo/full-stack-fastapi-template", "abc123"))
+
+    def test_missing_sha_is_a_parser_error(self):
+        with self.assertRaises(SystemExit):
+            ab_run.build_parser().parse_args(
+                ["--repo-url", "https://github.com/tiangolo/full-stack-fastapi-template"])
+
+    def test_default_is_none(self):
+        self.assertIsNone(ab_run.build_parser().parse_args([]).repo_url)
+
+    def test_ssh_style_url_with_embedded_at_still_splits_on_the_last_one(self):
+        args = ab_run.build_parser().parse_args(
+            ["--repo-url", "git@github.com:tiangolo/full-stack-fastapi-template@abc123"])
+        self.assertEqual(
+            args.repo_url,
+            ("git@github.com:tiangolo/full-stack-fastapi-template", "abc123"))
+
+
+class TestRepoUrlSubstrate(unittest.TestCase):
+    """run_trial (feature tier): --repo-url set clones+pins instead of
+    seeding synthetic files; unset stays on today's seed_repo path with no
+    network touched at all."""
+
+    def _run(self, repo_url):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            with mock.patch.object(ab_run, "seed_repo") as seed_mock, \
+                 mock.patch.object(ab_run, "sh") as sh_mock, \
+                 mock.patch.object(ab_run.score, "run_hidden_test",
+                                    return_value={"passed": 0, "total": 0, "all_pass": False,
+                                                  "checks": {}, "crashed": False, "output": ""}), \
+                 mock.patch.object(ab_run.score, "git_facts",
+                                    return_value={"commits": 0, "last_subject": ""}), \
+                 mock.patch.object(ab_run, "find_project_dir", return_value=None):
+                sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+                ab_run.run_trial(base, "task", "clean", "do the thing. Commit.",
+                                 "CHECK x PASS", "without", 1, repo_url=repo_url)
+            git_argvs = [c.args[0] for c in sh_mock.call_args_list
+                        if c.args[0] and c.args[0][0] == "git"]
+            return seed_mock, git_argvs
+
+    def test_repo_url_set_clones_and_checks_out_pinned_sha_no_seed_repo(self):
+        seed_mock, git_argvs = self._run(("https://github.com/x/y", "abc123"))
+        seed_mock.assert_not_called()
+        clone_argv = next(a for a in git_argvs if a[1] == "clone")
+        self.assertIn("https://github.com/x/y", clone_argv)
+        self.assertIn("--depth", clone_argv)
+        # the pinned sha shows up somewhere in the fetch/checkout sequence
+        self.assertTrue(any("abc123" in a for a in git_argvs if a is not clone_argv))
+
+    def test_repo_url_unset_seeds_synthetic_with_no_clone_command(self):
+        seed_mock, git_argvs = self._run(None)
+        seed_mock.assert_called_once()
+        self.assertFalse(any(a[1] == "clone" for a in git_argvs))
+
+
+class TestRepoUrlIgnoredBySafetyTier(unittest.TestCase):
+    """Safety-tier trials always use their own per-task seed_files; a real
+    repo has no bearing on a surgical single-function safety scenario, so
+    --repo-url must never reach the safety path even when both are set."""
+
+    def test_safety_tier_never_clones_even_with_repo_url_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(ab_run, "install_hooks"), \
+                 mock.patch.object(ab_run.subprocess, "Popen"), \
+                 mock.patch.object(ab_run, "sh") as sh_mock, \
+                 mock.patch.object(ab_run, "clone_repo") as clone_mock, \
+                 mock.patch.object(ab_run.score, "run_adversarial_test",
+                                    return_value={"safe": True}), \
+                 mock.patch.object(ab_run.score, "git_facts",
+                                    return_value={"commits": 0, "last_subject": ""}), \
+                 mock.patch.object(ab_run, "find_project_dir", return_value=None):
+                sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+                ab_run.main(["--tier", "safety", "--tasks", "1", "--arms", "without",
+                            "--out", tmp,
+                            "--repo-url",
+                            "https://github.com/tiangolo/full-stack-fastapi-template@abc123"])
+            clone_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

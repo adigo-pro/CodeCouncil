@@ -98,12 +98,12 @@ def build_prompt(suggestion: dict, staged_path: str, screen_signal: dict | None 
         "bare source, either is fine). Do not use any tool -- the script "
         "will be executed FOR you, with the staged file present and the "
         "script's own directory as its working directory.\n\n"
-        "The script must print exactly one final line:\n"
+        "The script must print exactly one final line AND exit with code 0:\n"
         "CONFIRMED: <one-line evidence> -- if running it reproduces the "
         "claimed problem (the bad behavior actually happens)\n"
         "REFUTED: <one-line evidence> -- if running it demonstrates the "
         "finding is wrong (the code behaves correctly)\n"
-        "If the finding cannot be tested this way, print neither line."
+        "If the finding cannot be tested this way, print neither line and exit 0."
     )
     addendum = EXPLOIT_ADDENDA.get((screen_signal or {}).get("cwe", ""))
     if addendum:
@@ -126,20 +126,29 @@ def localize_repro(repro: str, staging: Path) -> str:
     return repro.replace(str(staging), ".")
 
 
-def _classify(stdout: str, stderr: str) -> dict:
+def _classify(stdout: str, stderr: str, returncode: int = 0) -> dict:
     """Classify one executed verification script's captured output. A
     CONFIRMED/REFUTED line is the script's OWN verdict on itself (it ran for
     real, against the staged file) -- anything else (crash, no verdict line,
     both lines at once) can never become a verified/refuted finding; a
-    broken or contradictory script proves nothing."""
+    broken or contradictory script proves nothing.
+
+    Both the marker AND a clean exit (returncode == 0) are required for a
+    verdict. A script that prints the marker but exits nonzero is inconclusive."""
     confirmed = _CONFIRMED_RE.search(stdout)
     refuted = _REFUTED_RE.search(stdout)
     if confirmed and refuted:
         return {"status": "inconclusive",
                 "note": "verification script printed both CONFIRMED and REFUTED"}
     if confirmed:
+        if returncode != 0:
+            return {"status": "inconclusive",
+                    "note": f"CONFIRMED printed but script exited {returncode} — untrusted"}
         return {"status": "verified", "note": redact(confirmed.group(1).strip())[:300]}
     if refuted:
+        if returncode != 0:
+            return {"status": "inconclusive",
+                    "note": f"REFUTED printed but script exited {returncode} — untrusted"}
         return {"status": "refuted", "note": redact(refuted.group(1).strip())[:300]}
     diag = (stderr or stdout).strip()
     note = "verification script printed no CONFIRMED/REFUTED marker"
@@ -185,7 +194,7 @@ def verify_finding(repo: Path, suggestion: dict, system: str | None = None,
         except OSError as e:
             return {"status": "inconclusive",
                     "note": f"verification script failed to run: {str(e)[:150]}"}
-        result = _classify(res.stdout or "", res.stderr or "")
+        result = _classify(res.stdout or "", res.stderr or "", res.returncode)
         if result["status"] == "verified":
             result["repro"] = _cap(redact(localize_repro(script, staging)), REPRO_MAX_CHARS)
         return result

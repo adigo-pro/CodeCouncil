@@ -256,6 +256,31 @@ class TestScriptVerification(unittest.TestCase):
         result = verify.verify_finding(self.repo, self._suggestion())
         self.assertEqual(result["status"], "error")
 
+    def test_marker_then_crash_is_inconclusive(self):
+        """CONFIRMED marker printed but script exits nonzero → inconclusive,
+        not verified. A script that crashes after printing the marker is not
+        a clean verification."""
+        self._stub_reply(
+            "print('CONFIRMED: reproduced the issue')\n"
+            "raise RuntimeError('unrelated crash after marker')\n"
+        )
+        result = verify.verify_finding(self.repo, self._suggestion())
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertIn("exit", result["note"].lower())
+        self.assertNotIn("repro", result, "inconclusive should not have repro field")
+
+    def test_refuted_marker_then_crash_is_inconclusive(self):
+        """REFUTED marker printed but script exits nonzero → inconclusive,
+        not refuted. A script that crashes after printing the marker is not
+        a clean refutation."""
+        self._stub_reply(
+            "print('REFUTED: the code is correct')\n"
+            "raise RuntimeError('unrelated crash after marker')\n"
+        )
+        result = verify.verify_finding(self.repo, self._suggestion())
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertIn("exit", result["note"].lower())
+
 
 class TestVerifyFindingReproIsExecutedScript(unittest.TestCase):
     """verify_finding's repro is now the executed script text itself

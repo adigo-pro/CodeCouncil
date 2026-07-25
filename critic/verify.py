@@ -81,9 +81,48 @@ def safe_repro(cmd: str) -> bool:
     return not any(bad in stripped for bad in REPRO_UNSAFE_SUBSTRINGS)
 
 
-def build_prompt(suggestion: dict, staged_path: str) -> str:
+# Proof-by-exploit (Task 4): a plain SAST tool stops at "this pattern looks
+# dangerous". When the judge's confirmed finding traces back to one of these
+# mechanical screening signals (critic/screen.py's kind/cwe, linked by
+# screen.match_signal), the verification turn is told to DEMONSTRATE the
+# vulnerability class — not just re-read the code — before it may reply
+# CONFIRMED. Keep each addendum short (<=6 lines); module-level so the CWE
+# set is easy to extend alongside screen.py's _LINE_CHECKS.
+EXPLOIT_ADDENDA: dict[str, str] = {
+    "CWE-89": (
+        "SECURITY CLASS: SQL injection (CWE-89). You must DEMONSTRATE the "
+        "exploit — a repro that only re-reads the code is NOT verification.\n"
+        "Craft an input that changes the query's STRUCTURE — e.g. `1 OR "
+        "1=1` or a trailing `--` — and print the assembled query string so "
+        "it visibly differs from the parameterized intent."
+    ),
+    "CWE-78": (
+        "SECURITY CLASS: command injection (CWE-78). You must DEMONSTRATE "
+        "the exploit — a repro that only re-reads the code is NOT "
+        "verification.\nCraft an input with a shell metacharacter — e.g. "
+        "`; touch /tmp/pwned` or `$(id)` — and show it runs as a SEPARATE "
+        "command beyond the one the code intended."
+    ),
+    "CWE-95": (
+        "SECURITY CLASS: code injection via eval/exec (CWE-95). You must "
+        "DEMONSTRATE the exploit — a repro that only re-reads the code is "
+        "NOT verification.\nCraft an input that executes attacker code "
+        "through the eval/exec call — e.g. `__import__('os').system('id')` "
+        "— and show it runs beyond the intended expression."
+    ),
+    "CWE-502": (
+        "SECURITY CLASS: unsafe deserialization (CWE-502). You must "
+        "DEMONSTRATE the exploit — a repro that only re-reads the code is "
+        "NOT verification.\nCraft a malicious pickle/yaml/marshal payload "
+        "for the deserializer and show it executes attacker-controlled "
+        "behavior when loaded."
+    ),
+}
+
+
+def build_prompt(suggestion: dict, staged_path: str, screen_signal: dict | None = None) -> str:
     loc = f"{suggestion['file']}:{suggestion['line']}" if suggestion.get("line") else suggestion["file"]
-    return (
+    text = (
         "TASK: VERIFY\n\n"
         f"FINDING: [{suggestion['severity'].upper()}] {loc} — {suggestion['issue']}\n"
         f"Rationale: {suggestion.get('rationale', '')}\n\n"
@@ -96,6 +135,10 @@ def build_prompt(suggestion: dict, staged_path: str) -> str:
         "If CONFIRMED, add a second line:\n"
         "REPRO: <one shell command, runnable from the repo root, that demonstrates the problem>"
     )
+    addendum = EXPLOIT_ADDENDA.get((screen_signal or {}).get("cwe", ""))
+    if addendum:
+        text += "\n\n" + addendum
+    return text
 
 
 def _cap(text: str, limit: int) -> str:
@@ -132,8 +175,16 @@ def parse(raw: str) -> dict:
     return result
 
 
-def verify_finding(repo: Path, suggestion: dict, system: str | None = None) -> dict:
-    """Returns {"status": verified|refuted|inconclusive|error, "note": str}."""
+def verify_finding(repo: Path, suggestion: dict, system: str | None = None,
+                    screen_signal: dict | None = None) -> dict:
+    """Returns {"status": verified|refuted|inconclusive|error, "note": str}.
+
+    screen_signal: the mechanical screening signal (critic/screen.py) linked
+    to this finding by screen.match_signal, if any — when its cwe has a
+    known exploit template (EXPLOIT_ADDENDA), the verification turn is asked
+    to demonstrate the vulnerability class rather than just re-read the
+    code. None (the default, and the outcome for any non-security finding)
+    leaves the prompt byte-identical to before this parameter existed."""
     local = repo / suggestion.get("file", "")
     if not local.is_file():
         return {"status": "inconclusive", "note": "flagged file not found in repo"}
@@ -143,7 +194,7 @@ def verify_finding(repo: Path, suggestion: dict, system: str | None = None) -> d
     try:
         staged = staging / local.name
         shutil.copyfile(local, staged)
-        reply = agent.ask(build_prompt(suggestion, str(staged)), system=system,
+        reply = agent.ask(build_prompt(suggestion, str(staged), screen_signal), system=system,
                           tools=VERIFY_TOOLS, cwd=str(staging))
     except agent.AgentError as e:
         return {"status": "error", "note": str(e)[:200]}

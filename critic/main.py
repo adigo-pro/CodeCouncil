@@ -310,10 +310,18 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         if record["verdict"] == "SUGGESTION":
             record["suggestion"]["file"] = normalize_file(
                 ctx.get("repo"), record["suggestion"].get("file", ""))
+            # Task 4 (proof-by-exploit): link this SUGGESTION back to the
+            # mechanical screening signal that likely prompted it, if any —
+            # absent for anything screen.screen() didn't flag, so ordinary
+            # findings keep byte-identical records (no "screen_signal" key).
+            screen_signal = screen.match_signal(record["suggestion"], signals)
+            if screen_signal:
+                record["screen_signal"] = screen_signal
         if record["verdict"] == "SUGGESTION" and ctx.get("verify", True):
             try:
                 record["verification"] = verify.verify_finding(
-                    ctx["repo"], record["suggestion"], system=ctx.get("persona"))
+                    ctx["repo"], record["suggestion"], system=ctx.get("persona"),
+                    screen_signal=record.get("screen_signal"))
             except Exception as e:  # verification must never lose a finding
                 record["verification"] = {"status": "error", "note": str(e)[:200]}
         render_verdict(beat, ts, record)

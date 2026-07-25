@@ -82,6 +82,74 @@ class TestParse(unittest.TestCase):
         self.assertEqual(v["status"], "inconclusive")
 
 
+class TestExploitAddenda(unittest.TestCase):
+    """Task 4: a confirmed finding whose originating screen signal is a
+    known exploitable CWE gets a prompt addendum instructing the verifier
+    to DEMONSTRATE the vulnerability class, not just re-read the code. No
+    screen_signal (or an unknown/non-security cwe) must leave the prompt
+    byte-identical to today."""
+
+    def test_known_cwe_appends_addendum(self):
+        base = verify.build_prompt(_sugg()["suggestion"], "/tmp/staging/a.py")
+        with_signal = verify.build_prompt(
+            _sugg()["suggestion"], "/tmp/staging/a.py",
+            screen_signal={"kind": "sql-injection", "cwe": "CWE-89"})
+        self.assertNotEqual(base, with_signal)
+        self.assertIn(verify.EXPLOIT_ADDENDA["CWE-89"], with_signal)
+        self.assertIn("1 OR 1=1", with_signal)
+        self.assertTrue(with_signal.startswith(base))
+
+    def test_all_known_cwes_have_addenda_under_six_lines(self):
+        for cwe in ("CWE-89", "CWE-78", "CWE-95", "CWE-502"):
+            text = verify.EXPLOIT_ADDENDA[cwe]
+            self.assertLessEqual(text.count("\n") + 1, 6, cwe)
+
+    def test_screen_signal_none_is_byte_identical_to_today(self):
+        a = verify.build_prompt(_sugg()["suggestion"], "/tmp/staging/a.py")
+        b = verify.build_prompt(_sugg()["suggestion"], "/tmp/staging/a.py", screen_signal=None)
+        self.assertEqual(a, b)
+
+    def test_unknown_cwe_leaves_prompt_unchanged(self):
+        a = verify.build_prompt(_sugg()["suggestion"], "/tmp/staging/a.py")
+        b = verify.build_prompt(_sugg()["suggestion"], "/tmp/staging/a.py",
+                                screen_signal={"kind": "unresolvable-import",
+                                               "cwe": "slopsquatting"})
+        self.assertEqual(a, b)
+
+    def test_verify_finding_threads_screen_signal_into_prompt_seen_by_model(self):
+        """End-to-end: the stub echoes back whether it saw the addendum
+        marker text in its prompt file, proving verify_finding actually
+        passes screen_signal through to the model call (not just build_prompt
+        in isolation)."""
+        td = tempfile.TemporaryDirectory()
+        try:
+            repo = Path(td.name)
+            (repo / "app.py").write_text("cursor.execute(f'SELECT {x}')\n")
+            stub = repo / "stub.sh"
+            stub.write_text(
+                "#!/bin/sh\n"
+                "if grep -q 'DEMONSTRATE' \"$1\"; then echo 'CONFIRMED: saw addendum'; "
+                "else echo 'CONFIRMED: no addendum'; fi\n"
+            )
+            stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+            saved = os.environ.get("CRITIC_CMD")
+            os.environ["CRITIC_CMD"] = str(stub)
+            try:
+                suggestion = {"file": "app.py", "line": 1, "severity": "high",
+                             "issue": "SQL injection via f-string", "rationale": "r"}
+                result = verify.verify_finding(
+                    repo, suggestion,
+                    screen_signal={"kind": "sql-injection", "cwe": "CWE-89"})
+            finally:
+                if saved is None:
+                    os.environ.pop("CRITIC_CMD", None)
+                else:
+                    os.environ["CRITIC_CMD"] = saved
+            self.assertEqual(result["note"], "saw addendum")
+        finally:
+            td.cleanup()
+
+
 class TestParseRepro(unittest.TestCase):
     def test_colon_form(self):
         raw = "CONFIRMED: raised ZeroDivisionError\nREPRO: python3 -c \"1/0\""
@@ -249,6 +317,17 @@ class TestLocalizeRepro(unittest.TestCase):
 class TestDeliveryPolicy(unittest.TestCase):
     def test_refuted_never_delivered(self):
         rows = [_sugg({"status": "refuted", "note": "guard exists"})]
+        self.assertIsNone(decide({"hook_event_name": "PostToolUse", "cwd": "/x"}, rows, {}, NOW))
+        self.assertIsNone(decide({"hook_event_name": "Stop", "cwd": "/x",
+                                  "stop_hook_active": False}, rows, {}, NOW))
+
+    def test_refuted_exploit_never_delivered(self):
+        # a refuted finding whose repro was a real exploit attempt (Task 4)
+        # follows the exact same never-delivered path as any other refuted
+        # finding — the screen_signal field carries no separate delivery rule
+        row = _sugg({"status": "refuted", "note": "input was safely parameterized"})
+        row["screen_signal"] = {"kind": "sql-injection", "cwe": "CWE-89"}
+        rows = [row]
         self.assertIsNone(decide({"hook_event_name": "PostToolUse", "cwd": "/x"}, rows, {}, NOW))
         self.assertIsNone(decide({"hook_event_name": "Stop", "cwd": "/x",
                                   "stop_hook_active": False}, rows, {}, NOW))

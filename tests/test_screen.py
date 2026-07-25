@@ -154,6 +154,60 @@ class TestHallucinatedImports(unittest.TestCase):
         self.assertIn("definitely_not_a_real_pkg_xyz", signals[0]["evidence"])
 
 
+class TestMatchSignal(unittest.TestCase):
+    """Task 4: linking a judge's SUGGESTION back to the screening signal that
+    likely prompted it — same basename + (kind named in the issue text OR
+    line within 3). Ambiguous (more than one distinct signal matches) means
+    attach nothing."""
+
+    def test_matches_basename_and_kind_named_in_issue(self):
+        sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
+                "line": 40, "evidence": "cursor.execute(f'...')"}]
+        suggestion = {"file": "app.py", "line": 3,
+                      "issue": "Possible SQL injection via f-string in query"}
+        self.assertEqual(screen.match_signal(suggestion, sig),
+                         {"kind": "sql-injection", "cwe": "CWE-89"})
+
+    def test_matches_basename_and_line_proximity(self):
+        sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
+                "line": 10, "evidence": "..."}]
+        suggestion = {"file": "app.py", "line": 12, "issue": "bad query building"}
+        self.assertEqual(screen.match_signal(suggestion, sig),
+                         {"kind": "sql-injection", "cwe": "CWE-89"})
+
+    def test_no_match_different_basename(self):
+        sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "other.py",
+                "line": 3, "evidence": "..."}]
+        suggestion = {"file": "app.py", "line": 3, "issue": "SQL injection"}
+        self.assertIsNone(screen.match_signal(suggestion, sig))
+
+    def test_no_match_far_line_and_kind_not_named(self):
+        sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
+                "line": 100, "evidence": "..."}]
+        suggestion = {"file": "app.py", "line": 3, "issue": "unrelated style nit"}
+        self.assertIsNone(screen.match_signal(suggestion, sig))
+
+    def test_ambiguous_multiple_distinct_signals_no_attach(self):
+        sig = [{"kind": "sql-injection", "cwe": "CWE-89", "file": "app.py",
+                "line": 3, "evidence": "..."},
+               {"kind": "command-injection", "cwe": "CWE-78", "file": "app.py",
+                "line": 4, "evidence": "..."}]
+        suggestion = {"file": "app.py", "line": 3, "issue": "something is wrong here"}
+        self.assertIsNone(screen.match_signal(suggestion, sig))
+
+    def test_no_signals_no_attach(self):
+        suggestion = {"file": "app.py", "line": 3, "issue": "SQL injection"}
+        self.assertIsNone(screen.match_signal(suggestion, []))
+
+    def test_zero_line_signal_not_used_for_proximity(self):
+        # test-removed/assertions-weakened signals carry line=0 — that must
+        # never "proximity match" an arbitrary suggestion line via abs(0-N)<=3
+        sig = [{"kind": "test-removed", "cwe": "reward-hacking", "file": "app.py",
+                "line": 0, "evidence": "..."}]
+        suggestion = {"file": "app.py", "line": 2, "issue": "unrelated"}
+        self.assertIsNone(screen.match_signal(suggestion, sig))
+
+
 class TestScreenAndPrompt(unittest.TestCase):
     def test_no_repo_skips_import_resolution(self):
         d = diff("app.py", ["import definitely_not_a_real_pkg_xyz"])

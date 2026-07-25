@@ -243,6 +243,42 @@ def screen(diff_text: str, repo: Path | None = None) -> list[dict]:
     return signals[:MAX_SIGNALS]
 
 
+def match_signal(suggestion: dict, signals: list[dict]) -> dict | None:
+    """Link a judge's SUGGESTION back to the screening signal that likely
+    prompted it (Task 4: proof-by-exploit verification needs to know WHICH
+    CWE class to demonstrate). Pure.
+
+    Deliberately simple matching rule: a signal is a candidate when it
+    shares the suggestion's file basename AND either (a) the signal's kind
+    (e.g. "sql-injection" -> "sql injection") is named in the model's issue
+    text, or (b) the signal's line is within 3 of the suggestion's line (a
+    signal with no line, i.e. line 0, never proximity-matches). If more than
+    one DISTINCT (kind, cwe) pair ends up a candidate, the link is
+    ambiguous and nothing is attached — a wrong exploit class in the
+    verification prompt is worse than no addendum at all.
+    """
+    sugg_base = Path(suggestion.get("file") or "").name
+    if not sugg_base:
+        return None
+    sugg_line = suggestion.get("line")
+    issue = (suggestion.get("issue") or "").lower()
+    candidates: set[tuple[str, str]] = set()
+    for s in signals:
+        if Path(s.get("file") or "").name != sugg_base:
+            continue
+        kind = s.get("kind", "")
+        kind_named = bool(kind) and kind.replace("-", " ") in issue
+        sig_line = s.get("line") or 0
+        near_line = (isinstance(sugg_line, int) and sig_line > 0
+                     and abs(sig_line - sugg_line) <= 3)
+        if kind_named or near_line:
+            candidates.add((kind, s.get("cwe", "")))
+    if len(candidates) != 1:
+        return None
+    kind, cwe = next(iter(candidates))
+    return {"kind": kind, "cwe": cwe}
+
+
 def render(signals: list[dict]) -> list[str]:
     """Prompt lines for a signal list. Pure."""
     if not signals:

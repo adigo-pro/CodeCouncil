@@ -476,6 +476,100 @@ class TestAskWithRetry(unittest.TestCase):
         self.assertEqual(v["verdict"], "ERROR")
 
 
+class TestScreenSignalThreading(unittest.TestCase):
+    """Task 4 end-to-end: a SUGGESTION whose file+line+issue line up with a
+    mechanical screening signal gets that signal attached to the record and
+    threaded into the verification prompt so the verifier is told to
+    demonstrate the vulnerability class, not just re-read the code."""
+
+    def _stub(self, repo: Path, judge_reply: str) -> Path:
+        stub = repo / "stub.sh"
+        stub.write_text(
+            "#!/bin/sh\n"
+            "if grep -q 'TASK: VERIFY' \"$1\"; then\n"
+            "  if grep -q 'DEMONSTRATE' \"$1\"; then\n"
+            "    echo 'CONFIRMED: exploit demonstrated, saw addendum'\n"
+            "  else\n"
+            "    echo 'CONFIRMED: no addendum seen'\n"
+            "  fi\n"
+            "else\n"
+            f"  cat <<'PROMPTEOF'\n{judge_reply}\nPROMPTEOF\n"
+            "fi\n"
+        )
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+        return stub
+
+    def _run(self, repo: Path, app_contents: str, diff_text: str, judge_reply: str) -> dict:
+        (repo / "app.py").write_text(app_contents)
+        suggestions = repo / ".codecouncil" / "suggestions.ndjsonl"
+        heuristics = repo / ".codecouncil" / "heuristics.md"
+        stub = self._stub(repo, judge_reply)
+        os.environ["CRITIC_CMD"] = str(stub)
+        try:
+            from critic.main import judge_batch
+            ctx = {"heuristics_path": heuristics, "suggestions_file": suggestions,
+                   "persona": "", "project": "", "repo": repo, "verify": True,
+                   "beat": 1, "ts": "2026-01-01T00:00:00",
+                   "latest_diff": {"payload": {"diff": diff_text}}}
+            events = [{"type": "diff", "session": None,
+                       "payload": {"diff": diff_text, "stat": "", "untracked": []}}]
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                judge_batch(events, ctx)
+        finally:
+            os.environ.pop("CRITIC_CMD", None)
+        rows = [json.loads(line) for line in suggestions.read_text().splitlines()]
+        self.assertEqual(len(rows), 1)
+        return rows[0]
+
+    def test_security_suggestion_gets_screen_signal_and_exploit_addendum(self):
+        diff_text = (
+            "diff --git a/app.py b/app.py\n"
+            "--- a/app.py\n"
+            "+++ b/app.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            " def get_user(uid):\n"
+            "-    pass\n"
+            '+    cursor.execute(f"SELECT * FROM users WHERE id={uid}")\n'
+            "+    return cursor.fetchone()\n"
+        )
+        judge_reply = json.dumps({
+            "file": "app.py", "line": 2, "severity": "high",
+            "issue": "SQL injection via f-string interpolation into cursor.execute",
+            "rationale": "uid is interpolated into the query text unsanitized",
+        })
+        with tempfile.TemporaryDirectory() as td:
+            row = self._run(Path(td),
+                            'def get_user(uid):\n    cursor.execute(f"SELECT * FROM users WHERE id={uid}")\n    return cursor.fetchone()\n',
+                            diff_text, judge_reply)
+        self.assertEqual(row["verdict"], "SUGGESTION")
+        self.assertEqual(row["screen_signal"], {"kind": "sql-injection", "cwe": "CWE-89"})
+        self.assertEqual(row["verification"]["note"], "exploit demonstrated, saw addendum")
+
+    def test_non_security_suggestion_has_no_screen_signal_field(self):
+        diff_text = (
+            "diff --git a/app.py b/app.py\n"
+            "--- a/app.py\n"
+            "+++ b/app.py\n"
+            "@@ -1,2 +1,3 @@\n"
+            " def add(a, b):\n"
+            "+    # TODO: handle overflow\n"
+            "     return a + b\n"
+        )
+        judge_reply = json.dumps({
+            "file": "app.py", "line": 2, "severity": "low",
+            "issue": "TODO comment left in without a tracked follow-up",
+            "rationale": "no ticket reference",
+        })
+        with tempfile.TemporaryDirectory() as td:
+            row = self._run(Path(td),
+                            "def add(a, b):\n    # TODO: handle overflow\n    return a + b\n",
+                            diff_text, judge_reply)
+        self.assertEqual(row["verdict"], "SUGGESTION")
+        self.assertNotIn("screen_signal", row)
+        self.assertEqual(row["verification"]["note"], "no addendum seen")
+
+
 class TestMalformedVisibility(unittest.TestCase):
     """Task 5: a malformed reply must not silently degrade into an ordinary
     PASS — render_verdict has to shout about it."""

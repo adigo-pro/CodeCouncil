@@ -643,23 +643,30 @@ class TestAttachTestIntegrityMalformed(unittest.TestCase):
 
 
 class TestGatePending(unittest.TestCase):
-    """Task 1: pure truth table for whether the critic still has unjudged
-    material relative to the current observation log."""
+    """Task 1 (review finding 2): pending means unjudged CODE material — a
+    diff or commit event beyond what the critic has durably committed — not
+    just any byte gap. The critic's scheduler holds reasoning/tool_call
+    material without ever committing past it, so a raw offset gap is the
+    common case on a real Stop; only diff/commit events should burn the
+    gate's wait."""
 
-    def test_critic_behind_is_pending(self):
-        self.assertTrue(gate_pending(100, 50, False))
+    def test_diff_event_is_pending(self):
+        self.assertTrue(gate_pending([{"type": "diff"}]))
 
-    def test_critic_caught_up_not_pending(self):
-        self.assertFalse(gate_pending(100, 100, False))
+    def test_commit_event_is_pending(self):
+        self.assertTrue(gate_pending([{"type": "commit"}]))
 
-    def test_critic_offset_past_size_not_pending(self):
-        self.assertFalse(gate_pending(100, 150, False))
+    def test_reasoning_only_not_pending(self):
+        self.assertFalse(gate_pending([{"type": "reasoning"}, {"type": "tool_call"}]))
 
-    def test_inflight_batch_pending_even_when_offset_caught_up(self):
-        self.assertTrue(gate_pending(100, 100, True))
+    def test_no_unjudged_events_not_pending(self):
+        self.assertFalse(gate_pending([]))
 
-    def test_zero_size_zero_offset_not_pending(self):
-        self.assertFalse(gate_pending(0, 0, False))
+    def test_pending_if_any_event_is_diff_or_commit(self):
+        self.assertTrue(gate_pending([{"type": "reasoning"}, {"type": "diff"}]))
+
+    def test_events_missing_type_key_ignored(self):
+        self.assertFalse(gate_pending([{"no": "type"}]))
 
 
 class TestResolveGateSeconds(unittest.TestCase):
@@ -701,9 +708,26 @@ class TestDoneGateWait(unittest.TestCase):
     subprocess helper used by TestFailOpen) so time.sleep can be monkeypatched
     and the critic's on-disk state can be mutated mid-wait."""
 
+    def setUp(self):
+        # Review finding 3: load_config() reads core.config.CONFIG_DIR's
+        # default (~/.codecouncil/config.json). A maintainer's real
+        # gate_seconds (or any other key) must never leak into this suite —
+        # point the module at a scratch dir, same convention as
+        # tests/test_codecouncil.py's TestConsoleParsing.
+        from core import config as cfg
+        self.config_td = tempfile.TemporaryDirectory()
+        self._orig_config_dir = cfg.CONFIG_DIR
+        cfg.CONFIG_DIR = Path(self.config_td.name)
+        self.addCleanup(lambda: setattr(cfg, "CONFIG_DIR", self._orig_config_dir))
+        self.addCleanup(self.config_td.cleanup)
+
     def _stop_event(self, td, session_id="sess-gate"):
         return json.dumps({"hook_event_name": "Stop", "cwd": td, "stop_hook_active": False,
                            "session_id": session_id})
+
+    @staticmethod
+    def _diff_line():
+        return json.dumps({"type": "diff", "file": "a.py"}) + "\n"
 
     def test_gate_off_by_default_never_sleeps(self):
         import hooks.peer_hook as peer_hook
@@ -712,8 +736,8 @@ class TestDoneGateWait(unittest.TestCase):
             cc = Path(td) / ".codecouncil"
             cc.mkdir()
             (cc / "suggestions.ndjsonl").write_text("")
-            (cc / "observations.ndjsonl").write_text("x" * 50)
-            (cc / "critic-state.json").write_text(json.dumps({"offset": 10, "committed_offset": 0}))
+            (cc / "observations.ndjsonl").write_text(self._diff_line())
+            (cc / "critic-state.json").write_text(json.dumps({"offset": 0, "committed_offset": 0}))
             env = dict(os.environ)
             env.pop("COUNCIL_GATE_SECONDS", None)
             with mock.patch.dict(os.environ, env, clear=True), \
@@ -728,9 +752,10 @@ class TestDoneGateWait(unittest.TestCase):
             cc = Path(td) / ".codecouncil"
             cc.mkdir()
             (cc / "suggestions.ndjsonl").write_text("")
-            (cc / "observations.ndjsonl").write_text("x" * 100)
+            diff_line = self._diff_line()
+            (cc / "observations.ndjsonl").write_text(diff_line)
             (cc / "critic-state.json").write_text(
-                json.dumps({"offset": 100, "committed_offset": 20}))
+                json.dumps({"offset": 0, "committed_offset": 0}))
 
             calls = {"n": 0}
 
@@ -739,7 +764,7 @@ class TestDoneGateWait(unittest.TestCase):
                 if calls["n"] == 2:
                     # the critic catches up mid-wait AND a finding lands
                     (cc / "critic-state.json").write_text(
-                        json.dumps({"offset": 100, "committed_offset": 100}))
+                        json.dumps({"offset": len(diff_line), "committed_offset": len(diff_line)}))
                     (cc / "suggestions.ndjsonl").write_text(json.dumps(suggestion()) + "\n")
 
             with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "10"}), \
@@ -752,6 +777,26 @@ class TestDoneGateWait(unittest.TestCase):
             self.assertEqual(data["decision"], "block")
             self.assertIn("bug here", data["reason"])
 
+    def test_gate_reasoning_only_tail_never_sleeps(self):
+        """Review finding 2: material beyond committed_offset that is only
+        reasoning/tool_call (no diff/commit) must not be treated as pending
+        — this is the common shape of a real Stop, since the critic's
+        scheduler holds that material without ever committing past it."""
+        import hooks.peer_hook as peer_hook
+
+        with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text("")
+            (cc / "observations.ndjsonl").write_text(
+                json.dumps({"type": "reasoning", "text": "thinking"}) + "\n")
+            (cc / "critic-state.json").write_text(
+                json.dumps({"offset": 0, "committed_offset": 0}))
+            with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "10"}), \
+                 mock.patch.object(peer_hook.time, "sleep") as sleep_mock:
+                peer_hook.run(self._stop_event(td))
+            sleep_mock.assert_not_called()
+
     def test_gate_runs_at_most_once_per_session(self):
         import hooks.peer_hook as peer_hook
 
@@ -759,13 +804,14 @@ class TestDoneGateWait(unittest.TestCase):
             cc = Path(td) / ".codecouncil"
             cc.mkdir()
             (cc / "suggestions.ndjsonl").write_text("")
-            (cc / "observations.ndjsonl").write_text("x" * 100)
+            diff_line = self._diff_line()
+            (cc / "observations.ndjsonl").write_text(diff_line)
             (cc / "critic-state.json").write_text(
-                json.dumps({"offset": 100, "committed_offset": 20}))
+                json.dumps({"offset": 0, "committed_offset": 0}))
 
             def catch_up(_seconds):
                 (cc / "critic-state.json").write_text(
-                    json.dumps({"offset": 100, "committed_offset": 100}))
+                    json.dumps({"offset": len(diff_line), "committed_offset": len(diff_line)}))
 
             with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "10"}), \
                  mock.patch.object(peer_hook.time, "sleep", side_effect=catch_up) as sleep1:
@@ -773,9 +819,9 @@ class TestDoneGateWait(unittest.TestCase):
             self.assertEqual(sleep1.call_count, 1)
 
             # new unjudged material appears again for the SAME session
-            (cc / "observations.ndjsonl").write_text("x" * 200)
+            (cc / "observations.ndjsonl").write_text(diff_line + self._diff_line())
             (cc / "critic-state.json").write_text(
-                json.dumps({"offset": 100, "committed_offset": 100}))
+                json.dumps({"offset": len(diff_line), "committed_offset": len(diff_line)}))
 
             with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "10"}), \
                  mock.patch.object(peer_hook.time, "sleep") as sleep2:
@@ -789,7 +835,7 @@ class TestDoneGateWait(unittest.TestCase):
             cc = Path(td) / ".codecouncil"
             cc.mkdir()
             (cc / "suggestions.ndjsonl").write_text(json.dumps(suggestion()) + "\n")
-            (cc / "observations.ndjsonl").write_text("x" * 10)
+            (cc / "observations.ndjsonl").write_text(self._diff_line())
             with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "5"}), \
                  mock.patch.object(peer_hook, "_read_critic_state",
                                     side_effect=RuntimeError("boom")), \
@@ -801,8 +847,29 @@ class TestDoneGateWait(unittest.TestCase):
             data = json.loads(out)
             self.assertEqual(data["decision"], "block")
 
-    def test_gate_end_to_end_via_subprocess_stays_fail_open_when_off(self):
+    def test_gate_malformed_critic_state_treated_as_caught_up_no_wait(self):
+        """Review finding 5: a genuinely malformed critic-state.json (non-JSON
+        bytes on disk, not mocked) must flow through the real
+        _read_critic_state and be treated as "critic state unknown" -> no
+        wait, clean exit — same as a missing file."""
+        import hooks.peer_hook as peer_hook
+
         with tempfile.TemporaryDirectory() as td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text("")
+            (cc / "observations.ndjsonl").write_text(self._diff_line())
+            (cc / "critic-state.json").write_bytes(b"\xff\xfe not json {{{")
+
+            with mock.patch.dict(os.environ, {"COUNCIL_GATE_SECONDS": "5"}), \
+                 mock.patch.object(peer_hook.time, "sleep") as sleep_mock:
+                out = peer_hook.run(self._stop_event(td))
+
+            sleep_mock.assert_not_called()
+            self.assertIsNone(out)  # nothing pending to deliver either
+
+    def test_gate_end_to_end_via_subprocess_stays_fail_open_when_off(self):
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home_td:
             cc = Path(td) / ".codecouncil"
             cc.mkdir()
             (cc / "suggestions.ndjsonl").write_text("")
@@ -810,9 +877,59 @@ class TestDoneGateWait(unittest.TestCase):
                   "session_id": "sess-sub"}
             env = dict(os.environ)
             env.pop("COUNCIL_GATE_SECONDS", None)
+            env["HOME"] = home_td  # finding 3: never read the real ~/.codecouncil
             res = subprocess.run([sys.executable, str(PEER_HOOK)], input=json.dumps(ev),
                                  capture_output=True, text=True, timeout=30, env=env)
             self.assertEqual((res.returncode, res.stdout), (0, ""))
+
+    def test_gate_wait_does_not_hold_lock_across_sleep(self):
+        """Review finding 1 (the wedge): delivered.lock is shared by every
+        hook call in every concurrent session. If the gate's poll loop ran
+        inside that lock, one session's multi-second Stop wait would wedge
+        every other session's PostToolUse behind it. Starts a Stop-path gate
+        wait in a background subprocess (critic state that never catches up,
+        one diff event pending, a small cap) and asserts a SECOND, concurrent
+        PostToolUse hook invocation completes in well under the gate
+        duration — proof the lock was released before the poll loop, not
+        held across it."""
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home_td:
+            cc = Path(td) / ".codecouncil"
+            cc.mkdir()
+            (cc / "suggestions.ndjsonl").write_text("")
+            (cc / "observations.ndjsonl").write_text(self._diff_line())
+            # committed_offset never advances -> the critic never "catches
+            # up" and the wait runs the full cap.
+            (cc / "critic-state.json").write_text(
+                json.dumps({"offset": 0, "committed_offset": 0}))
+
+            gate_seconds = 2
+            env = dict(os.environ)
+            env["HOME"] = home_td
+            env["COUNCIL_GATE_SECONDS"] = str(gate_seconds)
+
+            stop_ev = json.dumps({"hook_event_name": "Stop", "cwd": td,
+                                  "stop_hook_active": False, "session_id": "sess-wedge"})
+            proc = subprocess.Popen([sys.executable, str(PEER_HOOK)], stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, env=env)
+            proc.stdin.write(stop_ev)
+            proc.stdin.close()
+            time.sleep(0.5)  # let the first process enter its poll loop
+
+            post_ev = json.dumps({"hook_event_name": "PostToolUse", "cwd": td, "tool_name": "Edit"})
+            start = time.time()
+            res2 = subprocess.run([sys.executable, str(PEER_HOOK)], input=post_ev,
+                                  capture_output=True, text=True, timeout=30, env=env)
+            elapsed = time.time() - start
+
+            self.assertEqual(res2.returncode, 0)
+            self.assertLess(elapsed, gate_seconds - 0.5,
+                            "second hook call blocked behind the first's gate wait "
+                            "-- delivered.lock was held across the sleep")
+
+            proc.wait(timeout=gate_seconds + 10)
+            proc.stdout.close()
+            proc.stderr.close()
 
 
 class TestInstall(unittest.TestCase):

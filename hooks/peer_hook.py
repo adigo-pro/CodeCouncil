@@ -82,6 +82,42 @@ def _read_critic_state(path: Path) -> dict | None:
     return raw if isinstance(raw, dict) else None
 
 
+# A Stop-time gate wait only needs to know whether recent unjudged material
+# includes a diff/commit — reaching back further than this into an enormous
+# uncommitted backlog wouldn't change the answer and would just slow the
+# hook down every poll. 512KB comfortably covers any realistic backlog's
+# recent tail.
+_GATE_SCAN_CAP = 512_000
+
+
+def _read_unjudged_events(obs_file: Path, committed_offset: int) -> list[dict]:
+    """Tolerant NDJSON parse of observations.ndjsonl from `committed_offset`
+    to EOF — the material the critic hasn't durably committed past yet (same
+    committed_offset the critic itself persists in critic-state.json). Skips
+    unparseable/partial lines per repo convention (core.store). If that slice
+    is bigger than _GATE_SCAN_CAP, only the LAST _GATE_SCAN_CAP bytes are
+    scanned (a possibly-truncated first line in that tail is dropped)."""
+    try:
+        size = obs_file.stat().st_size
+        if size <= committed_offset:
+            return []
+        start = max(committed_offset, size - _GATE_SCAN_CAP)
+        with obs_file.open("rb") as f:
+            f.seek(start)
+            if start > committed_offset:
+                f.readline()  # discard the partial line the seek landed inside
+            data = f.read()
+    except OSError:
+        return []
+    rows = []
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
 def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
     """Task 1 done-gate: optionally hold a Stop declaration open while the
     critic catches up on material it hasn't judged yet, so a finding landing
@@ -94,6 +130,17 @@ def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
     function otherwise reads). At most one wait per session (ledger key
     "gate"). Any exception anywhere -> behave exactly as if the gate were
     off; this function must never be the reason the hook fails to fail open.
+
+    Locking: delivered.lock is shared with every hook call in every
+    concurrent session on this repo. The poll loop below can run for up to
+    gate_seconds (default cap 120s) and must NEVER hold that lock while it
+    sleeps — otherwise one session's Stop wait wedges every other session's
+    PostToolUse behind it. So the lock is only ever held for two short spans:
+    (1) an initial check of the ledger's gate-used flag plus whether there is
+    anything to wait for at all, and (2) — after the (unlocked) poll loop
+    finishes — marking the gate used. A session that races another
+    invocation of itself between these two spans can wait twice; that's a
+    small, bounded, harmless race, not a wedge, and is accepted deliberately.
     """
     try:
         env_value = os.environ.get("COUNCIL_GATE_SECONDS")
@@ -111,10 +158,8 @@ def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
             state = _read_critic_state(state_path)
             if state is None:
                 return False  # unknown critic state -> treat as caught up
-            obs_size = obs_file.stat().st_size if obs_file.exists() else 0
             committed = state.get("committed_offset", 0)
-            current = state.get("offset", 0)
-            return gate_pending(obs_size, committed, current > committed)
+            return gate_pending(_read_unjudged_events(obs_file, committed))
 
         with _locked(lock_path):
             ledger = ledger_mod.load(ledger_path)
@@ -122,9 +167,14 @@ def _maybe_wait_for_critic(cc: Path, event: dict) -> None:
                 return
             if not _pending():
                 return
-            deadline = time.time() + gate_seconds
-            while _pending() and time.time() < deadline:
-                time.sleep(1)
+
+        # Poll OUTSIDE any lock — see docstring above.
+        deadline = time.time() + gate_seconds
+        while _pending() and time.time() < deadline:
+            time.sleep(1)
+
+        with _locked(lock_path):
+            ledger = ledger_mod.load(ledger_path)
             ledger_mod.mark_gate(ledger, session_key, time.time())
             ledger_mod.save(ledger_path, ledger)
     except Exception:

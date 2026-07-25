@@ -37,21 +37,29 @@ BLOCK_SEVERITIES = {"high"}
 # session that finishes faster than one judge cycle. Off by default — see
 # resolve_gate_seconds. Both helpers are pure; peer_hook.py owns the actual
 # filesystem polling loop.
-GATE_SECONDS_MIN = 1
 GATE_SECONDS_MAX = 120
 
+# Event types that mean "the critic still has real code to judge". Everything
+# else the observer emits (reasoning, tool_call) piles up between diffs as a
+# normal part of a session — the critic's scheduler holds that material
+# without ever committing past it, so treating any byte gap past
+# committed_offset as "pending" would make the gate wait out its full cap on
+# nearly every real Stop instead of only the ones with unjudged code.
+GATE_PENDING_EVENT_TYPES = {"diff", "commit"}
 
-def gate_pending(observations_size: int, critic_offset: int, inflight: bool) -> bool:
-    """True iff the critic has unjudged material: its durably-committed read
-    offset trails the observation log's current size, or a batch has been
-    read but not yet landed (inflight)."""
-    return critic_offset < observations_size or bool(inflight)
+
+def gate_pending(unjudged_events: list[dict]) -> bool:
+    """True iff any event in `unjudged_events` (the material beyond the
+    critic's durably-committed read offset — see peer_hook._read_unjudged_
+    events) is a `diff` or `commit` event, i.e. actual code the critic
+    hasn't judged yet."""
+    return any(e.get("type") in GATE_PENDING_EVENT_TYPES for e in unjudged_events)
 
 
 def resolve_gate_seconds(env_value, config_value) -> int:
     """0 (gate off) unless a positive int resolves from env_value (wins) or,
     failing that, config_value. Malformed/unset -> 0. A resolved value is
-    clamped to [GATE_SECONDS_MIN, GATE_SECONDS_MAX] (e.g. "999" -> 120)."""
+    clamped to at most GATE_SECONDS_MAX (e.g. "999" -> 120)."""
     raw = env_value if env_value is not None else config_value
     if raw is None:
         return 0

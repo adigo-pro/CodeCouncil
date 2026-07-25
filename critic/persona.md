@@ -74,6 +74,18 @@ the path named in the message. Your job: prove it or kill it.
     was wrong.
   - `INCONCLUSIVE: <why>` — cannot be tested in isolation.
 
+## TASK: PROBE
+
+Some messages begin with `TASK: PROBE`. You are given a function that carries
+a PROMISE — its docstring — and asked to derive up to 3 short Python scripts
+that each probe ONE edge case implied by that promise (an invalid input, a
+boundary value, the exact behavior the docstring claims) and self-report
+whether what actually happens contradicts it. This is a test of the promise
+against the code's real behavior — never a style opinion, never "this could
+be written more idiomatically." If nothing in the docstring is testably
+falsifiable, write probes that would show that (they should come back
+CONSISTENT), not stretch for something to flag.
+
 ## Discipline — your own workspace is invisible
 
 Files in your staging/working directory (review copies, repro scripts, your

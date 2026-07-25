@@ -30,7 +30,7 @@ from observer.transcript import tail_new_lines
 # own touched_contents derivation instead of drifting from a second copy.
 from observer.gitwatch import _touched_paths
 
-from . import agent, deps, prompt, receipt, screen, verify
+from . import agent, deps, probe, prompt, receipt, screen, verify
 from .render import render_error, render_quiet, render_status, render_verdict
 
 SEED_HEURISTICS = Path(__file__).parent / "heuristics.seed.md"
@@ -330,6 +330,76 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     with suggestions_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    if ctx.get("probes"):
+        probe_pass(events, ctx, record["heuristics_version"])
+
+
+def probe_pass(events: list[dict], ctx: dict, heuristics_version: int) -> None:
+    """Task 5: property probes. Opt-in (ctx["probes"], see resolve_probes) —
+    when off, judge_batch never calls this at all, so an off beat is
+    byte-identical to before this feature existed.
+
+    For each changed function carrying a docstring promise (probe.candidates,
+    diff-only and pure), spend up to probe.MAX_PROBE_CALLS_PER_BEAT TASK:
+    PROBE model turns deriving edge probes and executing them for real
+    (probe.run_probes) — the first probe whose execution contradicts the
+    promise becomes its own SUGGESTION record. That record flows through the
+    SAME verify-then-deliver path judge_batch's own findings use (Task 5
+    brief): it is pre-verified by construction (the probe IS the repro), but
+    a refuted re-run of verify.verify_finding still kills delivery, same as
+    any other finding — no separate delivery rule for "source": "probe".
+    Zero candidates -> zero model calls, so a quiet beat costs nothing extra.
+    """
+    repo = ctx.get("repo")
+    suggestions_file = ctx.get("suggestions_file")
+    if not repo or not suggestions_file:
+        return
+    diff_text = batch_diff_text(events, ctx)
+    if not diff_text:
+        return
+    cands = probe.candidates(diff_text)
+    if not cands:
+        return
+
+    def ask(text: str) -> str:
+        return agent.ask(text, system=ctx.get("persona"))
+
+    for candidate in cands[:probe.MAX_PROBE_CALLS_PER_BEAT]:
+        try:
+            finding = probe.run_probes(candidate, repo, ask)
+        except Exception:
+            continue  # a broken probe pipeline must never cost the beat
+        if not finding:
+            continue
+        record = {
+            "id": uuid.uuid4().hex[:12],
+            "ts": ctx["ts"],
+            "dispatched_ts": ctx["ts"],
+            "beat": ctx["beat"],
+            "session": majority_session(events),
+            "heuristics_version": heuristics_version,
+            "n_events": len(events),
+            "source": "probe",
+            "verdict": "SUGGESTION",
+            "suggestion": {
+                "file": finding["file"], "line": finding.get("line"),
+                "severity": "medium", "issue": finding["issue"],
+                "rationale": "Derived from an executed edge probe against "
+                             "the function's own docstring promise.",
+                "rule": None, "failure_mode": "claim-drift",
+            },
+        }
+        if ctx.get("verify", True):
+            try:
+                record["verification"] = verify.verify_finding(
+                    repo, record["suggestion"], system=ctx.get("persona"))
+            except Exception as e:  # verification must never lose a finding
+                record["verification"] = {"status": "error", "note": str(e)[:200]}
+        render_verdict(ctx["beat"], ctx["ts"], record)
+        record["ts"] = now_iso()
+        with suggestions_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
 
 TASK_REVIEW_COOLDOWN_S = 600
 
@@ -376,6 +446,15 @@ def resolve_prober(flag: str | None, env: dict) -> str | None:
     council (single-model flow, unchanged from before council mode existed).
     Pure — no I/O — so main() and tests share one place this rule lives."""
     return flag or env.get("COUNCIL_PROBER") or None
+
+
+def resolve_probes(flag: bool, env: dict) -> bool:
+    """Property probes' opt-in precedence: an explicit --probes flag wins,
+    then COUNCIL_PROBES from the environment (any of "1"/"true"/"yes",
+    case-insensitive), else off — default OFF for one release, same posture
+    as council mode's --prober/COUNCIL_PROBER before it. Pure — no I/O — so
+    main() and tests share one place this rule lives."""
+    return bool(flag) or env.get("COUNCIL_PROBES", "").strip().lower() in ("1", "true", "yes")
 
 
 def merge_council(primary: dict, prober: dict) -> tuple[dict, dict]:
@@ -712,6 +791,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--prober", default=None,
                     help="council mode: second model asked the same prompt, "
                          "recall-oriented, verified before delivery (or COUNCIL_PROBER env)")
+    ap.add_argument("--probes", action="store_true",
+                    help="opt-in: derive and execute edge probes against changed "
+                         "functions' own docstring promises (or COUNCIL_PROBES env)")
     args = ap.parse_args(argv)
 
     cc = args.repo.resolve() / ".codecouncil"
@@ -729,6 +811,10 @@ def main(argv: list[str] | None = None) -> int:
     if prober:
         print(f"critic: council mode — prober {prober}")
 
+    probes_on = resolve_probes(args.probes, agent.local_env())
+    if probes_on:
+        print("critic: property probes enabled")
+
     ctx = {
         "repo": args.repo.resolve(),
         "heuristics_path": cc / "heuristics.md",
@@ -738,6 +824,7 @@ def main(argv: list[str] | None = None) -> int:
         "verify": not args.no_verify,
         "task_review_cooldown": args.task_review_cooldown,
         "prober": prober,
+        "probes": probes_on,
     }
     def _on_committed(offset: int) -> None:
         # Runs on the scheduler's worker thread (called from TurnScheduler._run

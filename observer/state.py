@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.store import write_json_atomic
+
 
 @dataclass
 class State:
@@ -32,16 +34,13 @@ class State:
         return cls()
 
     def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
-                    "offsets": self.offsets,
-                    "last_diff_hash": self.last_diff_hash,
-                    "beat": self.beat,
-                    "interval": self.interval,
-                    "last_head": self.last_head,
-                }
-            ),
-            encoding="utf-8",
+        write_json_atomic(
+            path,
+            {
+                "offsets": self.offsets,
+                "last_diff_hash": self.last_diff_hash,
+                "beat": self.beat,
+                "interval": self.interval,
+                "last_head": self.last_head,
+            },
         )

@@ -17,11 +17,22 @@ lengths, so none can ever collide with a real suggestion id.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
+
+from core.store import write_json_atomic
 
 RECEIPTS_KEY = "receipts"
 TEST_INTEGRITY_KEY = "test_integrity"
 GATE_KEY = "gate"
+
+# delivered.json gets one key per suggestion/receipt/gated-session and is
+# never otherwise pruned, so a long session's ledger grows unbounded. This
+# mirrors hooks.logic.TTL_SECONDS (the delivery freshness window a stale
+# suggestion is judged against) but is a separate local constant rather than
+# an import: hooks.logic already imports hooks.ledger ("from . import ledger
+# as ledger_mod"), so importing logic.TTL_SECONDS back here would cycle.
+LEDGER_TTL_SECONDS = 600
 
 
 def load(path: Path) -> dict:
@@ -32,9 +43,31 @@ def load(path: Path) -> dict:
         return {}
 
 
+def _pruned(ledger: dict, now: float, ttl: float = LEDGER_TTL_SECONDS) -> dict:
+    """Drop stale leaf entries before a save. Every top-level key in this
+    ledger -- a suggestion id (`{"context": ts, "block": ts}`) or one of the
+    three reserved keys RECEIPTS_KEY/TEST_INTEGRITY_KEY/GATE_KEY (each
+    `{name-or-session: ts}`) -- shares the same {leaf: epoch} nested shape,
+    so one pass prunes both without special-casing which keys are reserved.
+    A top-level key left with no leaves after pruning is dropped entirely,
+    which is what actually keeps the file bounded rather than accumulating
+    empty shells forever. Malformed (non-dict) entries are dropped rather
+    than raising."""
+    pruned: dict = {}
+    for key, leaves in ledger.items():
+        if not isinstance(leaves, dict):
+            continue
+        kept = {
+            leaf: ts for leaf, ts in leaves.items()
+            if isinstance(ts, (int, float)) and now - ts <= ttl
+        }
+        if kept:
+            pruned[key] = kept
+    return pruned
+
+
 def save(path: Path, ledger: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(ledger), encoding="utf-8")
+    write_json_atomic(path, _pruned(ledger, time.time()))
 
 
 def mark(ledger: dict, suggestion_id: str, channel: str, now: float) -> None:

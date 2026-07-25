@@ -16,7 +16,7 @@ from pathlib import Path
 from core import knowledge
 from core.store import append_row as append_ndjson
 from core.store import read_rows as read_ndjson
-from core.store import read_tail_rows, wait_for
+from core.store import read_tail_rows, wait_for, write_json_atomic
 from critic import agent
 from critic.main import ensure_heuristics
 from critic.prompt import heuristics_version
@@ -298,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
             maybe_rollback(cc, state, read_ndjson(cc / "outcomes.ndjsonl"))
             maybe_rewrite(cc, state, args.force_rewrite,
                           rewrite_after=args.rewrite_after)
-            state_path.write_text(json.dumps(state), encoding="utf-8")
+            write_json_atomic(state_path, state)
             if args.once:
                 break
             time.sleep(args.interval)

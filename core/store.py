@@ -7,7 +7,9 @@ mid-write) and skip unparseable lines rather than crash.
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -61,6 +63,24 @@ def append_row(path: Path, row: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def write_json_atomic(path: Path, obj, *, indent: int | None = None) -> None:
+    """Write obj as JSON to path atomically (tmp in same dir + os.replace),
+    so a crash mid-write can never leave a torn/empty file that a reader
+    would treat as corrupt. Same durability discipline as core.config's
+    save_config / update_env_key and core.knowledge.add_fact: write to a
+    mkstemp'd file in the SAME directory (so os.replace is same-filesystem
+    and therefore atomic), then replace the target in one syscall.
+
+    `indent` is optional (default None = compact, matching every existing
+    caller's prior output) for the rare human-edited target (e.g. a Claude
+    Code settings.json) that wants pretty-printed JSON instead."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=indent)
+    os.replace(tmp, path)
 
 
 def wait_for(path: Path, message: str, once: bool, poll_s: float = 2.0) -> bool:

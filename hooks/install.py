@@ -13,6 +13,8 @@ import json
 import sys
 from pathlib import Path
 
+from core.store import write_json_atomic
+
 HOOK_SCRIPT = Path(__file__).resolve().parent / "peer_hook.py"
 EDIT_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
 
@@ -48,11 +50,19 @@ def install(repo: Path) -> list[str]:
     settings_path = repo / ".claude" / "settings.json"
     settings = {}
     if settings_path.exists():
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            print(f"error: {settings_path} exists but is not valid JSON — "
+                  "leaving it untouched. Fix or remove it, then re-run.", file=sys.stderr)
+            return []
+        if not isinstance(settings, dict):
+            print(f"error: {settings_path} does not contain a JSON object — "
+                  "leaving it untouched. Fix or remove it, then re-run.", file=sys.stderr)
+            return []
     settings, added = merged_settings(settings)
     if added:
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        write_json_atomic(settings_path, settings, indent=2)
     return added
 
 

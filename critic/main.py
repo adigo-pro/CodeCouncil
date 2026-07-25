@@ -20,7 +20,8 @@ from collections import Counter
 from pathlib import Path
 
 from core import knowledge
-from core.store import read_tail_rows, wait_for
+from core.redact import redact
+from core.store import read_tail_rows, wait_for, write_json_atomic
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
 # Loop-boundary note: this is observer-side, but CLAUDE.md carves out an
@@ -337,6 +338,15 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
 
 PROBED_KEYS_KEEP = 500  # cap persisted probe dedup hashes, newest kept — mirrors PROMPTS_KEEP/CASE_MATERIAL_KEEP
 
+# Same "… [N chars total]" capping discipline as critic/prompt.py's and
+# critic/verify.py's own local _cap (each module keeps its own copy rather
+# than importing across module boundaries — the established pattern here).
+PROBE_ISSUE_MAX_CHARS = prompt.MAX_ISSUE_CHARS
+
+
+def _cap(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + f"… [{len(text)} chars total]"
+
 
 def probe_key(file: str, qualname: str, promise: str) -> str:
     """Short stable id for a probed (file, qualname, promise) triple — the
@@ -424,7 +434,14 @@ def probe_pass(events: list[dict], ctx: dict, heuristics_version: int) -> None:
             "verdict": "SUGGESTION",
             "suggestion": {
                 "file": finding["file"], "line": finding.get("line"),
-                "severity": "medium", "issue": finding["issue"],
+                "severity": "medium",
+                # Model-authored (docstring promise + executed probe output)
+                # -- the same boundary parse_reply and verify.py redact at,
+                # since either can echo repo content that happens to be a
+                # credential shape (CLAUDE.md's redaction invariant: every
+                # text-bearing field a model can influence gets redacted
+                # before it lands in a stored artifact).
+                "issue": _cap(redact(finding["issue"]), PROBE_ISSUE_MAX_CHARS),
                 "rationale": "Derived from an executed edge probe against "
                              "the function's own docstring promise.",
                 "rule": None, "failure_mode": "claim-drift",
@@ -923,9 +940,10 @@ def main(argv: list[str] | None = None) -> int:
                 scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),
                                  "latest_diff": state.get("latest_diff"),
                                  "offset_now": state["offset"]})
-            state_path.write_text(json.dumps(
-                {k: state[k] for k in PERSISTED_STATE_KEYS if k in state}
-            ), encoding="utf-8")
+            write_json_atomic(
+                state_path,
+                {k: state[k] for k in PERSISTED_STATE_KEYS if k in state},
+            )
             if args.once:
                 break
             time.sleep(args.interval)

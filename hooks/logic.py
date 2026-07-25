@@ -110,6 +110,8 @@ def _pending(suggestions: list[dict], ledger: dict, channel: str,
              severities: set[str], now: float, hook_session_id: str | None) -> list[dict]:
     out = []
     for row in suggestions:
+        if not isinstance(row, dict):
+            continue  # a malformed suggestions line (bare scalar) must not raise
         s = row.get("suggestion") or {}
         if (
             row.get("verdict") == "SUGGESTION"

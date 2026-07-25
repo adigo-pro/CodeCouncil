@@ -255,6 +255,44 @@ class TestPeerHookLocking(unittest.TestCase):
             self.assertTrue(ledger_mod.delivered(ledger, "s1", "context"))
 
 
+class TestLedgerPruning(unittest.TestCase):
+    """delivered.json grows one key per suggestion/receipt/gated-session and
+    is never otherwise pruned -- save() must drop stale leaf entries so the
+    file stays bounded over a long session, without disturbing fresh
+    entries or the reserved-key nested shape."""
+
+    def test_old_entry_pruned_fresh_entry_kept_reserved_structure_intact(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "delivered.json"
+            old_ts = NOW - ledger_mod.LEDGER_TTL_SECONDS - 100
+            ledger = {
+                "old-suggestion": {"context": old_ts},
+                "fresh-suggestion": {"context": NOW, "block": NOW},
+                ledger_mod.RECEIPTS_KEY: {"old.md": old_ts, "new.md": NOW},
+                ledger_mod.GATE_KEY: {"sess-old": old_ts},
+            }
+            ledger_mod.save(path, ledger)
+            reloaded = ledger_mod.load(path)
+
+            self.assertNotIn("old-suggestion", reloaded)
+            self.assertIn("fresh-suggestion", reloaded)
+            self.assertEqual(reloaded["fresh-suggestion"], {"context": NOW, "block": NOW})
+            # reserved-key structure survives: still a nested dict, stale
+            # leaf dropped, fresh leaf kept
+            self.assertEqual(reloaded[ledger_mod.RECEIPTS_KEY], {"new.md": NOW})
+            # the gate entry's only leaf was stale -> the whole key is gone,
+            # not left behind as an empty shell
+            self.assertNotIn(ledger_mod.GATE_KEY, reloaded)
+
+    def test_malformed_non_dict_entry_dropped_not_raised(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "delivered.json"
+            ledger_mod.save(path, {"bad-entry": "not-a-dict", "good": {"context": NOW}})
+            reloaded = ledger_mod.load(path)
+            self.assertNotIn("bad-entry", reloaded)
+            self.assertEqual(reloaded["good"], {"context": NOW})
+
+
 class TestDecideContext(unittest.TestCase):
     def test_medium_and_high_injected_low_ignored(self):
         rows = [suggestion("a", "low"), suggestion("b", "medium"), suggestion("c", "high")]
@@ -287,6 +325,17 @@ class TestDecideContext(unittest.TestCase):
         out = decide(post_tool_use(), rows, ledger, NOW)
         self.assertEqual(out["hookSpecificOutput"]["additionalContext"].count("[HIGH]"), 3)
         self.assertEqual(sum(1 for i in range(5) if ledger_mod.delivered(ledger, f"s{i}", "context")), 3)
+
+    def test_malformed_bare_scalar_rows_among_dicts_skipped_not_raised(self):
+        # A corrupt/partial suggestions.ndjsonl line can parse as a bare
+        # JSON scalar (int/string) rather than a dict -- _pending must skip
+        # it instead of raising on row.get(...).
+        rows = [42, "oops", None, suggestion(sid="real", severity="high")]
+        ledger = {}
+        out = decide(post_tool_use(), rows, ledger, NOW)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("[HIGH]", ctx)
+        self.assertTrue(ledger_mod.delivered(ledger, "real", "context"))
 
 
 class TestDecideSessionStart(unittest.TestCase):
@@ -1050,6 +1099,27 @@ class TestInstall(unittest.TestCase):
             cmds = [h["command"] for e in settings["hooks"]["Stop"] for h in e["hooks"]]
             self.assertEqual(len(cmds), 2)
             self.assertIn("other.sh", cmds)
+
+    def test_malformed_existing_settings_left_untouched_not_crashed(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".claude").mkdir()
+            settings_path = repo / ".claude" / "settings.json"
+            settings_path.write_text("{not valid json,,,")
+            added = install(repo)  # must not raise
+            self.assertEqual(added, [])
+            # the user's real (if malformed) file must never be clobbered
+            self.assertEqual(settings_path.read_text(), "{not valid json,,,")
+
+    def test_non_object_existing_settings_left_untouched_not_crashed(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / ".claude").mkdir()
+            settings_path = repo / ".claude" / "settings.json"
+            settings_path.write_text(json.dumps([1, 2, 3]))
+            added = install(repo)  # must not raise
+            self.assertEqual(added, [])
+            self.assertEqual(json.loads(settings_path.read_text()), [1, 2, 3])
 
 
 if __name__ == "__main__":

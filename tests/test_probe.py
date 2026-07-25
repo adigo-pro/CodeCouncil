@@ -362,6 +362,40 @@ else:
         self.assertEqual(s["file"], "mod0.py")
         self.assertIn("docstring promises", s["issue"])
 
+    def test_probe_pass_redacts_secret_shaped_note_in_issue(self):
+        """probe_pass is the one model-authored-text sink that skips the
+        redact() boundary parse_reply and verify.py both apply -- a probe's
+        executed-script output (captured into finding["note"], folded into
+        finding["issue"]) can echo repo content verbatim, including a
+        credential shape. That must never reach suggestions.ndjsonl raw."""
+        from critic.main import judge_batch
+        secret = "nvapi-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        script = f"""#!/usr/bin/env python3
+import sys
+from pathlib import Path
+prompt_file = Path(sys.argv[1])
+text = prompt_file.read_text()
+if text.startswith("TASK: PROBE"):
+    print(
+        "PROBE:\\n"
+        "print(f'DIVERGES: leaked {secret}')\\n"
+    )
+else:
+    print("PASS")
+"""
+        self._set_stub(script)
+        (self.cc / "mod0.py").write_text(DOCSTRING_FUNC)
+        ctx = {**self.base_ctx, "probes": True,
+              "latest_diff": {"payload": {"diff": _diff(("mod0.py", DOCSTRING_FUNC))}}}
+        judge_batch([], ctx)
+        rows = self._rows()
+        probe_rows = [r for r in rows if r.get("verdict") == "SUGGESTION"
+                     and r.get("source") == "probe"]
+        self.assertEqual(len(probe_rows), 1)
+        issue = probe_rows[0]["suggestion"]["issue"]
+        self.assertIn("«REDACTED", issue)
+        self.assertNotIn(secret, issue)
+
     def test_probe_pass_dedups_across_beats_via_probed_keys_state(self):
         """Fix 2 (the important one): without cross-beat memory, an
         uncommitted candidate stays in the diff every beat, so probe_pass

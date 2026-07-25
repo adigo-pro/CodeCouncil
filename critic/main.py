@@ -7,6 +7,7 @@ a headless pi agent (https://pi.dev) whether anything is worth flagging.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -334,6 +335,18 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
         probe_pass(events, ctx, record["heuristics_version"])
 
 
+PROBED_KEYS_KEEP = 500  # cap persisted probe dedup hashes, newest kept — mirrors PROMPTS_KEEP/CASE_MATERIAL_KEEP
+
+
+def probe_key(file: str, qualname: str, promise: str) -> str:
+    """Short stable id for a probed (file, qualname, promise) triple — the
+    unit probe_pass dedupes on so an unchanged candidate is never re-probed
+    (and re-delivered as a fresh-uuid SUGGESTION) every beat it survives in
+    the working tree. Not a security use — sha1 truncated purely for a
+    compact, stable dedup key."""
+    return hashlib.sha1(f"{file}:{qualname}:{promise}".encode()).hexdigest()[:16]
+
+
 def probe_pass(events: list[dict], ctx: dict, heuristics_version: int) -> None:
     """Task 5: property probes. Opt-in (ctx["probes"], see resolve_probes) —
     when off, judge_batch never calls this at all, so an off beat is
@@ -349,6 +362,17 @@ def probe_pass(events: list[dict], ctx: dict, heuristics_version: int) -> None:
     a refuted re-run of verify.verify_finding still kills delivery, same as
     any other finding — no separate delivery rule for "source": "probe".
     Zero candidates -> zero model calls, so a quiet beat costs nothing extra.
+
+    Cross-beat memory: a candidate stays in the diff (hence in `candidates()`)
+    on every beat until the change is committed, so without dedup the same
+    function would re-run its TASK: PROBE turn — and on divergence, write a
+    NEW suggestion row with a fresh uuid — every single beat. `ctx["probed_keys"]`
+    (a snapshot of state persisted in critic-state.json, see main()/heartbeat())
+    is checked before spending a probe call on a candidate; the key is recorded
+    via `ctx["on_probed"]` right after probing regardless of outcome (probed-
+    but-consistent must not re-probe either — same waste, no finding to show
+    for it). Skipped-as-already-probed candidates don't consume the beat's
+    budget; only an actual model turn does.
     """
     repo = ctx.get("repo")
     suggestions_file = ctx.get("suggestions_file")
@@ -361,10 +385,24 @@ def probe_pass(events: list[dict], ctx: dict, heuristics_version: int) -> None:
     if not cands:
         return
 
+    already_probed = set(ctx.get("probed_keys") or [])
+    newly_probed: list[str] = []
+
     def ask(text: str) -> str:
         return agent.ask(text, system=ctx.get("persona"))
 
-    for candidate in cands[:probe.MAX_PROBE_CALLS_PER_BEAT]:
+    budget = probe.MAX_PROBE_CALLS_PER_BEAT
+    for candidate in cands:
+        if budget <= 0:
+            break
+        key = probe_key(candidate.get("file", ""), candidate.get("qualname", ""),
+                        candidate.get("promise", ""))
+        if key in already_probed or key in newly_probed:
+            continue
+        budget -= 1
+        # Recorded now (probed), not after checking for a finding below —
+        # a non-diverging candidate must never re-probe next beat either.
+        newly_probed.append(key)
         try:
             finding = probe.run_probes(candidate, repo, ask)
         except Exception:
@@ -400,15 +438,32 @@ def probe_pass(events: list[dict], ctx: dict, heuristics_version: int) -> None:
         with suggestions_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    if newly_probed and ctx.get("on_probed"):
+        # Report back whatever got probed this beat, whether or not any of
+        # them produced a finding, so the next beat's ctx["probed_keys"]
+        # snapshot (see heartbeat()) already excludes them. Mirrors
+        # TurnScheduler's on_committed callback: this runs on the scheduler's
+        # worker thread, reporting into main()-owned state via a callback
+        # rather than a direct mutation from here.
+        try:
+            ctx["on_probed"](newly_probed)
+        except Exception:
+            pass  # persisting the dedup set must never cost a probed finding
+
 
 TASK_REVIEW_COOLDOWN_S = 600
 
 # Fields the daemon loop in main() persists to critic-state.json every beat.
 # tests_run_at (Task 9): {session: iso_ts} — must survive a daemon restart or
-# a test run just before a restart would silently stop counting.
+# a test run just before a restart would silently stop counting. probed_keys
+# (Task 5 hardening): short dedup hashes of already-probed (file, qualname,
+# promise) triples, capped to the newest PROBED_KEYS_KEEP — fine to reset on
+# restart (probe_pass just re-reads an empty set), so this is best-effort
+# cross-beat memory, not a durability guarantee.
 PERSISTED_STATE_KEYS = (
     "offset", "committed_offset", "beat", "latest_diff", "interval",
     "review_offset", "last_task_review", "material_since_review", "tests_run_at",
+    "probed_keys",
 )
 
 
@@ -747,7 +802,12 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
 
     ctx = {**ctx, "beat": beat, "ts": ts, "latest_diff": state.get("latest_diff"),
            "offset_now": state["offset"],
-           "tests_run_sticky": sticky_tests_run(state.get("tests_run_at"), time.time())}
+           "tests_run_sticky": sticky_tests_run(state.get("tests_run_at"), time.time()),
+           # Snapshot of probe_pass's dedup set as of the START of this beat —
+           # a key learned mid-beat (via ctx["on_probed"], see main()) lands
+           # in state asynchronously and is only visible from the NEXT beat's
+           # snapshot, same eventual-consistency shape as on_committed/offset.
+           "probed_keys": state.get("probed_keys", [])}
     status = scheduler.submit(events, ctx)
 
     # the coding agent declared itself done: consider a task-level claim review
@@ -815,6 +875,17 @@ def main(argv: list[str] | None = None) -> int:
     if probes_on:
         print("critic: property probes enabled")
 
+    def _on_probed(keys: list[str]) -> None:
+        # Runs on the scheduler's worker thread (called from probe_pass, via
+        # judge_fn), same discipline as _on_committed below: a full-list
+        # reassignment rather than an in-place mutation another thread could
+        # observe half-written. Newest PROBED_KEYS_KEEP survive; ctx's
+        # per-beat "probed_keys" snapshot (heartbeat()) picks this up
+        # starting the NEXT beat.
+        existing = state.get("probed_keys", [])
+        merged = existing + [k for k in keys if k not in existing]
+        state["probed_keys"] = merged[-PROBED_KEYS_KEEP:]
+
     ctx = {
         "repo": args.repo.resolve(),
         "heuristics_path": cc / "heuristics.md",
@@ -825,6 +896,7 @@ def main(argv: list[str] | None = None) -> int:
         "task_review_cooldown": args.task_review_cooldown,
         "prober": prober,
         "probes": probes_on,
+        "on_probed": _on_probed,
     }
     def _on_committed(offset: int) -> None:
         # Runs on the scheduler's worker thread (called from TurnScheduler._run

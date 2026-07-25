@@ -43,6 +43,12 @@ from typing import Callable
 MAX_PROBES_PER_FUNC = 3
 MAX_PROBE_CALLS_PER_BEAT = 2  # TASK: PROBE model turns allowed per beat
 PROBE_TIMEOUT = 20  # seconds -- a hanging probe must never wedge a beat
+# Every other prompt sink in this repo caps inlined file/diff content with a
+# module constant and a "… [N chars total]" marker (observer/transcript.py,
+# observer/gitwatch.py, critic/prompt.py's _cap) -- build_prompt inlines the
+# ENTIRE current file, so it needs the same discipline or a large file blows
+# the prompt budget unbounded.
+PROBE_SOURCE_MAX_CHARS = 6000
 
 _FILE_HEADER_RE = re.compile(r"^\+\+\+ b/(.+)$")
 _PROBE_MARKER_RE = re.compile(r"^PROBE:\s*$", re.MULTILINE)
@@ -144,6 +150,8 @@ def candidates(diff_text: str) -> list[dict]:
 
 
 def build_prompt(candidate: dict, source: str, module_name: str) -> str:
+    if len(source) > PROBE_SOURCE_MAX_CHARS:
+        source = source[:PROBE_SOURCE_MAX_CHARS] + f"\n… [{len(source)} chars total]"
     return (
         "TASK: PROBE\n\n"
         f"FUNCTION: {candidate['qualname']} in {candidate['file']}\n"

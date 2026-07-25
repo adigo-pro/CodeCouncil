@@ -15,6 +15,8 @@ from pathlib import Path
 
 from core.store import read_tail_rows
 
+from .screen import _UNCHANGED_INTEGRITY as _UNCHANGED_TEST_INTEGRITY
+
 CLAIM_VERB_RE = re.compile(r"\b(add|fix|implement|handle|test|complete|done|pass)\w*\b",
                            re.IGNORECASE)
 MAX_CLAIM_BULLETS = 6
@@ -26,10 +28,9 @@ SLUG_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 # Task 2: test-integrity verdict (strengthened/unchanged/weakened) embedded
 # in every receipt so the done-gate (hooks/logic.py) can read it back without
 # re-parsing the session's diffs. Default matches screen._UNCHANGED_INTEGRITY
-# so a caller that doesn't pass test_integrity (old call sites, tests) keeps
-# rendering an inert "unchanged" block rather than crashing.
-_UNCHANGED_TEST_INTEGRITY = {"verdict": "unchanged", "tests_added": 0, "tests_removed": 0,
-                             "asserts_added": 0, "asserts_removed": 0}
+# (imported above, not duplicated) so a caller that doesn't pass
+# test_integrity (old call sites, tests) keeps rendering an inert "unchanged"
+# block rather than crashing.
 TEST_INTEGRITY_FENCE = "test-integrity"
 _TEST_INTEGRITY_BLOCK_RE = re.compile(
     r"```" + TEST_INTEGRITY_FENCE + r"\n(.*?)\n```", re.DOTALL)

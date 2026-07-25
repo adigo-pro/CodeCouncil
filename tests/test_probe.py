@@ -91,6 +91,26 @@ class TestCandidates(unittest.TestCase):
         self.assertEqual(len(cands), 1)
 
 
+class TestBuildPromptCap(unittest.TestCase):
+    """Fix 1: build_prompt must cap the inlined file source like every other
+    prompt sink in this repo (CLAUDE.md convention), not inline it whole."""
+
+    def test_large_source_capped_with_marker(self):
+        candidate = {"file": "mod.py", "qualname": "f", "promise": "does a thing"}
+        source = "x = 1\n" * 5000  # far larger than PROBE_SOURCE_MAX_CHARS
+        text = probe.build_prompt(candidate, source, "mod")
+        self.assertIn(f"[{len(source)} chars total]", text)
+        # bounded: the prompt must not scale with the full source length
+        self.assertLess(len(text), probe.PROBE_SOURCE_MAX_CHARS + 1000)
+
+    def test_small_source_not_truncated(self):
+        candidate = {"file": "mod.py", "qualname": "f", "promise": "does a thing"}
+        source = "def f(x):\n    return x\n"
+        text = probe.build_prompt(candidate, source, "mod")
+        self.assertNotIn("chars total]", text)
+        self.assertIn(source, text)
+
+
 class TestRunProbes(unittest.TestCase):
     def setUp(self):
         self.td = tempfile.TemporaryDirectory()
@@ -341,6 +361,71 @@ else:
         s = probe_rows[0]["suggestion"]
         self.assertEqual(s["file"], "mod0.py")
         self.assertIn("docstring promises", s["issue"])
+
+    def test_probe_pass_dedups_across_beats_via_probed_keys_state(self):
+        """Fix 2 (the important one): without cross-beat memory, an
+        uncommitted candidate stays in the diff every beat, so probe_pass
+        would re-run TASK: PROBE and write a fresh-uuid SUGGESTION row each
+        time. ctx["probed_keys"]/ctx["on_probed"] is the same mechanism
+        critic.main's real daemon loop threads through critic-state.json
+        (main()'s _on_probed callback + heartbeat()'s per-beat snapshot) --
+        simulated here by threading a plain dict across two judge_batch
+        calls, same shape."""
+        from critic.main import judge_batch
+        script = """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+prompt_file = Path(sys.argv[1])
+text = prompt_file.read_text()
+calls_log = Path(__file__).parent / "calls.log"
+if text.startswith("TASK: PROBE"):
+    with calls_log.open("a") as f:
+        f.write("probe\\n")
+    print(
+        "PROBE:\\n"
+        "try:\\n"
+        "    1/0\\n"
+        "except ZeroDivisionError as e:\\n"
+        "    print(f'DIVERGES: {e}')\\n"
+    )
+else:
+    print("PASS")
+"""
+        self._set_stub(script)
+        (self.cc / "mod0.py").write_text(DOCSTRING_FUNC)
+        diff = _diff(("mod0.py", DOCSTRING_FUNC))
+
+        state: dict = {}
+
+        def on_probed(keys):
+            existing = state.get("probed_keys", [])
+            state["probed_keys"] = existing + [k for k in keys if k not in existing]
+
+        def make_ctx():
+            return {**self.base_ctx, "probes": True,
+                   "latest_diff": {"payload": {"diff": diff}},
+                   "probed_keys": state.get("probed_keys", []),
+                   "on_probed": on_probed}
+
+        # Beat 1: nothing probed yet -> the model turn runs and the
+        # divergence becomes a SUGGESTION row.
+        judge_batch(self.events, make_ctx())
+        self.assertEqual(len(self._calls()), 1)
+
+        # Beat 2: same uncommitted candidate, still in the diff. The KEY
+        # assertion -- probe_pass must recognize it as already-probed and
+        # skip the model turn entirely, not spend a second call or deliver
+        # a second finding.
+        judge_batch(self.events, make_ctx())
+        self.assertEqual(len(self._calls()), 1,
+                         "probe_pass re-ran TASK: PROBE for an already-probed "
+                         "candidate on the next beat")
+
+        probe_rows = [r for r in self._rows() if r.get("verdict") == "SUGGESTION"
+                     and r.get("source") == "probe"]
+        self.assertEqual(len(probe_rows), 1,
+                         "an already-probed candidate was re-delivered as a "
+                         "second, fresh-uuid suggestion row")
 
 
 class TestResolveProbes(unittest.TestCase):

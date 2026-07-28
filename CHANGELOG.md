@@ -13,5 +13,7 @@ First public release.
   `COUNCIL-REBUTTAL:` protocol
 - Reflector: graded outcomes, eval-gated heuristics rewrites with
   auto-rollback, rebuttal → knowledge distillation
+- Community health: Code of Conduct (Contributor Covenant), SUPPORT.md,
+  issue/PR templates, security policy
 - One-command installer, interactive console (`/keys`, `/model`, `/status`),
   signal-first terminal, React dashboard

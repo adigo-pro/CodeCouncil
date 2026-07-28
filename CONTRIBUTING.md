@@ -4,6 +4,10 @@ CodeCouncil is small on purpose: four Python loops (stdlib-only), one React
 dashboard, files as the only bus. Most contributions need nothing but Python
 3.10+ and git.
 
+By participating, you agree to abide by our
+[Code of Conduct](CODE_OF_CONDUCT.md). Not sure where to ask something? See
+[SUPPORT.md](SUPPORT.md).
+
 ## Setup
 
 ```sh

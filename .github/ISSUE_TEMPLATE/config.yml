@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussion
+    url: https://github.com/adigo-tamu/CodeCouncil/discussions
+    about: Ask how something works, share an idea, or discuss a use case here rather than opening an issue.
+  - name: Security vulnerability
+    url: https://github.com/adigo-tamu/CodeCouncil/security/advisories/new
+    about: Report security issues privately via a GitHub security advisory — please do not open a public issue.

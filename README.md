@@ -245,5 +245,11 @@ Good first issues: redaction patterns, frozen eval
 cases, adapters for other coding agents (the observer only needs an intent
 stream; the hooks only need an injection channel).
 
+**Are you an AI coding agent?** Read [AGENTS.md](AGENTS.md) — a contribution
+guide written for you, not a human. And a fitting twist for a tool built for
+agents: while you work in this repo, CodeCouncil reviews *you* in real time
+(its hooks are installed on itself), so you'll get findings in your own
+context and can fix or `COUNCIL-REBUTTAL:` them as you go.
+
 Plain-language architecture tour: [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md).
 Design history: [docs/plans/](docs/plans/). License: [Apache-2.0](LICENSE).

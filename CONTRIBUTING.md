@@ -8,6 +8,10 @@ By participating, you agree to abide by our
 [Code of Conduct](CODE_OF_CONDUCT.md). Not sure where to ask something? See
 [SUPPORT.md](SUPPORT.md).
 
+**Contributing as an AI coding agent?** There's a guide written for you:
+[AGENTS.md](AGENTS.md). (Yes — and the repo will review your work in real time
+while you make it, because CodeCouncil's hooks are installed on itself.)
+
 ## Setup
 
 ```sh

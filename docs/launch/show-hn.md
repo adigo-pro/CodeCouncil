@@ -1,32 +1,48 @@
 # Show HN draft
 
-> **Title:** Show HN: CodeCouncil – an AI reviewer that caught a security bug in its own code
+> **Title:** Show HN: Claude 5 verifies its own code now. Here's why a different model still catches more
 >
 > (fallback titles, in preference order:)
-> - Show HN: An AI peer reviewer for AI coding agents – findings ship with executed proof
-> - Show HN: CodeCouncil – it reviews Claude Code while it works, and it reviews itself
+> - Show HN: CodeCouncil – an independent, execution-grounded reviewer for AI coding agents
+> - Show HN: An AI reviewer that caught a security bug in its own code (open source)
 
 ---
 
-Hi HN — I built CodeCouncil, an open-source AI peer reviewer that watches a
-coding agent (Claude Code today) *while it works*, and I want to lead with
-the thing that convinced me it's real:
+Hi HN — Anthropic shipped Claude 5 last week with self-verification as the
+headline: the model runs its own tests before it says "done." That's real
+progress. It also sharpened the reason I built CodeCouncil, so let me lead
+with the tension instead of dodging it.
 
-**While building CodeCouncil, CodeCouncil reviewed CodeCouncil — and caught
-real bugs in itself.** A secret-leak bug in its own redaction code that two
-independent reviewers had approved. A permissions hole in its own installer
-(delivered with an executed repro, blocking my "done" until I fixed it). A
-probe-dedup flaw that would have silently suppressed findings. Each catch
+A model checking its own work is the *most correlated reviewer possible* — same
+weights, same context, same incentive to be finished. The 2026 research on
+this is blunt: self-verification makes a model **more convincing, not more
+correct** ("More Convincing, Not More Correct", arXiv 2607.05904 — a
+reference-free self-judge's apparent pass rate climbs to 0.94 while true
+accuracy sits at 0.20; the errors even transfer across model families). "All
+tests pass" becomes a better-*disguised* false claim, not a rarer one. The
+documented antidote isn't more judges — it's an independent checker that
+**executes** instead of judging, ideally trained differently so its blind
+spots don't line up with the author's.
+
+That's CodeCouncil: an open-source reviewer that watches your Claude Code
+session in real time and delivers a finding only after **running a repro
+against your code** — ground truth, not another model's opinion — using a
+*different* model (free NVIDIA Nemotron by default) with no stake in calling
+your task done. Full argument with citations:
+github.com/adigo-tamu/CodeCouncil/blob/main/docs/benchmarks/WHY.md
+
+**The proof I trust most is that it caught bugs in itself.** While I was
+building it, CodeCouncil reviewed CodeCouncil — a secret-leak bug in its own
+redaction code that two reviewers had approved; a permissions hole in its own
+installer (delivered with an executed repro, blocking my "done" until I fixed
+it); a probe-dedup flaw that would have silently suppressed findings. Each
 came through the exact mechanism it sells.
 
-**What it does differently from PR-review bots (CodeRabbit, Greptile):**
+**How it differs from what's out there** (including Claude Code Review, which
+is a fine PR-time enterprise product — $15–25/review, runs on Anthropic's
+cloud, GitHub-only, Claude reviewing Claude):
 
-- **It reviews during the session, not at the PR.** By the time a PR comment
-  arrives, the agent that wrote the code is gone — its context evicted.
-  CodeCouncil delivers findings *into the agent's own context* via hooks,
-  while the agent still holds the code in its head. The agent fixes it (or
-  formally rebuts it) in-session.
-- **Findings arrive with receipts.** Before delivering, the critic writes and
+- **It executes, it doesn't judge.** Before delivering, the critic writes and
   runs a repro against a staged copy. Refuted findings are never delivered.
   For security findings it goes further: it executes the exploit.
 - **It reads intent, not just diffs.** The most common agent failure isn't

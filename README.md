@@ -7,18 +7,27 @@
 
 *Every line above is from a real run — the finding, the repro, the timings. Recreated frame-for-frame with [Remotion](https://remotion.dev) (`demo/`).*
 
-**An AI peer reviewer for AI coding agents.** CodeCouncil watches your Claude
-Code session in real time, pairs what the agent *says* it's doing with what
-*actually changed*, and interrupts only when it can back a finding — ideally
-with an executed repro. Then it grades its own performance against what you
-did next, and rewrites its own review rules from the results.
+**The independent, execution-grounded second opinion your model can't give
+itself.** Today's coding models verify their own work — Claude 5 runs its own
+tests before it says "done." That's real progress, and it's also the problem:
+a model checking its own output is the *most correlated possible reviewer*. It
+shares its own blind spots by construction, and 2026 research on
+[self-verification](docs/benchmarks/WHY.md) is blunt about the failure mode —
+self-checking makes a model **more convincing, not more correct** (a
+reference-free self-judge's apparent pass rate climbs to 0.94 while true
+accuracy sits at 0.20). "All tests pass" becomes a *better-disguised* untrue
+claim, not a rarer one.
 
-The premise: AI coding agents are fast and confident, and their most common
-failure isn't broken syntax — it's a **claim that isn't true**. "Handled the
-edge case" (it didn't). "All tests pass" (they never ran). A docstring that
-promises behavior the code doesn't have. Nobody reads the diff to check.
-CodeCouncil is the second pair of eyes that does — a *differently-trained*
-model, so it doesn't share your agent's blind spots.
+CodeCouncil is the outside check that isn't fooled by that, because it doesn't
+*judge* — it **executes**. It watches your Claude Code session in real time,
+pairs what the agent *says* with what *actually changed*, and interrupts only
+when it can prove a finding by **running a repro against your code** — ground
+truth, not another model's opinion. The reviewer is a *differently-trained*
+model with no stake in declaring the task done, so it catches what a
+self-verifier is structurally blind to. And because the research is equally
+clear that *"verification must co-evolve with the generator,"* CodeCouncil
+grades itself against what you did next and **rewrites its own review rules**
+as your agent improves.
 
 ```
 you + Claude Code ──▶ transcripts + git ──▶ Observer ──▶ Critic ──▶ verified finding
@@ -54,6 +63,32 @@ context** via Claude Code hooks, scoped to the session that caused them.
 
 ## What makes it different
 
+The three below are the load-bearing ones — each is what a self-verifying
+model structurally *can't* do, backed by 2026 research in
+[WHY.md](docs/benchmarks/WHY.md):
+
+- **It executes, it doesn't judge.** A self-verifier (and every LLM-judge
+  review tool) scores *plausibility* — the documented failure mode where
+  apparent pass rates climb while true accuracy doesn't. CodeCouncil delivers
+  a finding only after **running a repro against your code**: ground truth,
+  not another model's opinion. Refuted findings are never delivered; confirmed
+  ones ship with the executed proof.
+- **It's independent, and differently trained.** The reviewer is a separate
+  model with **no stake in declaring your task done** and — by design — a
+  different training distribution, so its blind spots don't line up with your
+  agent's. A model reviewing itself is the most correlated reviewer possible;
+  this is the opposite. (Opt-in **council mode** adds a second decorrelated
+  prober, measured not vibed — see [docs/benchmarks/](docs/benchmarks/):
+  Nemotron anchors precision at 0 false positives; `gpt-5-mini` adds recall; a
+  prober-only finding ships **only** with repro proof.)
+- **It co-evolves with your agent.** The research rule is *"verification must
+  co-evolve with the generator"* — a static reviewer decays as the model
+  improves. CodeCouncil grades every finding against what you did next and
+  rewrites its own review rules, eval-gated and auto-rolled-back on
+  regression, so the check keeps pace.
+
+And the supporting layers:
+
 - **It screens for the failure modes research actually documents.** ~45% of
   AI code introduces OWASP-class vulnerabilities while syntax looks perfect
   (Veracode, 150+ models); models hallucinate nonexistent packages
@@ -62,10 +97,6 @@ context** via Claude Code hooks, scoped to the session that caused them.
   injection patterns, unsafe deserialization, imports that don't resolve,
   removed tests and assertions — and the critic must confirm or dismiss each
   signal with a reason.
-- **Findings arrive with receipts.** Before delivering, the critic writes and
-  runs a repro against a staged copy of the flagged file. Refuted findings
-  are never delivered; confirmed ones ship with the proof and a
-  review-before-running repro command.
 - **It grades its own silences.** Every verdict records what it reviewed.
   When a later fix commit revises files a PASS covered, that PASS is graded
   `missed` — and the judgment packet becomes a frozen eval case
@@ -79,11 +110,6 @@ context** via Claude Code hooks, scoped to the session that caused them.
   (`COUNCIL-REBUTTAL: <reason>`) — recorded honestly, distilled into a
   per-repo facts file the critic reads on every future judgment. The same
   disagreement never needs to happen twice.
-- **Council mode** (opt-in): a second, decorrelated model probes alongside
-  the primary. The pairing is measured, not vibes — see
-  [docs/benchmarks/](docs/benchmarks/): Nemotron (0 false positives, 2/4
-  catches) anchors precision; `gpt-5-mini` (4/4 catches, 2 false positives)
-  adds recall. A prober-only finding is delivered **only** with repro proof.
 - **When your agent says "done", you get a session receipt** — claims made
   vs. mechanically verified facts (did a test command actually run?), written
   to `.codecouncil/receipts/` and announced in the transcript.

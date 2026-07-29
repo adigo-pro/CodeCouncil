@@ -1,17 +1,25 @@
 # X / Twitter launch thread draft
 
 **1/**
-I built an AI code reviewer that watches Claude Code work in real time.
+Claude 5 verifies its own code now. Runs its own tests before it says "done."
 
-While I was building it, it reviewed its own code.
+That's real progress — and it's exactly why I built an independent reviewer
+that uses a *different* model.
 
-It caught a security bug in itself. With an executed proof. And blocked me
-from saying "done" until I fixed it.
-
-Open source. Here's how it works 🧵
+A model checking itself is the most correlated reviewer possible. Open source.
+🧵
 
 **2/**
-The problem: AI agents' most common failure isn't broken syntax.
+The 2026 research is blunt: self-verification makes a model MORE CONVINCING,
+not more correct.
+
+A model judging its own work: apparent pass rate 0.94, true accuracy 0.20
+(arXiv 2607.05904). "All tests pass" becomes a better-disguised false claim,
+not a rarer one.
+
+**2b/**
+For the older framing that still holds: AI agents' most common failure isn't
+broken syntax.
 
 It's a claim that isn't true.
 

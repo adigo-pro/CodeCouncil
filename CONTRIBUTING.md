@@ -15,7 +15,7 @@ while you make it, because CodeCouncil's hooks are installed on itself.)
 ## Setup
 
 ```sh
-git clone https://github.com/adigo-tamu/CodeCouncil && cd CodeCouncil
+git clone https://github.com/adigo-pro/CodeCouncil && cd CodeCouncil
 python3 -m unittest discover -s tests        # no install step — stdlib only
 cd ui && npm install && npm run dev          # dashboard (optional)
 ```

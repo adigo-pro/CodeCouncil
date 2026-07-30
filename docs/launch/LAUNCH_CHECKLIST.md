@@ -9,7 +9,7 @@ assume you're in the repo root and `gh` is authenticated as the repo owner.
 
 - [ ] **Tree clean and pushed.** `git status` shows nothing; `git log origin/main..HEAD` is empty.
 - [ ] **CI green on the tip commit** — all six jobs (python 3.10, python 3.12, ui, lint, installer, bench-selftest):
-      `gh api "repos/adigo-tamu/CodeCouncil/actions/runs?per_page=1" --jq '.workflow_runs[0].conclusion'` → `success`
+      `gh api "repos/adigo-pro/CodeCouncil/actions/runs?per_page=1" --jq '.workflow_runs[0].conclusion'` → `success`
 - [ ] **Full suite green locally:** `python3 -m unittest discover -s tests` → `OK` (647 tests).
 - [ ] **Read the two launch drafts one more time** so you're happy to post them as-is:
       `docs/launch/show-hn.md` and `docs/launch/x-thread.md`. Confirm every number in them
@@ -31,25 +31,25 @@ assume you're in the repo root and `gh` is authenticated as the repo owner.
 
 - [ ] **Set the repo description + topics + website** (shows up the moment it's public):
       ```
-      gh repo edit adigo-tamu/CodeCouncil \
+      gh repo edit adigo-pro/CodeCouncil \
         --description "An AI peer reviewer for AI coding agents — watches Claude Code, verifies findings with executed repros, delivers them in-session." \
         --homepage "https://codecouncil.vercel.app" \
         --add-topic ai,code-review,claude-code,developer-tools,ai-agents,static-analysis,python
       ```
 - [ ] **Enable Discussions** — the Code of Conduct and SUPPORT.md link to it, so it must exist or
       those links 404. Settings → General → Features → check **Discussions**
-      (or `gh api -X PATCH repos/adigo-tamu/CodeCouncil -f has_discussions=true`).
+      (or `gh api -X PATCH repos/adigo-pro/CodeCouncil -f has_discussions=true`).
 - [ ] **(Optional) Enable "Private vulnerability reporting"** — Settings → Security → check it, so the
-      SECURITY.md advisory link works: `gh api -X PATCH repos/adigo-tamu/CodeCouncil -f security_and_analysis='{"secret_scanning":{"status":"enabled"}}'` (secret scanning) and toggle private reporting in the UI.
+      SECURITY.md advisory link works: `gh api -X PATCH repos/adigo-pro/CodeCouncil -f security_and_analysis='{"secret_scanning":{"status":"enabled"}}'` (secret scanning) and toggle private reporting in the UI.
 
 ## Phase 3 — Go public
 
 - [ ] **Flip the repo to public:**
       ```
-      gh repo edit adigo-tamu/CodeCouncil --visibility public --accept-visibility-change-consequences
+      gh repo edit adigo-pro/CodeCouncil --visibility public --accept-visibility-change-consequences
       ```
 - [ ] **Confirm the Community Standards page is 100%:**
-      `https://github.com/adigo-tamu/CodeCouncil/community` — README, Code of Conduct, Contributing,
+      `https://github.com/adigo-pro/CodeCouncil/community` — README, Code of Conduct, Contributing,
       License, Security, issue + PR templates should all be checked.
 
 ## Phase 4 — Tag and release
@@ -72,7 +72,7 @@ Now that it's public, these become real (they can't be tested while private —
 - [ ] **The one-line install works from the public URL**, in a throwaway environment:
       ```
       FAKE=$(mktemp -d)/h; mkdir -p "$FAKE"
-      HOME="$FAKE" sh -c 'curl -fsSL https://raw.githubusercontent.com/adigo-tamu/CodeCouncil/main/install.sh | sh'
+      HOME="$FAKE" sh -c 'curl -fsSL https://raw.githubusercontent.com/adigo-pro/CodeCouncil/main/install.sh | sh'
       test -x "$FAKE/.local/bin/codecouncil" && echo OK
       rm -rf "$(dirname "$FAKE")"
       ```

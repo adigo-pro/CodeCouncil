@@ -4,14 +4,14 @@ Thanks for using CodeCouncil. Here's where to go, depending on what you need:
 
 ## I have a question / want to discuss an idea
 
-Open a [GitHub Discussion](https://github.com/adigo-tamu/CodeCouncil/discussions)
-(if enabled) or a [feature-request issue](https://github.com/adigo-tamu/CodeCouncil/issues/new?template=feature_request.md).
+Open a [GitHub Discussion](https://github.com/adigo-pro/CodeCouncil/discussions)
+(if enabled) or a [feature-request issue](https://github.com/adigo-pro/CodeCouncil/issues/new?template=feature_request.md).
 Questions about how a loop works, how to configure a model provider, or whether
 a use case is a good fit are all welcome.
 
 ## Something is broken
 
-Open a [bug report](https://github.com/adigo-tamu/CodeCouncil/issues/new?template=bug_report.md).
+Open a [bug report](https://github.com/adigo-pro/CodeCouncil/issues/new?template=bug_report.md).
 The template asks for the relevant terminal lines and — if a finding is
 involved — the matching row from `.codecouncil/suggestions.ndjsonl` and the
 prompt file it names. Redaction runs at capture, but eyeball before pasting.
@@ -19,7 +19,7 @@ prompt file it names. Redaction runs at capture, but eyeball before pasting.
 ## I found a security issue
 
 See [SECURITY.md](SECURITY.md) — open a private
-[security advisory](https://github.com/adigo-tamu/CodeCouncil/security/advisories/new)
+[security advisory](https://github.com/adigo-pro/CodeCouncil/security/advisories/new)
 rather than a public issue.
 
 ## I want to contribute

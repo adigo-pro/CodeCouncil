@@ -81,14 +81,14 @@ key drives the critic (no card needed). Any provider works (OpenAI,
 Anthropic, Google, Groq, OpenRouter).
 
 One command:
-curl -fsSL https://raw.githubusercontent.com/adigo-tamu/CodeCouncil/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/adigo-pro/CodeCouncil/main/install.sh | sh
 
 **9/**
 Apache-2.0. The observer only needs a transcript stream — adapters for
 Cursor/Codex/etc. are the most-wanted contribution.
 
 Site: codecouncil.vercel.app
-Repo: github.com/adigo-tamu/CodeCouncil
+Repo: github.com/adigo-pro/CodeCouncil
 
 If your agent says "done," make it prove it. ⭐
 

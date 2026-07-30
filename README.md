@@ -1,6 +1,6 @@
 # CodeCouncil
 
-[![CI](https://github.com/adigo-tamu/CodeCouncil/actions/workflows/ci.yml/badge.svg)](https://github.com/adigo-tamu/CodeCouncil/actions/workflows/ci.yml)
+[![CI](https://github.com/adigo-pro/CodeCouncil/actions/workflows/ci.yml/badge.svg)](https://github.com/adigo-pro/CodeCouncil/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ![CodeCouncil catching a claim-vs-code bug: the agent's docstring promises ValueError, the code doesn't raise, the critic proves it by running it and delivers the finding into the agent's context](docs/demo.gif)
@@ -40,7 +40,7 @@ you + Claude Code ──▶ transcripts + git ──▶ Observer ──▶ Criti
 ## Sixty-second start
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/adigo-tamu/CodeCouncil/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/adigo-pro/CodeCouncil/main/install.sh | sh
 ```
 
 That checks Python 3.10+, installs to `~/.codecouncil/app`, puts `codecouncil`

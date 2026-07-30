@@ -29,7 +29,7 @@ session in real time and delivers a finding only after **running a repro
 against your code** — ground truth, not another model's opinion — using a
 *different* model (free NVIDIA Nemotron by default) with no stake in calling
 your task done. Full argument with citations:
-github.com/adigo-tamu/CodeCouncil/blob/main/docs/benchmarks/WHY.md
+github.com/adigo-pro/CodeCouncil/blob/main/docs/benchmarks/WHY.md
 
 **The proof I trust most is that it caught bugs in itself.** While I was
 building it, CodeCouncil reviewed CodeCouncil — a secret-leak bug in its own
@@ -74,9 +74,9 @@ cloud, GitHub-only, Claude reviewing Claude):
 communicating through append-only NDJSON files, models via pi (free NVIDIA
 Nemotron key works out of the box — no card). Apache-2.0.
 
-    curl -fsSL https://raw.githubusercontent.com/adigo-tamu/CodeCouncil/main/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/adigo-pro/CodeCouncil/main/install.sh | sh
 
-Site: https://codecouncil.vercel.app · Repo: https://github.com/adigo-tamu/CodeCouncil
+Site: https://codecouncil.vercel.app · Repo: https://github.com/adigo-pro/CodeCouncil
 
 Things I know it doesn't do yet: PR mode, non-Claude-Code agents (the
 observer only needs a transcript stream — adapters welcome), and the

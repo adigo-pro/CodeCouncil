@@ -1,7 +1,7 @@
 #!/bin/sh
 # CodeCouncil one-command installer.
 #
-#   curl -fsSL https://raw.githubusercontent.com/adigo-tamu/CodeCouncil/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/adigo-pro/CodeCouncil/main/install.sh | sh
 #
 # What it does (and nothing else):
 #   1. checks python3 >= 3.10 and git
@@ -13,7 +13,7 @@
 # Re-run any time to update. Uninstall: rm -rf ~/.codecouncil/app ~/.local/bin/codecouncil
 set -eu
 
-REPO_URL="${CODECOUNCIL_REPO_URL:-https://github.com/adigo-tamu/CodeCouncil}"
+REPO_URL="${CODECOUNCIL_REPO_URL:-https://github.com/adigo-pro/CodeCouncil}"
 APP_DIR="${CODECOUNCIL_HOME:-$HOME/.codecouncil/app}"
 BIN_DIR="$HOME/.local/bin"
 ENV_FILE="$HOME/.codecouncil/env"
@@ -99,4 +99,4 @@ say ""
 say "installed. next steps:"
 say "  1. add a model key to $ENV_FILE (free: NVIDIA_API_KEY from build.nvidia.com)"
 say "  2. codecouncil /path/to/repo-you-code-in"
-say "docs: https://github.com/adigo-tamu/CodeCouncil#sixty-second-start"
+say "docs: https://github.com/adigo-pro/CodeCouncil#sixty-second-start"

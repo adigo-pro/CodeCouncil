@@ -410,7 +410,7 @@ const EndCard: React.FC = () => {
         catches the claim · proves it · sees the fix
       </div>
       <div style={{ fontFamily: MONO, fontSize: 18, color: C.ok, marginTop: 16 }}>
-        github.com/adigo-tamu/CodeCouncil
+        github.com/adigo-pro/CodeCouncil
       </div>
       <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.mutedFg, marginTop: 10 }}>
         real sequence, real timings — Apache-2.0

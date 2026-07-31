@@ -85,7 +85,7 @@ class TestUntrackedContents(unittest.TestCase):
         self.assertNotEqual(fp1, fp2)
 
     def test_untracked_secret_redacted(self):
-        secret = "AKIAABCDEFGHIJKLMNOP"
+        secret = "AKIAIOSFODNN7EXAMPLE"
         (self.repo / "creds.py").write_text(f"aws_key = '{secret}'\n")
         snap = gitwatch.capture(self.repo)
         text = snap["untracked_contents"]["creds.py"]
@@ -96,7 +96,7 @@ class TestUntrackedContents(unittest.TestCase):
         (self.repo / "config.py").write_text("aws_key = ''\n")
         subprocess.run(["git", "-C", str(self.repo), "add", "-A"], check=True)
         subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "init"], check=True)
-        secret = "AKIAABCDEFGHIJKLMNOP"
+        secret = "AKIAIOSFODNN7EXAMPLE"
         (self.repo / "config.py").write_text(f"aws_key = '{secret}'\n")
         snap = gitwatch.capture(self.repo)
         self.assertNotIn(secret, snap["diff"])
@@ -107,7 +107,7 @@ class TestUntrackedContents(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.repo), "add", "-A"], check=True)
         subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "init"], check=True)
         old = gitwatch.head(self.repo)
-        secret = "AKIAABCDEFGHIJKLMNOP"
+        secret = "AKIAIOSFODNN7EXAMPLE"
         (self.repo / "config.py").write_text(f"aws_key = '{secret}'\n")
         subprocess.run(["git", "-C", str(self.repo), "commit", "-qam", "add key"], check=True)
         new = gitwatch.head(self.repo)
@@ -116,7 +116,7 @@ class TestUntrackedContents(unittest.TestCase):
         self.assertIn("«REDACTED:aws-key»", c["diff"])
 
     def test_fingerprint_stable_with_secret_across_calls(self):
-        secret = "AKIAABCDEFGHIJKLMNOP"
+        secret = "AKIAIOSFODNN7EXAMPLE"
         (self.repo / "creds.py").write_text(f"aws_key = '{secret}'\n")
         fp1 = gitwatch.fingerprint(gitwatch.capture(self.repo))
         fp2 = gitwatch.fingerprint(gitwatch.capture(self.repo))
@@ -153,7 +153,7 @@ class TestTouchedContents(unittest.TestCase):
 
     def test_touched_contents_redacted(self):
         self._commit("config.py", "aws_key = ''\n")
-        secret = "AKIAABCDEFGHIJKLMNOP"
+        secret = "AKIAIOSFODNN7EXAMPLE"
         (self.repo / "config.py").write_text(f"aws_key = '{secret}'\n")
         snap = gitwatch.capture(self.repo)
         text = snap["touched_contents"]["config.py"]

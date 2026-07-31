@@ -369,7 +369,7 @@ else:
         finding["issue"]) can echo repo content verbatim, including a
         credential shape. That must never reach suggestions.ndjsonl raw."""
         from critic.main import judge_batch
-        secret = "nvapi-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        secret = "nvapi-EXAMPLEfakekeyonly000000000000"
         script = f"""#!/usr/bin/env python3
 import sys
 from pathlib import Path

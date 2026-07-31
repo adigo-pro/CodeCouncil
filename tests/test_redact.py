@@ -12,7 +12,7 @@ from core import redact
 
 class TestRedact(unittest.TestCase):
     def test_aws_access_key(self):
-        secret = "AKIAABCDEFGHIJKLMNOP"
+        secret = "AKIAIOSFODNN7EXAMPLE"
         out = redact.redact(f"aws_key = '{secret}'")
         self.assertNotIn(secret, out)
         self.assertIn("«REDACTED:aws-key»", out)

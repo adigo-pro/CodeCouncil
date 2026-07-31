@@ -180,23 +180,61 @@ const TopChrome: React.FC = () => {
 };
 
 // ---- scenes ----
+/** The council mark — three nodes, one raised. Identical geometry to
+ *  ui/src/components/Header.tsx and the site favicon, so the demo opens on
+ *  the same logo everything else uses. The two outer nodes settle first, the
+ *  raised one drops in after: the "second opinion" arriving. */
+const Mark: React.FC<{ size?: number; progress?: number }> = ({ size = 132, progress = 1 }) => {
+  const outer = interpolate(progress, [0, 0.55], [0, 1], {
+    extrapolateLeft: "clamp", extrapolateRight: "clamp",
+  });
+  const raised = interpolate(progress, [0.45, 1], [0, 1], {
+    extrapolateLeft: "clamp", extrapolateRight: "clamp",
+  });
+  return (
+    <svg width={size} height={(size * 20) / 30} viewBox="0 0 30 20" fill="none">
+      <circle cx="5" cy="14" r="3.2" stroke={C.fg} strokeWidth="1.6"
+        opacity={outer} />
+      <circle cx="25" cy="14" r="3.2" stroke={C.fg} strokeWidth="1.6"
+        opacity={outer} />
+      <circle cx="15" cy={5 + (1 - raised) * 9} r="3.2" fill={C.fg} opacity={raised} />
+    </svg>
+  );
+};
+
 const Title: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const sub = spring({ frame: frame - 34, fps, config: { damping: 200 } });
+  const markP = spring({ frame: frame - 2, fps, config: { damping: 14, mass: 0.7 } });
+  const word = spring({ frame: frame - 22, fps, config: { damping: 200 } });
+  const sub = spring({ frame: frame - 36, fps, config: { damping: 200 } });
   const out = interpolate(frame, [T.titleEnd - 12, T.titleEnd], [1, 0], {
+    extrapolateLeft: "clamp", extrapolateRight: "clamp",
+  });
+  // a slow push-in through the whole card: cinema, not a static slide
+  const push = interpolate(frame, [0, T.titleEnd], [1.06, 1], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
   });
   return (
     <AbsoluteFill style={{
-      background: C.background, alignItems: "center", justifyContent: "center", opacity: out,
+      background: C.background, alignItems: "center", justifyContent: "center",
+      opacity: out, transform: `scale(${push})`,
     }}>
-      <div style={{ fontFamily: MONO, fontSize: 58, fontWeight: 700, color: C.fg, letterSpacing: -1 }}>
-        {typed("CodeCouncil", frame, 6, 0.55)}
-        <span style={{ color: C.live }}>▍</span>
+      <div style={{ opacity: markP }}>
+        <Mark progress={markP} />
       </div>
-      <div style={{ fontFamily: SANS, fontSize: 21, color: C.mutedFg, marginTop: 16, opacity: sub }}>
-        an AI peer reviewer for AI coding agents
+      <div style={{
+        fontFamily: SANS, fontSize: 62, fontWeight: 650, color: C.fg,
+        letterSpacing: -2, marginTop: 30,
+        opacity: word, transform: `translateY(${(1 - word) * 10}px)`,
+      }}>
+        CodeCouncil
+      </div>
+      <div style={{
+        fontFamily: SANS, fontSize: 22, color: C.mutedFg, marginTop: 14,
+        opacity: sub, transform: `translateY(${(1 - sub) * 8}px)`, letterSpacing: -0.2,
+      }}>
+        the second opinion your model can&rsquo;t give itself
       </div>
     </AbsoluteFill>
   );
@@ -402,18 +440,50 @@ const EndCard: React.FC = () => {
   const o = interpolate(frame, [T.endStart, T.endStart + 15], [0, 1], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
   });
+  // settle in with a gentle push — the last frame is the one people screenshot
+  const push = interpolate(frame, [T.endStart, T.endStart + 30], [1.04, 1], {
+    extrapolateLeft: "clamp", extrapolateRight: "clamp",
+  });
   return (
     <AbsoluteFill style={{
-      background: `${C.background}ee`, alignItems: "center", justifyContent: "center", opacity: o,
+      background: C.background, alignItems: "center", justifyContent: "center",
+      opacity: o, width: "100%", height: "100%", textAlign: "center", padding: 40,
+      // must sit above the review panel, which carries zIndex 2 during the
+      // spotlight beat — without this the end card renders *behind* the
+      // dashboard and its left half is hidden.
+      zIndex: 10,
     }}>
-      <div style={{ fontFamily: SANS, fontSize: 28, color: C.fg, fontWeight: 600 }}>
-        catches the claim · proves it · sees the fix
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", width: "100%", maxWidth: 1000,
+        transform: `scale(${push})`,
+      }}>
+      <Mark size={92} />
+      <div style={{
+        fontFamily: SANS, fontSize: 40, color: C.fg, fontWeight: 650,
+        letterSpacing: -1.4, marginTop: 26, textAlign: "center",
+      }}>
+        It didn&rsquo;t guess. It ran your code.
       </div>
-      <div style={{ fontFamily: MONO, fontSize: 18, color: C.ok, marginTop: 16 }}>
+      <div style={{
+        display: "flex", gap: 10, alignItems: "center", marginTop: 22,
+        fontFamily: MONO, fontSize: 14, color: C.mutedFg,
+      }}>
+        <span style={{ color: C.ok }}>caught the false claim</span>
+        <span style={{ color: C.border }}>·</span>
+        <span style={{ color: C.ok }}>proved it with a repro</span>
+        <span style={{ color: C.border }}>·</span>
+        <span style={{ color: C.ok }}>delivered in-session</span>
+      </div>
+      <div style={{
+        fontFamily: MONO, fontSize: 19, color: C.fg, marginTop: 34,
+        borderTop: `1px solid ${C.border}`, paddingTop: 22,
+      }}>
         github.com/adigo-pro/CodeCouncil
       </div>
       <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.mutedFg, marginTop: 10 }}>
-        real sequence, real timings — Apache-2.0
+        real sequence, real timings — Apache-2.0, free to run
+      </div>
       </div>
     </AbsoluteFill>
   );
@@ -421,12 +491,35 @@ const EndCard: React.FC = () => {
 
 export const Catch: React.FC = () => {
   const frame = useCurrentFrame();
+  // THE CATCH: when the finding lands, dim the whole canvas and lift the
+  // review panel toward camera for a beat. Without this the payoff reads as
+  // "another row appeared in a dashboard"; with it, the eye is forced to the
+  // one thing that matters. Fully settled again by the time the fix arrives.
+  const spot = interpolate(
+    frame,
+    [T.findingStart - 6, T.findingStart + 8, T.proofStamp + 40, T.proofStamp + 62],
+    [0, 1, 1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const lift = 1 + 0.018 * spot;
   return (
     <AbsoluteFill style={{ background: C.background }}>
       {frame >= T.titleEnd - 12 && (
         <AbsoluteFill style={{ flexDirection: "row", gap: 16, padding: "86px 20px 20px" }}>
-          <ReviewCardPanel />
-          <FeedCard />
+          {/* NOTE: no CSS `filter` here — a filter creates a containing block
+              for absolutely-positioned descendants, which traps Remotion's
+              AbsoluteFill overlays (the EndCard rendered clipped inside this
+              column). Scale + the neighbour's opacity carry the spotlight. */}
+          <div style={{
+            flex: 1, display: "flex",
+            transform: `scale(${lift})`, transformOrigin: "center left",
+            zIndex: 2,
+          }}>
+            <ReviewCardPanel />
+          </div>
+          <div style={{ flex: 1, display: "flex", opacity: 1 - 0.42 * spot }}>
+            <FeedCard />
+          </div>
         </AbsoluteFill>
       )}
       {frame >= T.titleEnd - 12 && <TopChrome />}

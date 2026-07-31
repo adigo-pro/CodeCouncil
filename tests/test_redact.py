@@ -36,7 +36,7 @@ class TestRedact(unittest.TestCase):
         self.assertIn("«REDACTED:github-token»", out)
 
     def test_github_pat_fine_grained(self):
-        secret = "github_pat_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0"
+        secret = "github_pat_11EXAMPLE0000_FAKEtokenForTestsONLYnotReal0000"
         out = redact.redact(secret)
         self.assertNotIn(secret, out)
         self.assertIn("«REDACTED:github-token»", out)
@@ -149,7 +149,7 @@ class TestRedact(unittest.TestCase):
     def test_github_oauth_token(self):
         # gh[ousr]_ — GitHub's non-classic first-party token shapes
         # (oauth/user-to-server/server-to-server/refresh).
-        secret = "gho_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0"
+        secret = "gho_EXAMPLE0FAKEtokenFORtestsONLYnotReal"
         out = redact.redact(secret)
         self.assertNotIn(secret, out)
         self.assertIn("«REDACTED:github-token»", out)

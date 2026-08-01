@@ -52,6 +52,11 @@ echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env   # free — see "Model pr
 codecouncil /path/to/repo-you-code-in                   # hooks + all three loops (defaults to `.`)
 ```
 
+Want the completely-free path spelled out step by step — key signup on
+build.nvidia.com, switching models, even council mode at $0? **See the
+[full free-setup guide](https://github.com/adigo-pro/CodeCouncil/discussions/1)**
+in Discussions.
+
 Re-run the installer to update. Prefer manual? `git clone` + `python3 -m
 codecouncil /path/to/repo` works identically — the installer is convenience,
 not magic ([install.sh](install.sh) is ~102 audited lines).

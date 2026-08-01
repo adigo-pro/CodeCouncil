@@ -1,16 +1,32 @@
+<div align="center">
+
 # CodeCouncil
 
+**The independent, execution-grounded second opinion your coding agent can't give itself.**
+
+*It doesn't judge your agent's work — it runs it.*
+
 [![CI](https://github.com/adigo-pro/CodeCouncil/actions/workflows/ci.yml/badge.svg)](https://github.com/adigo-pro/CodeCouncil/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://github.com/adigo-pro/CodeCouncil/blob/main/.github/workflows/ci.yml)
+[![Dependencies](https://img.shields.io/badge/dependencies-stdlib_only-brightgreen.svg)](#running-the-loops-individually)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Free setup](https://img.shields.io/badge/runs_free-NVIDIA_API-76b900.svg)](https://github.com/adigo-pro/CodeCouncil/discussions/1)
+
+**proves findings by running a repro** · **differently-trained reviewer** · **rewrites its own rules, eval-gated** · **$0 on a free NVIDIA key**
+
+</div>
 
 ![CodeCouncil catching a claim-vs-code bug: the agent's docstring promises ValueError, the code doesn't raise, the critic proves it by running it and delivers the finding into the agent's context](docs/demo.gif)
 
-*Every line above is from a real run — the finding, the repro, the timings. Recreated frame-for-frame with [Remotion](https://remotion.dev) (`demo/`).*
+<p align="center"><em>Every line above is from a real run — the finding, the repro, the timings. Recreated frame-for-frame with <a href="https://remotion.dev">Remotion</a> (<code>demo/</code>).</em></p>
 
-**The independent, execution-grounded second opinion your model can't give
-itself.** Today's coding models verify their own work — Claude 5 runs its own
-tests before it says "done." That's real progress, and it's also the problem:
-a model checking its own output is the *most correlated possible reviewer*. It
+---
+
+## Why
+
+Today's coding models verify their own work — Claude 5 runs its own tests
+before it says "done." That's real progress, and it's also the problem: a
+model checking its own output is the *most correlated possible reviewer*. It
 shares its own blind spots by construction, and 2026 research on
 [self-verification](docs/benchmarks/WHY.md) is blunt about the failure mode —
 self-checking makes a model **more convincing, not more correct** (a
@@ -37,6 +53,8 @@ you + Claude Code ──▶ transcripts + git ──▶ Observer ──▶ Criti
                              back on regression)           fix it or rebut it
 ```
 
+---
+
 ## Sixty-second start
 
 ```sh
@@ -52,10 +70,9 @@ echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env   # free — see "Model pr
 codecouncil /path/to/repo-you-code-in                   # hooks + all three loops (defaults to `.`)
 ```
 
-Want the completely-free path spelled out step by step — key signup on
-build.nvidia.com, switching models, even council mode at $0? **See the
-[full free-setup guide](https://github.com/adigo-pro/CodeCouncil/discussions/1)**
-in Discussions.
+> **Completely free path**, spelled out step by step — key signup on
+> build.nvidia.com, switching models, even council mode at $0:
+> **[the full free-setup guide](https://github.com/adigo-pro/CodeCouncil/discussions/1)** in Discussions.
 
 Re-run the installer to update. Prefer manual? `git clone` + `python3 -m
 codecouncil /path/to/repo` works identically — the installer is convenience,
@@ -66,58 +83,51 @@ your terminal, on the dashboard (`cd ui && npm install && npm run dev` →
 localhost:4700), and — the important part — **inside your coding agent's own
 context** via Claude Code hooks, scoped to the session that caused them.
 
+---
+
 ## What makes it different
 
 The three below are the load-bearing ones — each is what a self-verifying
 model structurally *can't* do, backed by 2026 research in
 [WHY.md](docs/benchmarks/WHY.md):
 
-- **It executes, it doesn't judge.** A self-verifier (and every LLM-judge
-  review tool) scores *plausibility* — the documented failure mode where
-  apparent pass rates climb while true accuracy doesn't. CodeCouncil delivers
-  a finding only after **running a repro against your code**: ground truth,
-  not another model's opinion. Refuted findings are never delivered; confirmed
-  ones ship with the executed proof.
-- **It's independent, and differently trained.** The reviewer is a separate
-  model with **no stake in declaring your task done** and — by design — a
-  different training distribution, so its blind spots don't line up with your
-  agent's. A model reviewing itself is the most correlated reviewer possible;
-  this is the opposite. (Opt-in **council mode** adds a second decorrelated
-  prober, measured not vibed — see [docs/benchmarks/](docs/benchmarks/):
-  Nemotron anchors precision at 0 false positives; `gpt-5-mini` adds recall; a
-  prober-only finding ships **only** with repro proof.)
-- **It co-evolves with your agent.** The research rule is *"verification must
-  co-evolve with the generator"* — a static reviewer decays as the model
-  improves. CodeCouncil grades every finding against what you did next and
-  rewrites its own review rules, eval-gated and auto-rolled-back on
-  regression, so the check keeps pace.
+### It executes, it doesn't judge
 
-And the supporting layers:
+A self-verifier (and every LLM-judge review tool) scores *plausibility* — the
+documented failure mode where apparent pass rates climb while true accuracy
+doesn't. CodeCouncil delivers a finding only after **running a repro against
+your code**: ground truth, not another model's opinion. Refuted findings are
+never delivered; confirmed ones ship with the executed proof.
 
-- **It screens for the failure modes research actually documents.** ~45% of
-  AI code introduces OWASP-class vulnerabilities while syntax looks perfect
-  (Veracode, 150+ models); models hallucinate nonexistent packages
-  ("slopsquatting"); agents under pressure weaken their own tests. Every diff
-  gets zero-cost mechanical screening for exactly these — SQL/command/eval
-  injection patterns, unsafe deserialization, imports that don't resolve,
-  removed tests and assertions — and the critic must confirm or dismiss each
-  signal with a reason.
-- **It grades its own silences.** Every verdict records what it reviewed.
-  When a later fix commit revises files a PASS covered, that PASS is graded
-  `missed` — and the judgment packet becomes a frozen eval case
-  automatically. The eval set grows from real mistakes.
-- **Self-improvement is measured and reversible, not vibes.** The Reflector
-  rewrites the critic's rules from graded outcomes — but a candidate must
-  match or beat the current rules on the frozen evals to ship, and a version
-  whose real-world acceptance drops gets auto-rolled-back. Every finding
-  cites the rule that motivated it, so rewrites are evidence-linked per rule.
-- **Rebuttals become knowledge.** Your agent can push back
-  (`COUNCIL-REBUTTAL: <reason>`) — recorded honestly, distilled into a
-  per-repo facts file the critic reads on every future judgment. The same
-  disagreement never needs to happen twice.
-- **When your agent says "done", you get a session receipt** — claims made
-  vs. mechanically verified facts (did a test command actually run?), written
-  to `.codecouncil/receipts/` and announced in the transcript.
+### It's independent, and differently trained
+
+The reviewer is a separate model with **no stake in declaring your task
+done** and — by design — a different training distribution, so its blind
+spots don't line up with your agent's. A model reviewing itself is the most
+correlated reviewer possible; this is the opposite. (Opt-in **council mode**
+adds a second decorrelated prober, measured not vibed — see
+[docs/benchmarks/](docs/benchmarks/): Nemotron anchors precision at 0 false
+positives; `gpt-5-mini` adds recall; a prober-only finding ships **only**
+with repro proof.)
+
+### It co-evolves with your agent
+
+The research rule is *"verification must co-evolve with the generator"* — a
+static reviewer decays as the model improves. CodeCouncil grades every
+finding against what you did next and rewrites its own review rules,
+eval-gated and auto-rolled-back on regression, so the check keeps pace.
+
+### And the supporting layers
+
+| Layer | What it does |
+|---|---|
+| **Failure-mode screening** | ~45% of AI code introduces OWASP-class vulnerabilities while syntax looks perfect (Veracode, 150+ models); models hallucinate nonexistent packages ("slopsquatting"); agents under pressure weaken their own tests. Every diff gets zero-cost mechanical screening for exactly these — SQL/command/eval injection patterns, unsafe deserialization, imports that don't resolve, removed tests and assertions — and the critic must confirm or dismiss each signal with a reason. |
+| **Graded silences** | Every verdict records what it reviewed. When a later fix commit revises files a PASS covered, that PASS is graded `missed` — and the judgment packet becomes a frozen eval case automatically. The eval set grows from real mistakes. |
+| **Measured self-improvement** | The Reflector rewrites the critic's rules from graded outcomes — but a candidate must match or beat the current rules on the frozen evals to ship, and a version whose real-world acceptance drops gets auto-rolled-back. Every finding cites the rule that motivated it, so rewrites are evidence-linked per rule. |
+| **Rebuttals become knowledge** | Your agent can push back (`COUNCIL-REBUTTAL: <reason>`) — recorded honestly, distilled into a per-repo facts file the critic reads on every future judgment. The same disagreement never needs to happen twice. |
+| **Session receipts** | When your agent says "done", you get claims made vs. mechanically verified facts (did a test command actually run?), written to `.codecouncil/receipts/` and announced in the transcript. |
+
+---
 
 ## Configuring — the two-terminal workflow
 
@@ -125,13 +135,14 @@ CodeCouncil is built to run beside your coding agent: `codecouncil .` in one
 terminal, Claude Code in the other. The running council is interactive —
 slash commands work in place, Claude Code-style:
 
-```
-/keys              guided API-key setup (hidden input, saved to ~/.codecouncil/env)
-/model <p/m>       set + persist the primary model (restarts just the critic)
-/prober <p/m|off>  council mode on/off (restarts just the critic)
-/status            daemons, beats, last verdict, heuristics version, keys
-/config            resolved configuration and where each value came from
-```
+| Command | What it does |
+|---|---|
+| `/keys` | Guided API-key setup (hidden input, saved to `~/.codecouncil/env`) |
+| `/model <p/m>` | Set + persist the primary model (restarts just the critic) |
+| `/prober <p/m\|off>` | Council mode on/off (restarts just the critic) |
+| `/status` | Daemons, beats, last verdict, heuristics version, keys |
+| `/config` | Resolved configuration and where each value came from |
+| `/verbose` | Unmute idle-beat chatter |
 
 Settings layer the way you'd expect: **CLI flag > environment variable
 (`COUNCIL_MODEL` / `COUNCIL_PROBER`) > `~/.codecouncil/config.json`**. Keys
@@ -144,6 +155,8 @@ findings, repro proofs, council votes, grades, heuristics rewrites, receipts
 — arrive **★ highlighted**. The dashboard auto-starts when built
 (`cd ui && npm install`, once) and announces its URL:
 `[ui] dashboard ready → http://localhost:4700/`.
+
+---
 
 ## Model providers
 
@@ -166,7 +179,7 @@ login — NVIDIA hosts Nemotron and other open models with a free API key:
 
 | Provider | Key in `~/.codecouncil/env` | Example `/model` value |
 |---|---|---|
-| NVIDIA (free) | `NVIDIA_API_KEY` | `nvidia-nim/nvidia/nemotron-3-super-120b-a12b` |
+| **NVIDIA (free)** | `NVIDIA_API_KEY` | `nvidia-nim/nvidia/nemotron-3-super-120b-a12b` |
 | OpenRouter | `OPENROUTER_API_KEY` | `openrouter/openai/gpt-5-mini` |
 | OpenAI | `OPENAI_API_KEY` | `openai/gpt-5-mini` |
 | Anthropic | `ANTHROPIC_API_KEY` | `anthropic/claude-haiku-4-5` |
@@ -184,6 +197,8 @@ its blind spots; Nemotron, GPT, or Gemini won't. (Council mode formalizes
 this: `--prober openrouter/openai/gpt-5-mini` adds a decorrelated second
 opinion, delivered only with repro proof.)
 
+---
+
 ## Security model, in one paragraph
 
 Everything is **redacted at capture** — credentials in diffs, new files,
@@ -194,6 +209,8 @@ leaves your machine is review prompts to the provider *you* configure; keys
 live in `~/.codecouncil/env`, outside every repo. Repros run in throwaway
 temp dirs; investigation tools are path-jailed to the repo. Full contract:
 [SECURITY.md](SECURITY.md).
+
+---
 
 ## Running the loops individually
 
@@ -213,32 +230,38 @@ Loops communicate **only through NDJSON files** in the watched repo's
 never (missing inputs → wait). `COUNCIL_MODEL=provider/model` picks the
 primary model; `CRITIC_CMD=<script>` stubs the model for tests.
 
+---
+
 ## Honest numbers
 
 From this repo's own dogfooding (it watches itself — the hooks are installed
 here, and the critic reviews its builders):
 
-- Plant-to-catch on a claim-vs-code bug: **~90 seconds**; catch-to-delivery
-  into the agent's context: **~2 minutes**.
-- It caught a real secret-leak bug **in its own redaction code** that two
-  independent reviewers had approved.
-- Model bake-offs across 12 candidates, 7 frozen cases each, latency and
-  format discipline measured: [docs/benchmarks/](docs/benchmarks/).
-- 647 tests (`python3 -m unittest discover -s tests`), CI on 3.10/3.12 +
-  UI build + lint + installer smoke test + bench-selftest (the A/B harness's
-  safety scorers prove they discriminate good from bad, zero API spend,
-  before anyone trusts a live run). Small-n caveat: the self-improvement
-  curves are days old, not months. That's what running it grows.
-- The A/B harness's full method — arms, tiers, isolation, self-test gate,
-  limitations, ponytail attribution — is written up in
-  [docs/benchmarks/METHODOLOGY.md](docs/benchmarks/METHODOLOGY.md). Four live
-  45-session safety-tier runs are published under it —
-  [run 1](docs/benchmarks/2026-07-25-safety-run1.md),
-  [run 2](docs/benchmarks/2026-07-25-safety-run2.md),
-  [run 3](docs/benchmarks/2026-07-25-safety-run3.md),
-  [run 4](docs/benchmarks/2026-07-25-safety-run4.md) — each tying within
-  noise, each diagnosing and fixing the next real bottleneck (judge timing →
-  recall → delivery → verification reliability).
+| Measure | Result |
+|---|---|
+| Plant-to-catch on a claim-vs-code bug | **~90 seconds** |
+| Catch-to-delivery into the agent's context | **~2 minutes** |
+| Caught in its own redaction code | A real secret-leak bug **two independent reviewers had approved** |
+| Model bake-off | 12 candidates × 7 frozen cases, latency + format discipline measured — [docs/benchmarks/](docs/benchmarks/) |
+| Tests | **647** (`python3 -m unittest discover -s tests`) · CI on 3.10/3.12 + UI build + lint + installer smoke test + bench-selftest |
+
+The bench-selftest means the A/B harness's safety scorers prove they
+discriminate good from bad — zero API spend — before anyone trusts a live
+run. Small-n caveat: the self-improvement curves are days old, not months.
+That's what running it grows.
+
+The A/B harness's full method — arms, tiers, isolation, self-test gate,
+limitations, ponytail attribution — is written up in
+[docs/benchmarks/METHODOLOGY.md](docs/benchmarks/METHODOLOGY.md). Four live
+45-session safety-tier runs are published under it —
+[run 1](docs/benchmarks/2026-07-25-safety-run1.md),
+[run 2](docs/benchmarks/2026-07-25-safety-run2.md),
+[run 3](docs/benchmarks/2026-07-25-safety-run3.md),
+[run 4](docs/benchmarks/2026-07-25-safety-run4.md) — each tying within
+noise, each diagnosing and fixing the next real bottleneck (judge timing →
+recall → delivery → verification reliability).
+
+---
 
 ## Contributing
 
@@ -256,5 +279,8 @@ agents: while you work in this repo, CodeCouncil reviews *you* in real time
 (its hooks are installed on itself), so you'll get findings in your own
 context and can fix or `COUNCIL-REBUTTAL:` them as you go.
 
-Plain-language architecture tour: [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md).
-Design history: [docs/plans/](docs/plans/). License: [Apache-2.0](LICENSE).
+<div align="center">
+
+[Architecture tour](docs/PROJECT_GUIDE.md) · [Design history](docs/plans/) · [Free setup guide](https://github.com/adigo-pro/CodeCouncil/discussions/1) · [Apache-2.0](LICENSE)
+
+</div>

@@ -12,8 +12,9 @@ never-committed credentials file outside any watched repo):
   PI_BIN          pi executable (default "pi")
   COUNCIL_MODEL   "provider/model" override (e.g. "openai/gpt-4o", or
                   "nvidia-nim/nvidia/nemotron-3-super-120b-a12b" via the
-                  bundled NVIDIA provider extension); defaults to pi's own default model,
-                  unless NVIDIA_API_KEY is available (then Nemotron 3 Super)
+                  bundled NVIDIA provider extension); defaults to the first
+                  configured key's model (core.config.KEY_DEFAULT_MODELS order,
+                  free NVIDIA-hosted Nemotron first), else pi's own default
   NVIDIA_API_KEY  enables the bundled NVIDIA-hosted Nemotron provider
   CRITIC_CMD      test stub: run as `$CRITIC_CMD <prompt-file> <resolved-model-or-empty>`,
                   stdout = reply (existing single-arg stubs ignore the second argv)
@@ -25,6 +26,8 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+
+from core import config as cfg
 
 TURN_TIMEOUT = 180
 
@@ -73,12 +76,17 @@ def _run(cmd: list[str], timeout: int, cwd: str | None = None,
 
 def _resolve_model(model: str | None, env: dict[str, str]) -> str | None:
     """One source of truth for model precedence: explicit param > COUNCIL_MODEL
-    env > NVIDIA default (when its key resolves) > None. The CRITIC_CMD stub
-    branch and the pi branch must never drift apart on this — the stub's
-    argv[2] IS the test contract for what production would have sent."""
-    return model or env.get("COUNCIL_MODEL") or (
-        DEFAULT_NVIDIA_MODEL if env.get("NVIDIA_API_KEY") else None
-    )
+    env > first configured key's default (cfg.KEY_DEFAULT_MODELS order: free
+    NVIDIA first, Anthropic last) > None. The CRITIC_CMD stub branch and the
+    pi branch must never drift apart on this — the stub's argv[2] IS the test
+    contract for what production would have sent."""
+    explicit = model or env.get("COUNCIL_MODEL")
+    if explicit:
+        return explicit
+    for key, default in cfg.KEY_DEFAULT_MODELS:
+        if env.get(key):
+            return default
+    return None
 
 
 def ask(prompt: str, system: str | None = None, tools: str | None = None,

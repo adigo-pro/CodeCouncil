@@ -193,5 +193,63 @@ class TestSignalFilter(unittest.TestCase):
         self.assertEqual(classify("\x1b[2m· beat 1 · 10:00:00 · nothing new, no call made\x1b[0m"), DROP)
 
 
+class TestModelHelpers(unittest.TestCase):
+    """Shared provider/key/default maps + /model validation (console-model-flexibility)."""
+
+    def test_maps_are_consistent(self):
+        from core import config as cfg
+        # every auto-default's key is a known key, and its provider maps back to it
+        for key, model in cfg.KEY_DEFAULT_MODELS:
+            self.assertIn(key, cfg.KNOWN_KEYS)
+            provider = model.split("/", 1)[0]
+            self.assertEqual(cfg.PROVIDER_KEYS.get(provider), key)
+        # every known key has an auto-default (so /keys alone always works)
+        self.assertEqual({k for k, _ in cfg.KEY_DEFAULT_MODELS}, set(cfg.KNOWN_KEYS))
+        # free NVIDIA first, Anthropic last (decorrelation caveat)
+        self.assertEqual(cfg.KEY_DEFAULT_MODELS[0][0], "NVIDIA_API_KEY")
+        self.assertEqual(cfg.KEY_DEFAULT_MODELS[-1][0], "ANTHROPIC_API_KEY")
+
+    def test_check_model_missing_key(self):
+        from core import config as cfg
+        warns = cfg.check_model("openrouter/openai/gpt-5-mini", {})
+        self.assertTrue(any("OPENROUTER_API_KEY" in w for w in warns))
+        self.assertFalse(cfg.check_model("openrouter/openai/gpt-5-mini",
+                                         {"OPENROUTER_API_KEY": "sk-or-x"}))
+
+    def test_check_model_shapes(self):
+        from core import config as cfg
+        env = {"OPENROUTER_API_KEY": "x", "NVIDIA_API_KEY": "x", "OPENAI_API_KEY": "x"}
+        # no slash at all
+        self.assertTrue(cfg.check_model("gpt-5-mini", env))
+        # openrouter and nvidia-nim ids nest — a single segment after the prefix is wrong
+        self.assertTrue(any("nested" in w or "full" in w
+                            for w in cfg.check_model("openrouter/gpt-5-mini", env)))
+        self.assertTrue(any("nested" in w or "full" in w
+                            for w in cfg.check_model("nvidia-nim/nemotron-3-super", env)))
+        # well-formed values are clean
+        self.assertFalse(cfg.check_model("openai/gpt-5-mini", env))
+        self.assertFalse(cfg.check_model("nvidia-nim/nvidia/nemotron-3-super-120b-a12b", env))
+
+    def test_check_model_unknown_provider_is_soft_note(self):
+        from core import config as cfg
+        warns = cfg.check_model("mistral/mistral-large", {})
+        self.assertTrue(any("unknown provider" in w for w in warns))
+
+    def test_resolve_with_source(self):
+        import tempfile
+        from core import config as cfg
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            self.assertEqual(cfg.resolve_with_source("f", "E", "k", {"E": "e"}, base),
+                             ("f", "flag"))
+            self.assertEqual(cfg.resolve_with_source(None, "E", "k", {"E": "e"}, base),
+                             ("e", "env:E"))
+            cfg.save_config({"k": "c"}, base)
+            self.assertEqual(cfg.resolve_with_source(None, "E", "k", {}, base),
+                             ("c", "config"))
+            self.assertEqual(cfg.resolve_with_source(None, "E", "other", {}, base),
+                             (None, "default"))
+
+
 if __name__ == "__main__":
     unittest.main()

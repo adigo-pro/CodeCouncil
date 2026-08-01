@@ -1,5 +1,6 @@
 """Tests for the codecouncil launcher's preflight warnings."""
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -191,6 +192,47 @@ class TestSignalFilter(unittest.TestCase):
         self.assertEqual(classify("✓ beat 12 · 10:00:00 · PASS — clean"), NORMAL)
         # daemons write plain text to pipes, but tolerate ANSI anyway
         self.assertEqual(classify("\x1b[2m· beat 1 · 10:00:00 · nothing new, no call made\x1b[0m"), DROP)
+
+
+class TestConsoleOverrideResolution(unittest.TestCase):
+    """/model must beat a stale --model flag or exported COUNCIL_MODEL: a knob
+    in console_set resolves from config.json only."""
+
+    def setUp(self):
+        import tempfile
+        from core import config as cfg
+        self.td = tempfile.TemporaryDirectory()
+        self._orig = cfg.CONFIG_DIR
+        cfg.CONFIG_DIR = Path(self.td.name)
+        self.addCleanup(lambda: setattr(cfg, "CONFIG_DIR", self._orig))
+        self.addCleanup(self.td.cleanup)
+
+    @staticmethod
+    def _args(model=None, prober=None):
+        import argparse
+        return argparse.Namespace(model=model, prober=prober)
+
+    def test_flag_and_env_win_normally(self):
+        with mock.patch.dict(os.environ, {"COUNCIL_PROBER": "e/p"}, clear=False):
+            os.environ.pop("COUNCIL_MODEL", None)
+            model, prober = launcher.resolve_settings(self._args(model="f/m"))
+            self.assertEqual((model, prober), ("f/m", "e/p"))
+
+    def test_console_set_drops_flag_and_env_for_that_knob_only(self):
+        from core import config as cfg
+        cfg.save_config({"model": "c/m"})
+        with mock.patch.dict(
+                os.environ, {"COUNCIL_MODEL": "e/m", "COUNCIL_PROBER": "e/p"}, clear=False):
+            model, prober = launcher.resolve_settings(
+                self._args(model="f/m", prober="f/p"), console_set={"model"})
+            self.assertEqual(model, "c/m")   # flag + env ignored, config wins
+            self.assertEqual(prober, "f/p")  # untouched knob keeps flag precedence
+
+    def test_console_set_prober_off_resolves_none(self):
+        with mock.patch.dict(os.environ, {"COUNCIL_PROBER": "e/p"}, clear=False):
+            _, prober = launcher.resolve_settings(
+                self._args(prober="f/p"), console_set={"prober"})
+            self.assertIsNone(prober)  # config has no prober -> council off
 
 
 class TestModelHelpers(unittest.TestCase):

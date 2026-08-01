@@ -49,7 +49,7 @@ available, and scaffolds `~/.codecouncil/env` for your key. Then:
 
 ```sh
 echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env   # free — see "Model providers"
-codecouncil /path/to/repo-you-code-in                   # hooks + all three loops
+codecouncil /path/to/repo-you-code-in                   # hooks + all three loops (defaults to `.`)
 ```
 
 Re-run the installer to update. Prefer manual? `git clone` + `python3 -m

@@ -99,7 +99,8 @@ def resolve_settings(args) -> tuple[str | None, str | None]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="codecouncil", description=__doc__)
-    ap.add_argument("repo", type=Path, help="path to the repo being coded in")
+    ap.add_argument("repo", type=Path, nargs="?", default=Path("."),
+                    help="path to the repo being coded in (default: current directory)")
     ap.add_argument("--model", help="model for pi turns (sets COUNCIL_MODEL, e.g. openai/gpt-4o)")
     ap.add_argument("--prober", help="council mode: second model asked alongside --model/"
                     "COUNCIL_MODEL (e.g. openrouter/openai/gpt-5-mini), or set COUNCIL_PROBER")

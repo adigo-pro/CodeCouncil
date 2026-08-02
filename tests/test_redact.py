@@ -212,3 +212,49 @@ class TestRedact(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStripControls(unittest.TestCase):
+    """Model-authored findings are printed to the developer's terminal and
+    injected into the coding agent's context. A raw ANSI escape in that text
+    can repaint the line above it — e.g. overwrite a HIGH severity label — so
+    a finding could be made to look like something it isn't."""
+
+    def test_csi_colour_sequences_removed(self):
+        out = redact.strip_controls("issue \x1b[31mred\x1b[0m text")
+        self.assertEqual(out, "issue red text")
+
+    def test_cursor_movement_removed(self):
+        """The dangerous ones: move-up + erase-line can rewrite prior output."""
+        out = redact.strip_controls("safe\x1b[1A\x1b[2Kforged HIGH severity")
+        self.assertNotIn("\x1b", out)
+        self.assertEqual(out, "safeforged HIGH severity")
+
+    def test_osc_sequence_removed(self):
+        out = redact.strip_controls("a\x1b]0;window title\x07b")
+        self.assertEqual(out, "ab")
+
+    def test_c0_controls_removed_but_whitespace_kept(self):
+        out = redact.strip_controls("a\x00b\x07c\td\ne\rf")
+        self.assertEqual(out, "abc\td\ne\rf")
+
+    def test_ordinary_text_untouched(self):
+        text = "safe_divide(1, 0) raises ZeroDivisionError — see utils.py:42"
+        self.assertEqual(redact.strip_controls(text), text)
+
+    def test_empty_input(self):
+        self.assertEqual(redact.strip_controls(""), "")
+
+
+class TestSanitize(unittest.TestCase):
+    def test_strips_and_redacts(self):
+        out = redact.sanitize("key: \x1b[31mAKIAIOSFODNN7EXAMPLE\x1b[0m")
+        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", out)
+        self.assertNotIn("\x1b", out)
+
+    def test_escape_split_secret_still_redacted(self):
+        """Stripping runs BEFORE redaction, so an escape spliced into the
+        middle of a credential can't break it past the patterns."""
+        out = redact.sanitize("AKIA\x1b[0mIOSFODNN7EXAMPLE")
+        self.assertNotIn("IOSFODNN7EXAMPLE", out)
+        self.assertIn("REDACTED", out)

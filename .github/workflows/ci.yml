@@ -22,6 +22,24 @@ jobs:
       # tests/test_jail.py (the path-jail security boundary) actually runs
       # instead of self-skipping -- jail.mjs has zero npm dependencies, so
       # a bare `node` on PATH is all it needs.
+      #
+      # Same reasoning for bubblewrap: it is the Linux mechanism behind
+      # core/sandbox.py, and without it tests/test_sandbox.py's
+      # exploit-regression class has no sandbox to assert against. That class
+      # now ERRORS rather than skipping when no mechanism exists, so this step
+      # is what keeps the HIGH-severity guard (model-authored scripts must not
+      # reach credentials or the network) actually enforced in CI.
+      - name: Install bubblewrap (Linux OS sandbox for model-authored scripts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default,
+          # which bwrap requires; without this it fails with
+          # "Creating new namespace failed: Operation not permitted".
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          # Fail fast and loudly here rather than as a confusing test error.
+          bwrap --ro-bind / / --unshare-net -- /bin/true
+          echo "bwrap functional"
       - run: python3 -m unittest discover -s tests
 
   ui:

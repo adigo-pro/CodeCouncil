@@ -4,6 +4,40 @@ Notable changes. Format: [Keep a Changelog](https://keepachangelog.com); version
 
 ## [Unreleased]
 
+### Security
+- **Model-authored verify/probe scripts now run under an OS sandbox**
+  (`core/sandbox.py`; macOS `sandbox-exec`, Linux `bwrap`) that denies network
+  egress and reads under your real home directory. Previously these scripts
+  were protected only by a scrubbed environment and a redirected `HOME` —
+  which **did not stop credential theft**: `pwd.getpwuid()` recovers the real
+  home regardless of `$HOME`, so a script could read `~/.codecouncil/env` by
+  absolute path and POST it out. `SECURITY.md` claimed keys were unreachable;
+  that claim was wrong and has been corrected.
+  **If you ran CodeCouncil's verification against a repository you don't fully
+  trust, rotate the API keys in `~/.codecouncil/env`.**
+  Policy via `COUNCIL_SANDBOX` (`auto` default / `require` / `off`) or the
+  `sandbox` config key; hosts with no mechanism warn instead of pretending.
+- Observer capture no longer follows a symlink out of the repo
+  (`gitwatch._read_confined`). `git ls-files` lists untracked symlinks, so a
+  repo shipping `leaked.txt -> ~/.aws/credentials` could previously have that
+  outside file captured and sent to the model provider — redaction does not
+  catch it, since such files are ordinary confidential text, not key shapes.
+- A/B scoring subprocesses (`evals/ab/score.py`) get a scrubbed environment
+  instead of the operator's full `os.environ`; they import agent-produced code,
+  which runs its top-level statements.
+- Distilled knowledge facts (`core/knowledge.py`) now reject review-process
+  vocabulary and security-exemption phrasing, closing a path where a crafted
+  rebuttal could persist "SQL injection is an accepted convention here" into
+  every future judgment prompt.
+- `screen.resolve_new_imports` runs its probe with `-I` and a scrubbed
+  environment, so the untrusted repo's directory is off `sys.path` and no API
+  key reaches a process rooted in it.
+- Model-authored text is control-character stripped as well as redacted
+  (`core.redact.sanitize`) — an ANSI escape in a finding could otherwise
+  repaint the terminal and misrepresent a severity.
+- CI installs bubblewrap, and the exploit-regression tests now ERROR rather
+  than silently skipping when no sandbox mechanism exists.
+
 ### Added
 - Per-key model auto-defaults: with no model configured, the first configured
   API key picks its provider's default model (`core.config.KEY_DEFAULT_MODELS`,

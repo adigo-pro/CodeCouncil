@@ -95,6 +95,43 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
+# ANSI escape sequences (CSI "\x1b[...m", OSC "\x1b]...BEL", and bare
+# two-character escapes) plus C0 control characters. Tab/newline/carriage
+# return are deliberately preserved — they are ordinary content in a diff or
+# a multi-line note.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]"          # CSI  — colour/cursor control
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC  — window title, hyperlinks
+    r"|\x1b[@-Z\\-_]"                      # bare two-char escapes
+)
+_C0_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def strip_controls(text: str) -> str:
+    """Remove ANSI escapes and C0 control characters, keeping \\t/\\n/\\r.
+
+    Model-authored strings (issue, rationale, verification note, repro) are
+    printed to the developer's terminal by critic/render.py and injected into
+    the coding agent's context by hooks/logic.py. Left raw, an escape sequence
+    in that text can repaint the terminal — overwriting the severity label of
+    the line above, or hiding text with a colour — so a finding could be made
+    to *look* like something it is not. Cheap to remove at the boundary where
+    model output is already being redacted and capped."""
+    if not text:
+        return text
+    return _C0_RE.sub("", _ANSI_RE.sub("", text))
+
+
+def sanitize(text: str) -> str:
+    """The full boundary treatment for MODEL-AUTHORED text: strip terminal
+    control sequences, then redact credential shapes.
+
+    Strip runs first so an escape sequence spliced into the middle of a
+    credential (`sk-abc\\x1b[0mdef…`) can't split it past the redaction
+    patterns."""
+    return redact(strip_controls(text))
+
+
 def redact(text: str) -> str:
     """Replace every high-confidence credential shape in `text` with a
     `«REDACTED:kind»` marker. Non-secret text (including the surrounding

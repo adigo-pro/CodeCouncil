@@ -20,7 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 from core import knowledge
-from core.redact import redact
+from core.redact import sanitize
 from core.store import read_tail_rows, wait_for, write_json_atomic
 from observer.events import now_iso
 from observer.transcript import tail_new_lines
@@ -441,7 +441,7 @@ def probe_pass(events: list[dict], ctx: dict, heuristics_version: int) -> None:
                 # credential shape (CLAUDE.md's redaction invariant: every
                 # text-bearing field a model can influence gets redacted
                 # before it lands in a stored artifact).
-                "issue": _cap(redact(finding["issue"]), PROBE_ISSUE_MAX_CHARS),
+                "issue": _cap(sanitize(finding["issue"]), PROBE_ISSUE_MAX_CHARS),
                 "rationale": "Derived from an executed edge probe against "
                              "the function's own docstring promise.",
                 "rule": None, "failure_mode": "claim-drift",

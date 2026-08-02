@@ -41,9 +41,10 @@ def preflight(model: str | None, prober: str | None = None) -> list[str]:
     env = agent.local_env()  # includes ~/.codecouncil/env
     has_key = any(env.get(v) for v in KEY_VARS)
     if not model and not env.get("COUNCIL_MODEL") and not has_key:
-        warns.append("no model configured: pass --model, set COUNCIL_MODEL, or put an "
-                     "API key in ~/.codecouncil/env. pi will fall back to its own default, "
-                     "which may not be authenticated.")
+        warns.append("no model configured and no API key found: type /keys in this "
+                     "console once the council starts (guided, hidden input), or pass "
+                     "--model / set COUNCIL_MODEL / add a key to ~/.codecouncil/env. "
+                     "pi will fall back to its own default, which may not be authenticated.")
     # Council mode (Task 4): the prober is a second, independent model call
     # (critic/main.py's resolve_prober precedence: --prober flag > this same
     # COUNCIL_PROBER env fallback > None). openrouter/* providers need
@@ -88,13 +89,22 @@ def _pump(name: str, proc: subprocess.Popen) -> None:
             print(f"{_tag(name)} {text}", flush=True)
 
 
-def resolve_settings(args) -> tuple[str | None, str | None]:
-    """flag > env var > ~/.codecouncil/config.json — one rule for both knobs."""
+def resolve_settings(args, console_set: frozenset | set = frozenset()
+                     ) -> tuple[str | None, str | None]:
+    """flag > env var > ~/.codecouncil/config.json — one rule for both knobs.
+    A knob named in console_set was just set via /model or /prober: the console
+    persisted it to config.json, so the launch-time flag and any exported env
+    var must stop outranking it — that knob resolves from the config file only."""
     from core import config as cfg
-    env = os.environ
-    model = cfg.resolve(args.model, "COUNCIL_MODEL", "model", dict(env))
-    prober = cfg.resolve(args.prober, "COUNCIL_PROBER", "prober", dict(env))
-    return model, prober
+    env = dict(os.environ)
+
+    def one(knob: str, flag: str | None, env_name: str, key: str) -> str | None:
+        if knob in console_set:
+            return cfg.resolve(None, env_name, key, {})
+        return cfg.resolve(flag, env_name, key, env)
+
+    return (one("model", args.model, "COUNCIL_MODEL", "model"),
+            one("prober", args.prober, "COUNCIL_PROBER", "prober"))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -112,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {repo} is not a directory", file=sys.stderr)
         return 2
 
+    console_set: set[str] = set()  # knobs reconfigured via /model | /prober
+
     model, prober = resolve_settings(args)
     for w in preflight(model, prober):
         print(f"{_tag('critic')} warning: {w}", flush=True)
@@ -125,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def launch(name: str) -> None:
         # settings re-resolve on every (re)launch so /model and /prober apply
-        m, p = resolve_settings(args)
+        m, p = resolve_settings(args, console_set)
         env = os.environ.copy()
         if m:
             env["COUNCIL_MODEL"] = m
@@ -171,12 +183,38 @@ def main(argv: list[str] | None = None) -> int:
                 old.kill()
         launch("critic")
 
+    def settings_info() -> dict:
+        """Resolved model/prober + which layer won — for /model and /keys.
+        Adds the auto-default layer below config: with no explicit model, the
+        critic falls to the first configured key's default (critic/agent.py's
+        _resolve_model), and the console should show that truthfully."""
+        from core import config as cfg
+        env_file = agent.local_env()   # includes ~/.codecouncil/env keys
+        env = dict(os.environ)
+
+        def one(knob, flag, env_name, key):
+            if knob in console_set:
+                return cfg.resolve_with_source(None, env_name, key, {})
+            return cfg.resolve_with_source(flag, env_name, key, env)
+
+        m, msrc = one("model", args.model, "COUNCIL_MODEL", "model")
+        if m is None:
+            for k, d in cfg.KEY_DEFAULT_MODELS:
+                if env_file.get(k):
+                    m, msrc = d, f"auto:{k}"
+                    break
+        p, psrc = one("prober", args.prober, "COUNCIL_PROBER", "prober")
+        return {"model": m, "model_source": msrc,
+                "prober": p, "prober_source": psrc, "env": env_file}
+
     console_note = ""
     if sys.stdin.isatty():
         from .console import Console
         console = Console(repo=repo, restart_critic=restart_critic,
                           stop=stopping.set,
-                          say=lambda m: print(f"{_tag('critic')} {m}", flush=True))
+                          say=lambda m: print(f"{_tag('critic')} {m}", flush=True),
+                          settings_info=settings_info,
+                          on_override=console_set.add)
 
         def _read_stdin() -> None:
             for line in sys.stdin:

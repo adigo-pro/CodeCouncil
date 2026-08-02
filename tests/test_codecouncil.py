@@ -1,5 +1,6 @@
 """Tests for the codecouncil launcher's preflight warnings."""
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -191,6 +192,191 @@ class TestSignalFilter(unittest.TestCase):
         self.assertEqual(classify("✓ beat 12 · 10:00:00 · PASS — clean"), NORMAL)
         # daemons write plain text to pipes, but tolerate ANSI anyway
         self.assertEqual(classify("\x1b[2m· beat 1 · 10:00:00 · nothing new, no call made\x1b[0m"), DROP)
+
+
+class TestConsoleOverrideResolution(unittest.TestCase):
+    """/model must beat a stale --model flag or exported COUNCIL_MODEL: a knob
+    in console_set resolves from config.json only."""
+
+    def setUp(self):
+        import tempfile
+        from core import config as cfg
+        self.td = tempfile.TemporaryDirectory()
+        self._orig = cfg.CONFIG_DIR
+        cfg.CONFIG_DIR = Path(self.td.name)
+        self.addCleanup(lambda: setattr(cfg, "CONFIG_DIR", self._orig))
+        self.addCleanup(self.td.cleanup)
+
+    @staticmethod
+    def _args(model=None, prober=None):
+        import argparse
+        return argparse.Namespace(model=model, prober=prober)
+
+    def test_flag_and_env_win_normally(self):
+        with mock.patch.dict(os.environ, {"COUNCIL_PROBER": "e/p"}, clear=False):
+            os.environ.pop("COUNCIL_MODEL", None)
+            model, prober = launcher.resolve_settings(self._args(model="f/m"))
+            self.assertEqual((model, prober), ("f/m", "e/p"))
+
+    def test_console_set_drops_flag_and_env_for_that_knob_only(self):
+        from core import config as cfg
+        cfg.save_config({"model": "c/m"})
+        with mock.patch.dict(
+                os.environ, {"COUNCIL_MODEL": "e/m", "COUNCIL_PROBER": "e/p"}, clear=False):
+            model, prober = launcher.resolve_settings(
+                self._args(model="f/m", prober="f/p"), console_set={"model"})
+            self.assertEqual(model, "c/m")   # flag + env ignored, config wins
+            self.assertEqual(prober, "f/p")  # untouched knob keeps flag precedence
+
+    def test_console_set_prober_off_resolves_none(self):
+        with mock.patch.dict(os.environ, {"COUNCIL_PROBER": "e/p"}, clear=False):
+            _, prober = launcher.resolve_settings(
+                self._args(prober="f/p"), console_set={"prober"})
+            self.assertIsNone(prober)  # config has no prober -> council off
+
+
+class TestModelHelpers(unittest.TestCase):
+    """Shared provider/key/default maps + /model validation (console-model-flexibility)."""
+
+    def test_maps_are_consistent(self):
+        from core import config as cfg
+        # every auto-default's key is a known key, and its provider maps back to it
+        for key, model in cfg.KEY_DEFAULT_MODELS:
+            self.assertIn(key, cfg.KNOWN_KEYS)
+            provider = model.split("/", 1)[0]
+            self.assertEqual(cfg.PROVIDER_KEYS.get(provider), key)
+        # every known key has an auto-default (so /keys alone always works)
+        self.assertEqual({k for k, _ in cfg.KEY_DEFAULT_MODELS}, set(cfg.KNOWN_KEYS))
+        # free NVIDIA first, Anthropic last (decorrelation caveat)
+        self.assertEqual(cfg.KEY_DEFAULT_MODELS[0][0], "NVIDIA_API_KEY")
+        self.assertEqual(cfg.KEY_DEFAULT_MODELS[-1][0], "ANTHROPIC_API_KEY")
+
+    def test_check_model_missing_key(self):
+        from core import config as cfg
+        warns = cfg.check_model("openrouter/openai/gpt-5-mini", {})
+        self.assertTrue(any("OPENROUTER_API_KEY" in w for w in warns))
+        self.assertFalse(cfg.check_model("openrouter/openai/gpt-5-mini",
+                                         {"OPENROUTER_API_KEY": "sk-or-x"}))
+
+    def test_check_model_shapes(self):
+        from core import config as cfg
+        env = {"OPENROUTER_API_KEY": "x", "NVIDIA_API_KEY": "x", "OPENAI_API_KEY": "x"}
+        # no slash at all
+        self.assertTrue(cfg.check_model("gpt-5-mini", env))
+        # openrouter and nvidia-nim ids nest — a single segment after the prefix is wrong
+        self.assertTrue(any("nested" in w or "full" in w
+                            for w in cfg.check_model("openrouter/gpt-5-mini", env)))
+        self.assertTrue(any("nested" in w or "full" in w
+                            for w in cfg.check_model("nvidia-nim/nemotron-3-super", env)))
+        # well-formed values are clean
+        self.assertFalse(cfg.check_model("openai/gpt-5-mini", env))
+        self.assertFalse(cfg.check_model("nvidia-nim/nvidia/nemotron-3-super-120b-a12b", env))
+
+    def test_check_model_unknown_provider_is_soft_note(self):
+        from core import config as cfg
+        warns = cfg.check_model("mistral/mistral-large", {})
+        self.assertTrue(any("unknown provider" in w for w in warns))
+
+    def test_resolve_with_source(self):
+        import tempfile
+        from core import config as cfg
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            self.assertEqual(cfg.resolve_with_source("f", "E", "k", {"E": "e"}, base),
+                             ("f", "flag"))
+            self.assertEqual(cfg.resolve_with_source(None, "E", "k", {"E": "e"}, base),
+                             ("e", "env:E"))
+            cfg.save_config({"k": "c"}, base)
+            self.assertEqual(cfg.resolve_with_source(None, "E", "k", {}, base),
+                             ("c", "config"))
+            self.assertEqual(cfg.resolve_with_source(None, "E", "other", {}, base),
+                             (None, "default"))
+
+
+class TestConsoleModelFlow(unittest.TestCase):
+    """/model validation, bare /model info, /keys -> model chaining."""
+
+    def setUp(self):
+        import tempfile
+        from core import config as cfg
+        self.td = tempfile.TemporaryDirectory()
+        self._orig = cfg.CONFIG_DIR
+        cfg.CONFIG_DIR = Path(self.td.name)
+        self.addCleanup(lambda: setattr(cfg, "CONFIG_DIR", self._orig))
+        self.addCleanup(self.td.cleanup)
+        self.msgs, self.restarts, self.overrides = [], [], []
+        self.info = {"model": None, "model_source": "default",
+                     "prober": None, "prober_source": "default", "env": {}}
+
+    def _console(self):
+        from codecouncil.console import Console
+        return Console(repo=Path("."), restart_critic=lambda: self.restarts.append(1),
+                       stop=lambda: None, say=self.msgs.append,
+                       settings_info=lambda: dict(self.info),
+                       on_override=self.overrides.append)
+
+    def test_model_missing_key_warns_but_still_saves(self):
+        from core import config as cfg
+        self._console().handle("/model openrouter/openai/gpt-5-mini")
+        self.assertTrue(any("OPENROUTER_API_KEY" in m for m in self.msgs))
+        self.assertEqual(cfg.load_config().get("model"), "openrouter/openai/gpt-5-mini")
+        self.assertEqual(self.overrides, ["model"])
+        self.assertEqual(self.restarts, [1])
+
+    def test_bare_model_shows_current_source_and_examples(self):
+        self.info.update(model="openai/gpt-5-mini", model_source="config",
+                         env={"OPENAI_API_KEY": "x"})
+        self._console().handle("/model")
+        joined = "\n".join(self.msgs)
+        self.assertIn("openai/gpt-5-mini", joined)
+        self.assertIn("config", joined)
+        self.assertNotIn("Restarting", joined)   # bare /model never restarts
+        self.assertEqual(self.restarts, [])
+
+    def test_bare_model_with_no_keys_points_at_keys(self):
+        self._console().handle("/model")
+        self.assertTrue(any("/keys" in m for m in self.msgs))
+
+    def test_prober_gets_same_validation(self):
+        self._console().handle("/prober openrouter/openai/gpt-5-mini")
+        self.assertTrue(any("OPENROUTER_API_KEY" in m for m in self.msgs))
+        self.assertEqual(self.overrides, ["prober"])
+
+    def test_prober_off_skips_validation(self):
+        self._console().handle("/prober off")
+        self.assertFalse(any("warning" in m for m in self.msgs))
+
+    def test_keys_offers_model_switch_when_current_uses_other_key(self):
+        from core import config as cfg
+        self.info.update(model="nvidia-nim/nvidia/nemotron-3-super-120b-a12b",
+                         model_source="auto:NVIDIA_API_KEY")
+        answers = iter(["3", "y"])   # 3 = OPENAI_API_KEY in KNOWN_KEYS order
+        with mock.patch("builtins.input", lambda *_: next(answers)), \
+             mock.patch("getpass.getpass", lambda *_: "sk-test"):
+            self._console().handle("/keys")
+        self.assertEqual(cfg.load_config().get("model"), "openai/gpt-5-mini")
+        self.assertEqual(self.overrides, ["model"])
+        self.assertEqual(self.restarts, [1])
+
+    def test_keys_no_switch_when_declined(self):
+        from core import config as cfg
+        self.info.update(model="nvidia-nim/nvidia/nemotron-3-super-120b-a12b",
+                         model_source="config")
+        answers = iter(["3", "n"])
+        with mock.patch("builtins.input", lambda *_: next(answers)), \
+             mock.patch("getpass.getpass", lambda *_: "sk-test"):
+            self._console().handle("/keys")
+        self.assertIsNone(cfg.load_config().get("model"))
+        self.assertEqual(self.restarts, [])
+
+    def test_keys_announces_when_key_matches_current_model(self):
+        # saving the key the current model already uses -> no switch prompt
+        self.info.update(model="openai/gpt-5-mini", model_source="auto:OPENAI_API_KEY")
+        with mock.patch("builtins.input", lambda *_: "3"), \
+             mock.patch("getpass.getpass", lambda *_: "sk-test"):
+            self._console().handle("/keys")
+        self.assertTrue(any("openai/gpt-5-mini" in m for m in self.msgs))
+        self.assertEqual(self.restarts, [])
 
 
 if __name__ == "__main__":

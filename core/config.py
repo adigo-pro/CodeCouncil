@@ -26,6 +26,53 @@ KNOWN_KEYS = {
     "GROQ_API_KEY": "Groq-hosted open models (gsk_...)",
 }
 
+# provider prefix (first path segment of a "provider/model-id" value) -> the
+# API key that provider needs. /model uses this to warn at set time instead
+# of letting a missing key surface as per-beat critic failures.
+PROVIDER_KEYS = {
+    "nvidia-nim": "NVIDIA_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GEMINI_API_KEY",
+    "groq": "GROQ_API_KEY",
+}
+
+# When no model is configured anywhere, the first key present picks a default
+# so a single /keys entry always yields a working council. Ordered: free
+# NVIDIA first; Anthropic last (a critic from the coding agent's own family
+# shares its blind spots — README "Model providers" caveat).
+KEY_DEFAULT_MODELS = (
+    ("NVIDIA_API_KEY", "nvidia-nim/nvidia/nemotron-3-super-120b-a12b"),
+    ("OPENROUTER_API_KEY", "openrouter/openai/gpt-5-mini"),
+    ("OPENAI_API_KEY", "openai/gpt-5-mini"),
+    ("GROQ_API_KEY", "groq/openai/gpt-oss-120b"),
+    ("GEMINI_API_KEY", "google/gemini-3-flash-preview"),
+    ("ANTHROPIC_API_KEY", "anthropic/claude-haiku-4-5"),
+)
+
+# providers whose model ids nest a vendor path (openrouter/openai/gpt-5-mini,
+# nvidia-nim/nvidia/nemotron-…) — a single segment after the prefix 404s
+_NESTED_ID_PROVIDERS = ("openrouter", "nvidia-nim")
+
+
+def check_model(model: str, env: dict[str, str]) -> list[str]:
+    """Warnings (never errors) for a /model value. Pure — no I/O."""
+    if "/" not in model:
+        return [f"'{model}' doesn't look like provider/model-id — e.g. openai/gpt-5-mini"]
+    provider, rest = model.split("/", 1)
+    warns = []
+    key = PROVIDER_KEYS.get(provider)
+    if key and not env.get(key):
+        warns.append(f"{provider}/… needs {key}, which isn't set — run /keys first")
+    if key is None:
+        warns.append(f"unknown provider '{provider}' — if pi doesn't support it, "
+                     "every critic beat will fail (see pi.dev/docs for providers)")
+    if provider in _NESTED_ID_PROVIDERS and "/" not in rest:
+        warns.append(f"{provider} model ids are nested — expected the full path, "
+                     f"e.g. {dict(KEY_DEFAULT_MODELS)[PROVIDER_KEYS[provider]]}")
+    return warns
+
 
 def config_path(base: Path | None = None) -> Path:
     return (base or CONFIG_DIR) / "config.json"
@@ -86,7 +133,22 @@ def update_env_key(name: str, value: str, base: Path | None = None) -> None:
     os.chmod(p, 0o600)
 
 
+def resolve_with_source(flag: str | None, env_name: str, config_key: str,
+                        env: dict[str, str], base: Path | None = None
+                        ) -> tuple[str | None, str]:
+    """resolve() plus WHERE the value came from: 'flag' | 'env:<NAME>' |
+    'config' | 'default' — so /model and /status can show the layer that won."""
+    if flag:
+        return flag, "flag"
+    if env.get(env_name):
+        return env[env_name], f"env:{env_name}"
+    v = load_config(base).get(config_key)
+    if v:
+        return v, "config"
+    return None, "default"
+
+
 def resolve(flag: str | None, env_name: str, config_key: str,
             env: dict[str, str], base: Path | None = None) -> str | None:
     """The one precedence rule: flag > env var > config file > None."""
-    return flag or env.get(env_name) or load_config(base).get(config_key) or None
+    return resolve_with_source(flag, env_name, config_key, env, base)[0]

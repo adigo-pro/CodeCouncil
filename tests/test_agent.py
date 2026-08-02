@@ -213,5 +213,31 @@ class TestAskStubModelArgv(unittest.TestCase):
             self.assertEqual(reply, "got:[]")
 
 
+class TestDefaultModelOrder(unittest.TestCase):
+    """Any single API key must yield a working model with zero /model step."""
+
+    def test_each_key_alone_picks_its_default(self):
+        from core import config as cfg
+        from critic.agent import _resolve_model
+        for key, default in cfg.KEY_DEFAULT_MODELS:
+            self.assertEqual(_resolve_model(None, {key: "x"}), default, key)
+
+    def test_nvidia_wins_when_multiple_keys(self):
+        from critic.agent import DEFAULT_NVIDIA_MODEL, _resolve_model
+        env = {"OPENAI_API_KEY": "x", "NVIDIA_API_KEY": "x", "ANTHROPIC_API_KEY": "x"}
+        self.assertEqual(_resolve_model(None, env), DEFAULT_NVIDIA_MODEL)
+
+    def test_explicit_and_env_still_win(self):
+        from critic.agent import _resolve_model
+        env = {"NVIDIA_API_KEY": "x", "COUNCIL_MODEL": "openai/gpt-5-mini"}
+        self.assertEqual(_resolve_model(None, env), "openai/gpt-5-mini")
+        self.assertEqual(_resolve_model("groq/openai/gpt-oss-120b", env),
+                         "groq/openai/gpt-oss-120b")
+
+    def test_no_keys_resolves_none(self):
+        from critic.agent import _resolve_model
+        self.assertIsNone(_resolve_model(None, {}))
+
+
 if __name__ == "__main__":
     unittest.main()

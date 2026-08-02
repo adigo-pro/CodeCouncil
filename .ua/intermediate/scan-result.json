@@ -1,0 +1,1446 @@
+{
+  "name": "CodeCouncil",
+  "description": "CodeCouncil is an independent, execution-grounded AI peer reviewer that watches a Claude Code session in real time, pairs the agent's stated intent with actual git changes, and only speaks after verifying a finding by running a repro. It writes claims-vs-verified session receipts and rewrites its own review heuristics from graded outcomes, with every rewrite gated by frozen evals and auto-rolled-back on measured regression. Note: this project has over 100 source files; consider scoping analysis to a subdirectory for faster results.",
+  "languages": [
+    "css",
+    "html",
+    "javascript",
+    "json",
+    "markdown",
+    "python",
+    "shell",
+    "toml",
+    "typescript",
+    "yaml"
+  ],
+  "frameworks": [
+    "GitHub Actions",
+    "React",
+    "Remotion",
+    "Tailwind CSS",
+    "Vite"
+  ],
+  "files": [
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "language": "markdown",
+      "sizeLines": 19,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/config.yml",
+      "language": "yaml",
+      "sizeLines": 8,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "language": "markdown",
+      "sizeLines": 12,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "language": "markdown",
+      "sizeLines": 9,
+      "fileCategory": "docs"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "language": "yaml",
+      "sizeLines": 83,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "AGENTS.md",
+      "language": "markdown",
+      "sizeLines": 117,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "language": "markdown",
+      "sizeLines": 27,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "CLAUDE.md",
+      "language": "markdown",
+      "sizeLines": 68,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "CODE_OF_CONDUCT.md",
+      "language": "markdown",
+      "sizeLines": 134,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "codecouncil/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "codecouncil/__main__.py",
+      "language": "python",
+      "sizeLines": 5,
+      "fileCategory": "code"
+    },
+    {
+      "path": "codecouncil/console.py",
+      "language": "python",
+      "sizeLines": 148,
+      "fileCategory": "code"
+    },
+    {
+      "path": "codecouncil/main.py",
+      "language": "python",
+      "sizeLines": 215,
+      "fileCategory": "code"
+    },
+    {
+      "path": "codecouncil/signal_filter.py",
+      "language": "python",
+      "sizeLines": 57,
+      "fileCategory": "code"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "language": "markdown",
+      "sizeLines": 109,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "core/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "core/config.py",
+      "language": "python",
+      "sizeLines": 92,
+      "fileCategory": "code"
+    },
+    {
+      "path": "core/knowledge.py",
+      "language": "python",
+      "sizeLines": 137,
+      "fileCategory": "code"
+    },
+    {
+      "path": "core/redact.py",
+      "language": "python",
+      "sizeLines": 114,
+      "fileCategory": "code"
+    },
+    {
+      "path": "core/store.py",
+      "language": "python",
+      "sizeLines": 96,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/__main__.py",
+      "language": "python",
+      "sizeLines": 4,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/agent.py",
+      "language": "python",
+      "sizeLines": 138,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/deps.py",
+      "language": "python",
+      "sizeLines": 146,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/heuristics.seed.md",
+      "language": "markdown",
+      "sizeLines": 38,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "critic/main.py",
+      "language": "python",
+      "sizeLines": 956,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/persona.md",
+      "language": "markdown",
+      "sizeLines": 120,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "critic/pi_extensions/jail.mjs",
+      "language": "javascript",
+      "sizeLines": 131,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/pi_extensions/nvidia_provider.mjs",
+      "language": "javascript",
+      "sizeLines": 78,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/pi_extensions/repo_tools.mjs",
+      "language": "javascript",
+      "sizeLines": 186,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/pkg_names.py",
+      "language": "python",
+      "sizeLines": 129,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/probe.py",
+      "language": "python",
+      "sizeLines": 331,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/prompt.py",
+      "language": "python",
+      "sizeLines": 435,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/receipt.py",
+      "language": "python",
+      "sizeLines": 237,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/render.py",
+      "language": "python",
+      "sizeLines": 76,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/screen.py",
+      "language": "python",
+      "sizeLines": 326,
+      "fileCategory": "code"
+    },
+    {
+      "path": "critic/verify.py",
+      "language": "python",
+      "sizeLines": 207,
+      "fileCategory": "code"
+    },
+    {
+      "path": "demo/package.json",
+      "language": "json",
+      "sizeLines": 14,
+      "fileCategory": "config"
+    },
+    {
+      "path": "demo/remotion.config.ts",
+      "language": "typescript",
+      "sizeLines": 2,
+      "fileCategory": "code"
+    },
+    {
+      "path": "demo/src/Catch.tsx",
+      "language": "typescript",
+      "sizeLines": 531,
+      "fileCategory": "code"
+    },
+    {
+      "path": "demo/src/index.ts",
+      "language": "typescript",
+      "sizeLines": 4,
+      "fileCategory": "code"
+    },
+    {
+      "path": "demo/src/Root.tsx",
+      "language": "typescript",
+      "sizeLines": 14,
+      "fileCategory": "code"
+    },
+    {
+      "path": "demo/tsconfig.json",
+      "language": "json",
+      "sizeLines": 13,
+      "fileCategory": "config"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-21-critic-bakeoff-round2.json",
+      "language": "json",
+      "sizeLines": 260,
+      "fileCategory": "config"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-21-critic-bakeoff.json",
+      "language": "json",
+      "sizeLines": 307,
+      "fileCategory": "config"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-23-ab-pilot.md",
+      "language": "markdown",
+      "sizeLines": 70,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-23-ab-pilot.ndjsonl",
+      "language": "ndjsonl",
+      "sizeLines": 12,
+      "fileCategory": "data"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-25-safety-run1.md",
+      "language": "markdown",
+      "sizeLines": 66,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-25-safety-run1.ndjsonl",
+      "language": "ndjsonl",
+      "sizeLines": 45,
+      "fileCategory": "data"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-25-safety-run2.md",
+      "language": "markdown",
+      "sizeLines": 89,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-25-safety-run2.ndjsonl",
+      "language": "ndjsonl",
+      "sizeLines": 45,
+      "fileCategory": "data"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-25-safety-run3.md",
+      "language": "markdown",
+      "sizeLines": 80,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-25-safety-run3.ndjsonl",
+      "language": "ndjsonl",
+      "sizeLines": 45,
+      "fileCategory": "data"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-25-safety-run4.md",
+      "language": "markdown",
+      "sizeLines": 68,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/benchmarks/2026-07-25-safety-run4.ndjsonl",
+      "language": "ndjsonl",
+      "sizeLines": 45,
+      "fileCategory": "data"
+    },
+    {
+      "path": "docs/benchmarks/METHODOLOGY.md",
+      "language": "markdown",
+      "sizeLines": 272,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/benchmarks/WHY.md",
+      "language": "markdown",
+      "sizeLines": 80,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/launch/LAUNCH_CHECKLIST.md",
+      "language": "markdown",
+      "sizeLines": 126,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/launch/show-hn.md",
+      "language": "markdown",
+      "sizeLines": 86,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/launch/social-posts.md",
+      "language": "markdown",
+      "sizeLines": 62,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/launch/x-thread.md",
+      "language": "markdown",
+      "sizeLines": 98,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-20-hardening-and-usefulness.md",
+      "language": "markdown",
+      "sizeLines": 103,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-21-council-mode.md",
+      "language": "markdown",
+      "sizeLines": 109,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-21-counterpart-pair-programmer.md",
+      "language": "markdown",
+      "sizeLines": 119,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-21-first-principles-learning-loop.md",
+      "language": "markdown",
+      "sizeLines": 290,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-23-oss-cleanup.md",
+      "language": "markdown",
+      "sizeLines": 515,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-24-failure-mode-deepening.md",
+      "language": "markdown",
+      "sizeLines": 152,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-24-honest-benchmark.md",
+      "language": "markdown",
+      "sizeLines": 153,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-25-done-gate.md",
+      "language": "markdown",
+      "sizeLines": 67,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-25-run3-levers.md",
+      "language": "markdown",
+      "sizeLines": 67,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/plans/2026-07-25-script-verification.md",
+      "language": "markdown",
+      "sizeLines": 47,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/PROJECT_GUIDE.md",
+      "language": "markdown",
+      "sizeLines": 191,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/specs/2026-07-18-observer-design.md",
+      "language": "markdown",
+      "sizeLines": 32,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "evals/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/ab/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/ab/rescore.py",
+      "language": "python",
+      "sizeLines": 67,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/ab/run.py",
+      "language": "python",
+      "sizeLines": 575,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/ab/safety_tasks.py",
+      "language": "python",
+      "sizeLines": 433,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/ab/score.py",
+      "language": "python",
+      "sizeLines": 168,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/ab/tasks.py",
+      "language": "python",
+      "sizeLines": 318,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/cases/clean-rename.json",
+      "language": "json",
+      "sizeLines": 59,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/clean-slugify.json",
+      "language": "json",
+      "sizeLines": 45,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/clean-truncate.json",
+      "language": "json",
+      "sizeLines": 49,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/dep-hallucinated.json",
+      "language": "json",
+      "sizeLines": 47,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/dep-known-clean.json",
+      "language": "json",
+      "sizeLines": 45,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/docstring-trap.json",
+      "language": "json",
+      "sizeLines": 57,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/gaming-assert-removed.json",
+      "language": "json",
+      "sizeLines": 48,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/gaming-test-refactor-clean.json",
+      "language": "json",
+      "sizeLines": 45,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/latent-config.json",
+      "language": "json",
+      "sizeLines": 55,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/latent-drift.json",
+      "language": "json",
+      "sizeLines": 50,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/logic-edge-clean.json",
+      "language": "json",
+      "sizeLines": 45,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/logic-promise-gap.json",
+      "language": "json",
+      "sizeLines": 47,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/planted-divide.json",
+      "language": "json",
+      "sizeLines": 40,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/security-param-clean.json",
+      "language": "json",
+      "sizeLines": 45,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/cases/security-sqli.json",
+      "language": "json",
+      "sizeLines": 47,
+      "fileCategory": "config"
+    },
+    {
+      "path": "evals/extract.py",
+      "language": "python",
+      "sizeLines": 52,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/run.py",
+      "language": "python",
+      "sizeLines": 130,
+      "fileCategory": "code"
+    },
+    {
+      "path": "hooks/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "hooks/install.py",
+      "language": "python",
+      "sizeLines": 87,
+      "fileCategory": "code"
+    },
+    {
+      "path": "hooks/ledger.py",
+      "language": "python",
+      "sizeLines": 102,
+      "fileCategory": "code"
+    },
+    {
+      "path": "hooks/logic.py",
+      "language": "python",
+      "sizeLines": 273,
+      "fileCategory": "code"
+    },
+    {
+      "path": "hooks/peer_hook.py",
+      "language": "python",
+      "sizeLines": 272,
+      "fileCategory": "code"
+    },
+    {
+      "path": "install.sh",
+      "language": "shell",
+      "sizeLines": 102,
+      "fileCategory": "script"
+    },
+    {
+      "path": "observer/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "observer/__main__.py",
+      "language": "python",
+      "sizeLines": 4,
+      "fileCategory": "code"
+    },
+    {
+      "path": "observer/events.py",
+      "language": "python",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "observer/gitwatch.py",
+      "language": "python",
+      "sizeLines": 158,
+      "fileCategory": "code"
+    },
+    {
+      "path": "observer/main.py",
+      "language": "python",
+      "sizeLines": 127,
+      "fileCategory": "code"
+    },
+    {
+      "path": "observer/render.py",
+      "language": "python",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "observer/state.py",
+      "language": "python",
+      "sizeLines": 46,
+      "fileCategory": "code"
+    },
+    {
+      "path": "observer/transcript.py",
+      "language": "python",
+      "sizeLines": 148,
+      "fileCategory": "code"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 255,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "reflector/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "reflector/__main__.py",
+      "language": "python",
+      "sizeLines": 4,
+      "fileCategory": "code"
+    },
+    {
+      "path": "reflector/harvest.py",
+      "language": "python",
+      "sizeLines": 173,
+      "fileCategory": "code"
+    },
+    {
+      "path": "reflector/judge.py",
+      "language": "python",
+      "sizeLines": 182,
+      "fileCategory": "code"
+    },
+    {
+      "path": "reflector/main.py",
+      "language": "python",
+      "sizeLines": 311,
+      "fileCategory": "code"
+    },
+    {
+      "path": "reflector/misses.py",
+      "language": "python",
+      "sizeLines": 171,
+      "fileCategory": "code"
+    },
+    {
+      "path": "reflector/persona.md",
+      "language": "markdown",
+      "sizeLines": 42,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "reflector/report.py",
+      "language": "python",
+      "sizeLines": 225,
+      "fileCategory": "code"
+    },
+    {
+      "path": "reflector/rewrite.py",
+      "language": "python",
+      "sizeLines": 172,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ruff.toml",
+      "language": "toml",
+      "sizeLines": 13,
+      "fileCategory": "config"
+    },
+    {
+      "path": "SECURITY.md",
+      "language": "markdown",
+      "sizeLines": 93,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "SUPPORT.md",
+      "language": "markdown",
+      "sizeLines": 45,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "tests/fixtures/session.jsonl",
+      "language": "jsonl",
+      "sizeLines": 8,
+      "fileCategory": "data"
+    },
+    {
+      "path": "tests/harvest_isolation.py",
+      "language": "python",
+      "sizeLines": 46,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_ab_safety.py",
+      "language": "python",
+      "sizeLines": 179,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_ab.py",
+      "language": "python",
+      "sizeLines": 586,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_agent.py",
+      "language": "python",
+      "sizeLines": 217,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_codecouncil.py",
+      "language": "python",
+      "sizeLines": 197,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_core.py",
+      "language": "python",
+      "sizeLines": 51,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_critic_beat.py",
+      "language": "python",
+      "sizeLines": 842,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_critic_council.py",
+      "language": "python",
+      "sizeLines": 336,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_critic_receipts.py",
+      "language": "python",
+      "sizeLines": 397,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_critic.py",
+      "language": "python",
+      "sizeLines": 629,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_deps.py",
+      "language": "python",
+      "sizeLines": 188,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_evals.py",
+      "language": "python",
+      "sizeLines": 78,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_gitwatch.py",
+      "language": "python",
+      "sizeLines": 215,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_harvest.py",
+      "language": "python",
+      "sizeLines": 280,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_hooks.py",
+      "language": "python",
+      "sizeLines": 1126,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_jail.py",
+      "language": "python",
+      "sizeLines": 148,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_knowledge.py",
+      "language": "python",
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_misses.py",
+      "language": "python",
+      "sizeLines": 363,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_observer.py",
+      "language": "python",
+      "sizeLines": 191,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_probe.py",
+      "language": "python",
+      "sizeLines": 552,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_redact.py",
+      "language": "python",
+      "sizeLines": 214,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_reflector.py",
+      "language": "python",
+      "sizeLines": 1132,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_screen.py",
+      "language": "python",
+      "sizeLines": 278,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_store.py",
+      "language": "python",
+      "sizeLines": 50,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tests/test_verify.py",
+      "language": "python",
+      "sizeLines": 399,
+      "fileCategory": "code"
+    },
+    {
+      "path": "training/__init__.py",
+      "language": "python",
+      "sizeLines": 0,
+      "fileCategory": "code"
+    },
+    {
+      "path": "training/run.py",
+      "language": "python",
+      "sizeLines": 253,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/index.html",
+      "language": "html",
+      "sizeLines": 18,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "ui/package.json",
+      "language": "json",
+      "sizeLines": 25,
+      "fileCategory": "config"
+    },
+    {
+      "path": "ui/server/council.ts",
+      "language": "typescript",
+      "sizeLines": 403,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/App.tsx",
+      "language": "typescript",
+      "sizeLines": 46,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/components/ActivityFeed.tsx",
+      "language": "typescript",
+      "sizeLines": 110,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/components/Header.tsx",
+      "language": "typescript",
+      "sizeLines": 90,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/components/HeuristicsCard.tsx",
+      "language": "typescript",
+      "sizeLines": 114,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/components/ImprovementChart.tsx",
+      "language": "typescript",
+      "sizeLines": 203,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/components/ReviewPanel.tsx",
+      "language": "typescript",
+      "sizeLines": 187,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/components/StatBand.tsx",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/live.ts",
+      "language": "typescript",
+      "sizeLines": 21,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/main.tsx",
+      "language": "typescript",
+      "sizeLines": 10,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/styles.css",
+      "language": "css",
+      "sizeLines": 64,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "ui/src/types.ts",
+      "language": "typescript",
+      "sizeLines": 99,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/src/useCouncil.ts",
+      "language": "typescript",
+      "sizeLines": 48,
+      "fileCategory": "code"
+    },
+    {
+      "path": "ui/tsconfig.json",
+      "language": "json",
+      "sizeLines": 16,
+      "fileCategory": "config"
+    },
+    {
+      "path": "ui/vite.config.ts",
+      "language": "typescript",
+      "sizeLines": 73,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 169,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "large",
+  "importMap": {
+    ".github/ISSUE_TEMPLATE/bug_report.md": [],
+    ".github/ISSUE_TEMPLATE/config.yml": [],
+    ".github/ISSUE_TEMPLATE/feature_request.md": [],
+    ".github/PULL_REQUEST_TEMPLATE.md": [],
+    ".github/workflows/ci.yml": [],
+    "AGENTS.md": [],
+    "CHANGELOG.md": [],
+    "CLAUDE.md": [],
+    "CODE_OF_CONDUCT.md": [],
+    "codecouncil/__init__.py": [],
+    "codecouncil/__main__.py": [
+      "codecouncil/main.py"
+    ],
+    "codecouncil/console.py": [
+      "core/__init__.py",
+      "core/store.py"
+    ],
+    "codecouncil/main.py": [
+      "codecouncil/signal_filter.py",
+      "critic/__init__.py",
+      "critic/agent.py",
+      "hooks/install.py"
+    ],
+    "codecouncil/signal_filter.py": [],
+    "CONTRIBUTING.md": [],
+    "core/__init__.py": [],
+    "core/config.py": [],
+    "core/knowledge.py": [],
+    "core/redact.py": [],
+    "core/store.py": [],
+    "critic/__init__.py": [],
+    "critic/__main__.py": [
+      "critic/main.py"
+    ],
+    "critic/agent.py": [],
+    "critic/deps.py": [
+      "critic/pkg_names.py"
+    ],
+    "critic/heuristics.seed.md": [],
+    "critic/main.py": [
+      "core/__init__.py",
+      "core/knowledge.py",
+      "core/redact.py",
+      "core/store.py",
+      "critic/agent.py",
+      "critic/deps.py",
+      "critic/probe.py",
+      "critic/prompt.py",
+      "critic/receipt.py",
+      "critic/render.py",
+      "critic/screen.py",
+      "critic/verify.py",
+      "observer/events.py",
+      "observer/gitwatch.py",
+      "observer/transcript.py"
+    ],
+    "critic/persona.md": [],
+    "critic/pi_extensions/jail.mjs": [],
+    "critic/pi_extensions/nvidia_provider.mjs": [],
+    "critic/pi_extensions/repo_tools.mjs": [
+      "critic/pi_extensions/jail.mjs"
+    ],
+    "critic/pkg_names.py": [],
+    "critic/probe.py": [],
+    "critic/prompt.py": [
+      "core/redact.py"
+    ],
+    "critic/receipt.py": [
+      "core/store.py",
+      "critic/screen.py"
+    ],
+    "critic/render.py": [],
+    "critic/screen.py": [
+      "critic/deps.py"
+    ],
+    "critic/verify.py": [
+      "core/redact.py",
+      "critic/agent.py",
+      "critic/probe.py"
+    ],
+    "demo/package.json": [],
+    "demo/remotion.config.ts": [],
+    "demo/src/Catch.tsx": [],
+    "demo/src/index.ts": [
+      "demo/src/Root.tsx"
+    ],
+    "demo/src/Root.tsx": [
+      "demo/src/Catch.tsx"
+    ],
+    "demo/tsconfig.json": [],
+    "docs/benchmarks/2026-07-21-critic-bakeoff-round2.json": [],
+    "docs/benchmarks/2026-07-21-critic-bakeoff.json": [],
+    "docs/benchmarks/2026-07-23-ab-pilot.md": [],
+    "docs/benchmarks/2026-07-23-ab-pilot.ndjsonl": [],
+    "docs/benchmarks/2026-07-25-safety-run1.md": [],
+    "docs/benchmarks/2026-07-25-safety-run1.ndjsonl": [],
+    "docs/benchmarks/2026-07-25-safety-run2.md": [],
+    "docs/benchmarks/2026-07-25-safety-run2.ndjsonl": [],
+    "docs/benchmarks/2026-07-25-safety-run3.md": [],
+    "docs/benchmarks/2026-07-25-safety-run3.ndjsonl": [],
+    "docs/benchmarks/2026-07-25-safety-run4.md": [],
+    "docs/benchmarks/2026-07-25-safety-run4.ndjsonl": [],
+    "docs/benchmarks/METHODOLOGY.md": [],
+    "docs/benchmarks/WHY.md": [],
+    "docs/launch/LAUNCH_CHECKLIST.md": [],
+    "docs/launch/show-hn.md": [],
+    "docs/launch/social-posts.md": [],
+    "docs/launch/x-thread.md": [],
+    "docs/plans/2026-07-20-hardening-and-usefulness.md": [],
+    "docs/plans/2026-07-21-council-mode.md": [],
+    "docs/plans/2026-07-21-counterpart-pair-programmer.md": [],
+    "docs/plans/2026-07-21-first-principles-learning-loop.md": [],
+    "docs/plans/2026-07-23-oss-cleanup.md": [],
+    "docs/plans/2026-07-24-failure-mode-deepening.md": [],
+    "docs/plans/2026-07-24-honest-benchmark.md": [],
+    "docs/plans/2026-07-25-done-gate.md": [],
+    "docs/plans/2026-07-25-run3-levers.md": [],
+    "docs/plans/2026-07-25-script-verification.md": [],
+    "docs/PROJECT_GUIDE.md": [],
+    "docs/specs/2026-07-18-observer-design.md": [],
+    "evals/__init__.py": [],
+    "evals/ab/__init__.py": [],
+    "evals/ab/rescore.py": [
+      "evals/ab/__init__.py",
+      "evals/ab/run.py",
+      "evals/ab/score.py",
+      "evals/ab/tasks.py"
+    ],
+    "evals/ab/run.py": [
+      "critic/__init__.py",
+      "critic/agent.py",
+      "evals/ab/__init__.py",
+      "evals/ab/safety_tasks.py",
+      "evals/ab/score.py",
+      "evals/ab/tasks.py",
+      "hooks/install.py",
+      "observer/transcript.py",
+      "training/run.py"
+    ],
+    "evals/ab/safety_tasks.py": [],
+    "evals/ab/score.py": [
+      "hooks/__init__.py"
+    ],
+    "evals/ab/tasks.py": [],
+    "evals/cases/clean-rename.json": [],
+    "evals/cases/clean-slugify.json": [],
+    "evals/cases/clean-truncate.json": [],
+    "evals/cases/dep-hallucinated.json": [],
+    "evals/cases/dep-known-clean.json": [],
+    "evals/cases/docstring-trap.json": [],
+    "evals/cases/gaming-assert-removed.json": [],
+    "evals/cases/gaming-test-refactor-clean.json": [],
+    "evals/cases/latent-config.json": [],
+    "evals/cases/latent-drift.json": [],
+    "evals/cases/logic-edge-clean.json": [],
+    "evals/cases/logic-promise-gap.json": [],
+    "evals/cases/planted-divide.json": [],
+    "evals/cases/security-param-clean.json": [],
+    "evals/cases/security-sqli.json": [],
+    "evals/extract.py": [],
+    "evals/run.py": [
+      "critic/__init__.py",
+      "critic/agent.py",
+      "critic/prompt.py",
+      "observer/events.py"
+    ],
+    "hooks/__init__.py": [],
+    "hooks/install.py": [
+      "core/store.py"
+    ],
+    "hooks/ledger.py": [
+      "core/store.py"
+    ],
+    "hooks/logic.py": [],
+    "hooks/peer_hook.py": [
+      "core/config.py",
+      "core/store.py",
+      "critic/receipt.py",
+      "hooks/__init__.py",
+      "hooks/logic.py"
+    ],
+    "install.sh": [],
+    "observer/__init__.py": [],
+    "observer/__main__.py": [
+      "observer/main.py"
+    ],
+    "observer/events.py": [],
+    "observer/gitwatch.py": [
+      "core/redact.py"
+    ],
+    "observer/main.py": [
+      "observer/events.py",
+      "observer/gitwatch.py",
+      "observer/render.py",
+      "observer/state.py",
+      "observer/transcript.py"
+    ],
+    "observer/render.py": [
+      "observer/events.py"
+    ],
+    "observer/state.py": [
+      "core/store.py"
+    ],
+    "observer/transcript.py": [
+      "core/redact.py",
+      "observer/events.py"
+    ],
+    "README.md": [],
+    "reflector/__init__.py": [],
+    "reflector/__main__.py": [
+      "reflector/main.py"
+    ],
+    "reflector/harvest.py": [],
+    "reflector/judge.py": [],
+    "reflector/main.py": [
+      "core/__init__.py",
+      "core/knowledge.py",
+      "core/store.py",
+      "critic/__init__.py",
+      "critic/agent.py",
+      "critic/main.py",
+      "critic/prompt.py",
+      "hooks/__init__.py",
+      "observer/events.py",
+      "reflector/harvest.py",
+      "reflector/judge.py",
+      "reflector/misses.py",
+      "reflector/report.py",
+      "reflector/rewrite.py"
+    ],
+    "reflector/misses.py": [
+      "observer/gitwatch.py"
+    ],
+    "reflector/persona.md": [],
+    "reflector/report.py": [
+      "reflector/main.py"
+    ],
+    "reflector/rewrite.py": [],
+    "ruff.toml": [],
+    "SECURITY.md": [],
+    "SUPPORT.md": [],
+    "tests/fixtures/session.jsonl": [],
+    "tests/harvest_isolation.py": [
+      "evals/run.py",
+      "reflector/__init__.py",
+      "reflector/harvest.py"
+    ],
+    "tests/test_ab_safety.py": [
+      "evals/ab/__init__.py",
+      "evals/ab/safety_tasks.py",
+      "evals/ab/score.py"
+    ],
+    "tests/test_ab.py": [
+      "evals/ab/__init__.py",
+      "evals/ab/score.py",
+      "evals/ab/tasks.py"
+    ],
+    "tests/test_agent.py": [
+      "critic/__init__.py",
+      "critic/agent.py"
+    ],
+    "tests/test_codecouncil.py": [
+      "codecouncil/__init__.py"
+    ],
+    "tests/test_core.py": [
+      "core/__init__.py",
+      "core/store.py"
+    ],
+    "tests/test_critic_beat.py": [
+      "critic/main.py"
+    ],
+    "tests/test_critic_council.py": [
+      "critic/render.py"
+    ],
+    "tests/test_critic_receipts.py": [
+      "critic/__init__.py",
+      "critic/prompt.py"
+    ],
+    "tests/test_critic.py": [
+      "critic/__init__.py",
+      "critic/main.py",
+      "critic/prompt.py",
+      "critic/render.py"
+    ],
+    "tests/test_deps.py": [
+      "critic/__init__.py",
+      "critic/deps.py",
+      "critic/screen.py",
+      "tests/test_screen.py"
+    ],
+    "tests/test_evals.py": [
+      "evals/run.py"
+    ],
+    "tests/test_gitwatch.py": [
+      "observer/__init__.py",
+      "observer/gitwatch.py"
+    ],
+    "tests/test_harvest.py": [
+      "evals/run.py",
+      "observer/__init__.py",
+      "observer/transcript.py",
+      "reflector/__init__.py",
+      "reflector/harvest.py",
+      "tests/harvest_isolation.py"
+    ],
+    "tests/test_hooks.py": [
+      "hooks/__init__.py",
+      "hooks/install.py",
+      "hooks/logic.py"
+    ],
+    "tests/test_jail.py": [],
+    "tests/test_knowledge.py": [
+      "core/__init__.py",
+      "core/knowledge.py"
+    ],
+    "tests/test_misses.py": [
+      "reflector/misses.py"
+    ],
+    "tests/test_observer.py": [
+      "observer/__init__.py",
+      "observer/events.py",
+      "observer/state.py",
+      "observer/transcript.py"
+    ],
+    "tests/test_probe.py": [
+      "critic/__init__.py",
+      "critic/probe.py"
+    ],
+    "tests/test_redact.py": [
+      "core/__init__.py",
+      "core/redact.py"
+    ],
+    "tests/test_reflector.py": [
+      "reflector/__init__.py",
+      "reflector/judge.py",
+      "reflector/report.py",
+      "reflector/rewrite.py",
+      "tests/harvest_isolation.py"
+    ],
+    "tests/test_screen.py": [
+      "critic/__init__.py",
+      "critic/prompt.py",
+      "critic/screen.py"
+    ],
+    "tests/test_store.py": [
+      "core/store.py"
+    ],
+    "tests/test_verify.py": [
+      "critic/__init__.py",
+      "critic/verify.py",
+      "hooks/logic.py"
+    ],
+    "training/__init__.py": [],
+    "training/run.py": [],
+    "ui/index.html": [],
+    "ui/package.json": [],
+    "ui/server/council.ts": [],
+    "ui/src/App.tsx": [
+      "ui/src/components/ActivityFeed.tsx",
+      "ui/src/components/Header.tsx",
+      "ui/src/components/HeuristicsCard.tsx",
+      "ui/src/components/ImprovementChart.tsx",
+      "ui/src/components/ReviewPanel.tsx",
+      "ui/src/components/StatBand.tsx",
+      "ui/src/useCouncil.ts"
+    ],
+    "ui/src/components/ActivityFeed.tsx": [
+      "ui/src/types.ts",
+      "ui/src/useCouncil.ts"
+    ],
+    "ui/src/components/Header.tsx": [
+      "ui/src/live.ts",
+      "ui/src/types.ts"
+    ],
+    "ui/src/components/HeuristicsCard.tsx": [
+      "ui/src/types.ts",
+      "ui/src/useCouncil.ts"
+    ],
+    "ui/src/components/ImprovementChart.tsx": [
+      "ui/src/types.ts"
+    ],
+    "ui/src/components/ReviewPanel.tsx": [
+      "ui/src/types.ts",
+      "ui/src/useCouncil.ts"
+    ],
+    "ui/src/components/StatBand.tsx": [
+      "ui/src/types.ts"
+    ],
+    "ui/src/live.ts": [],
+    "ui/src/main.tsx": [
+      "ui/src/App.tsx",
+      "ui/src/styles.css"
+    ],
+    "ui/src/styles.css": [],
+    "ui/src/types.ts": [],
+    "ui/src/useCouncil.ts": [
+      "ui/src/types.ts"
+    ],
+    "ui/tsconfig.json": [],
+    "ui/vite.config.ts": [
+      "ui/server/council.ts"
+    ]
+  }
+}

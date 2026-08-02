@@ -1,0 +1,66 @@
+# .understandignore — patterns for files/dirs to exclude from analysis
+# Syntax: same as .gitignore (globs, # comments, ! negation, trailing / for dirs)
+# Lines below are suggestions — uncomment to activate.
+# Use ! prefix to force-include something excluded by defaults.
+#
+# Built-in defaults (always excluded unless negated):
+#   node_modules/, .git/, dist/, build/, obj/, *.lock, *.min.js, etc.
+#
+
+# --- From .gitignore (uncomment to exclude) ---
+
+# Live runtime data, not source: observations/suggestions NDJSON, receipts,
+# prompts. CLAUDE.md forbids writing this dir; it is also pure noise for a
+# structural graph.
+.codecouncil/
+# This tool's own output directory — do not analyze ourselves.
+.ua/
+*.pyc
+.DS_Store
+.claude/settings.json
+.superpowers/
+ui/dist/
+demo/out/
+# Machine-generated eval cases harvested from real grades — regenerated data,
+# not authored source.
+evals/cases-harvested/
+
+# --- Detected directories (kept on purpose) ---
+
+# docs/  — kept: PROJECT_GUIDE.md + docs/benchmarks/ are primary narrative.
+# tests/ — kept: one test file per concern; yields tested_by coverage edges.
+
+# --- Test file patterns (uncomment to exclude) ---
+
+# JS / TS
+# *.test.*
+# *.spec.*
+# *.snap
+# C# / .NET
+# **/*Tests.cs
+# **/*Test.cs
+# **/*Fixture.cs
+# **/*.Tests.csproj
+# Java / Kotlin
+# **/src/test/**
+# **/*Test.java
+# **/*IT.java
+# **/*Spec.kt
+# Go
+# **/*_test.go
+# C++
+# **/*_test.cc
+# **/*_test.cpp
+# **/*_test.cxx
+# **/*Test.cc
+# **/*Test.cpp
+# **/*_unittest.cc
+# **/*_unittest.cpp
+# **/*_browsertest.cc
+# **/*_benchmark.cc
+# **/*Benchmark.cpp
+# Python
+# **/test_*.py
+# **/*_test.py
+# **/tests.py
+# **/conftest.py

@@ -190,22 +190,41 @@ class TestExploitBlockedEndToEnd(unittest.TestCase):
 
     def test_getpwuid_home_read_is_blocked(self):
         """HOME redirection alone did NOT stop this — getpwuid reads the OS
-        user database, not the environment."""
-        real_home = pwd.getpwuid(os.getuid()).pw_dir
-        probe = Path(real_home) / ".codecouncil"
-        if not probe.exists():
-            self.skipTest("no ~/.codecouncil on this host to attempt reading")
-        res = self._run(
-            "import os, pwd\n"
-            "real = pwd.getpwuid(os.getuid()).pw_dir\n"
-            "try:\n"
-            "    open(os.path.join(real, '.codecouncil', 'env'), 'rb').read()\n"
-            "    print('LEAKED')\n"
-            "except Exception as e:\n"
-            "    print('BLOCKED', type(e).__name__)\n"
-        )
-        self.assertNotIn("LEAKED", res.stdout)
-        self.assertIn("BLOCKED", res.stdout)
+        user database, not the environment.
+
+        The decoy is PLANTED rather than assumed. An earlier cut of this test
+        skipped when `~/.codecouncil` happened not to exist, which meant CI —
+        where runners have no such directory — verified the network half of
+        the sandbox and silently skipped the credential half. A guard that
+        quietly tests nothing is the failure mode this whole file exists to
+        prevent, so the test now creates the file it wants denied."""
+        real_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        try:
+            fd, decoy = tempfile.mkstemp(prefix=".codecouncil-sandbox-decoy-",
+                                         dir=real_home)
+        except OSError as e:  # unwritable home (rare, e.g. locked-down CI)
+            self.skipTest(f"cannot plant a decoy in {real_home}: {e}")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write("NVIDIA_API_KEY=nvapi-DECOY-must-never-be-readable\n")
+            res = self._run(
+                "import os, pwd\n"
+                f"target = {decoy!r}\n"
+                "real = pwd.getpwuid(os.getuid()).pw_dir\n"
+                "print('RECOVERED-REAL-HOME' if real in target else 'HOME-MISMATCH')\n"
+                "try:\n"
+                "    data = open(target, 'rb').read()\n"
+                "    print('LEAKED', len(data))\n"
+                "except Exception as e:\n"
+                "    print('BLOCKED', type(e).__name__)\n"
+            )
+            # the attack's first step still works — getpwuid does route around
+            # the HOME redirect; it is the OS boundary that stops the read
+            self.assertIn("RECOVERED-REAL-HOME", res.stdout)
+            self.assertNotIn("LEAKED", res.stdout)
+            self.assertIn("BLOCKED", res.stdout)
+        finally:
+            os.unlink(decoy)
 
     def test_network_egress_is_blocked(self):
         res = self._run(

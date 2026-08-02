@@ -280,6 +280,17 @@ Good first issues: redaction patterns, frozen eval
 cases, adapters for other coding agents (the observer only needs an intent
 stream; the hooks only need an injection channel).
 
+**Want to understand the codebase fast?** A checked-in structural map lives
+at [`.ua/knowledge-graph.json`](.ua/knowledge-graph.json): 554 nodes (files,
+classes, functions), 1,239 edges (imports, calls, `tested_by`), 10
+architectural layers, and a 14-step guided tour that walks
+observer → critic → hooks → reflector in data-flow order. With the
+[Understand-Anything](https://github.com/Egonex-AI/Understand-Anything)
+plugin installed, `/understand-dashboard` opens it as an interactive graph;
+without it, the JSON reads plainly (`project`, `nodes`, `edges`, `layers`,
+`tour`). It's a commit-pinned snapshot (`.ua/meta.json` says which), not a
+live view — see CONTRIBUTING.md's "Architecture map".
+
 **Are you an AI coding agent?** Read [AGENTS.md](AGENTS.md) — a contribution
 guide written for you, not a human. And a fitting twist for a tool built for
 agents: while you work in this repo, CodeCouncil reviews *you* in real time

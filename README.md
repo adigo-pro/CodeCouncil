@@ -66,8 +66,9 @@ on your PATH, wires up [pi](https://pi.dev) (the model runtime) if npm is
 available, and scaffolds `~/.codecouncil/env` for your key. Then:
 
 ```sh
-echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env   # free — see "Model providers"
-codecouncil /path/to/repo-you-code-in                   # hooks + all three loops (defaults to `.`)
+codecouncil /path/to/repo-you-code-in   # hooks + all three loops (defaults to `.`)
+# then type /keys in the running council — guided key setup with hidden input;
+# a model is picked automatically (free NVIDIA key: see "Model providers")
 ```
 
 > **Completely free path**, spelled out step by step — key signup on
@@ -137,8 +138,8 @@ slash commands work in place, Claude Code-style:
 
 | Command | What it does |
 |---|---|
-| `/keys` | Guided API-key setup (hidden input, saved to `~/.codecouncil/env`) |
-| `/model <p/m>` | Set + persist the primary model (restarts just the critic) |
+| `/keys` | Guided API-key setup (hidden input, saved to `~/.codecouncil/env`) — then offers that provider's model if you're not already on it |
+| `/model [p/m]` | Show (bare) or set + persist the primary model — set warns on a missing key or malformed id, and beats any launch `--model`/env (restarts just the critic) |
 | `/prober <p/m\|off>` | Council mode on/off (restarts just the critic) |
 | `/status` | Daemons, beats, last verdict, heuristics version, keys |
 | `/config` | Resolved configuration and where each value came from |
@@ -173,9 +174,10 @@ login — NVIDIA hosts Nemotron and other open models with a free API key:
 2. Open any model page and click **Get API Key** — it starts with
    `nvapi-`. (NVIDIA's own docs:
    [docs.api.nvidia.com](https://docs.api.nvidia.com/nim/reference/getting-started).)
-3. `echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env` — with that key
-   present and no model configured, CodeCouncil defaults to NVIDIA-hosted
-   Nemotron automatically.
+3. Run `codecouncil` and type `/keys` — guided, hidden input (for scripts,
+   the one-liner still works: `echo 'NVIDIA_API_KEY=nvapi-...' >> ~/.codecouncil/env`).
+   With a key present and no model configured, CodeCouncil picks that
+   provider's default model automatically.
 
 | Provider | Key in `~/.codecouncil/env` | Example `/model` value |
 |---|---|---|
@@ -185,6 +187,11 @@ login — NVIDIA hosts Nemotron and other open models with a free API key:
 | Anthropic | `ANTHROPIC_API_KEY` | `anthropic/claude-haiku-4-5` |
 | Google | `GEMINI_API_KEY` | `google/gemini-3-flash-preview` |
 | Groq | `GROQ_API_KEY` | `groq/openai/gpt-oss-120b` |
+
+With a key configured and no model set, CodeCouncil picks that provider's
+table entry automatically (first configured key wins, free NVIDIA first,
+Anthropic last) — `/keys` alone is a working setup; `/model` is only needed
+to switch.
 
 The `nvidia-nim/…` and `openrouter/…` IDs above are the exact strings from
 our [bake-off](docs/benchmarks/); for other providers, any model ID from

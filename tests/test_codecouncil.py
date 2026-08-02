@@ -293,5 +293,91 @@ class TestModelHelpers(unittest.TestCase):
                              (None, "default"))
 
 
+class TestConsoleModelFlow(unittest.TestCase):
+    """/model validation, bare /model info, /keys -> model chaining."""
+
+    def setUp(self):
+        import tempfile
+        from core import config as cfg
+        self.td = tempfile.TemporaryDirectory()
+        self._orig = cfg.CONFIG_DIR
+        cfg.CONFIG_DIR = Path(self.td.name)
+        self.addCleanup(lambda: setattr(cfg, "CONFIG_DIR", self._orig))
+        self.addCleanup(self.td.cleanup)
+        self.msgs, self.restarts, self.overrides = [], [], []
+        self.info = {"model": None, "model_source": "default",
+                     "prober": None, "prober_source": "default", "env": {}}
+
+    def _console(self):
+        from codecouncil.console import Console
+        return Console(repo=Path("."), restart_critic=lambda: self.restarts.append(1),
+                       stop=lambda: None, say=self.msgs.append,
+                       settings_info=lambda: dict(self.info),
+                       on_override=self.overrides.append)
+
+    def test_model_missing_key_warns_but_still_saves(self):
+        from core import config as cfg
+        self._console().handle("/model openrouter/openai/gpt-5-mini")
+        self.assertTrue(any("OPENROUTER_API_KEY" in m for m in self.msgs))
+        self.assertEqual(cfg.load_config().get("model"), "openrouter/openai/gpt-5-mini")
+        self.assertEqual(self.overrides, ["model"])
+        self.assertEqual(self.restarts, [1])
+
+    def test_bare_model_shows_current_source_and_examples(self):
+        self.info.update(model="openai/gpt-5-mini", model_source="config",
+                         env={"OPENAI_API_KEY": "x"})
+        self._console().handle("/model")
+        joined = "\n".join(self.msgs)
+        self.assertIn("openai/gpt-5-mini", joined)
+        self.assertIn("config", joined)
+        self.assertNotIn("Restarting", joined)   # bare /model never restarts
+        self.assertEqual(self.restarts, [])
+
+    def test_bare_model_with_no_keys_points_at_keys(self):
+        self._console().handle("/model")
+        self.assertTrue(any("/keys" in m for m in self.msgs))
+
+    def test_prober_gets_same_validation(self):
+        self._console().handle("/prober openrouter/openai/gpt-5-mini")
+        self.assertTrue(any("OPENROUTER_API_KEY" in m for m in self.msgs))
+        self.assertEqual(self.overrides, ["prober"])
+
+    def test_prober_off_skips_validation(self):
+        self._console().handle("/prober off")
+        self.assertFalse(any("warning" in m for m in self.msgs))
+
+    def test_keys_offers_model_switch_when_current_uses_other_key(self):
+        from core import config as cfg
+        self.info.update(model="nvidia-nim/nvidia/nemotron-3-super-120b-a12b",
+                         model_source="auto:NVIDIA_API_KEY")
+        answers = iter(["3", "y"])   # 3 = OPENAI_API_KEY in KNOWN_KEYS order
+        with mock.patch("builtins.input", lambda *_: next(answers)), \
+             mock.patch("getpass.getpass", lambda *_: "sk-test"):
+            self._console().handle("/keys")
+        self.assertEqual(cfg.load_config().get("model"), "openai/gpt-5-mini")
+        self.assertEqual(self.overrides, ["model"])
+        self.assertEqual(self.restarts, [1])
+
+    def test_keys_no_switch_when_declined(self):
+        from core import config as cfg
+        self.info.update(model="nvidia-nim/nvidia/nemotron-3-super-120b-a12b",
+                         model_source="config")
+        answers = iter(["3", "n"])
+        with mock.patch("builtins.input", lambda *_: next(answers)), \
+             mock.patch("getpass.getpass", lambda *_: "sk-test"):
+            self._console().handle("/keys")
+        self.assertIsNone(cfg.load_config().get("model"))
+        self.assertEqual(self.restarts, [])
+
+    def test_keys_announces_when_key_matches_current_model(self):
+        # saving the key the current model already uses -> no switch prompt
+        self.info.update(model="openai/gpt-5-mini", model_source="auto:OPENAI_API_KEY")
+        with mock.patch("builtins.input", lambda *_: "3"), \
+             mock.patch("getpass.getpass", lambda *_: "sk-test"):
+            self._console().handle("/keys")
+        self.assertTrue(any("openai/gpt-5-mini" in m for m in self.msgs))
+        self.assertEqual(self.restarts, [])
+
+
 if __name__ == "__main__":
     unittest.main()

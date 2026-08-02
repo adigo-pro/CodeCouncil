@@ -20,7 +20,7 @@ from core.store import read_tail_rows
 HELP = """\
 commands (while the council runs):
   /keys              set up a model API key (guided, hidden input)
-  /model <p/m>       set + persist the primary model (restarts the critic)
+  /model [p/m]       show or set + persist the primary model (set restarts the critic)
   /prober <p/m|off>  set + persist the council prober (restarts the critic)
   /status            daemons, beats, last verdict, heuristics version, keys
   /config            show resolved configuration and where it came from
@@ -45,11 +45,18 @@ class Console:
     console never has to know how subprocesses are managed."""
 
     def __init__(self, repo: Path, restart_critic: Callable[[], None],
-                 stop: Callable[[], None], say: Callable[[str], None]):
+                 stop: Callable[[], None], say: Callable[[str], None],
+                 settings_info: Callable[[], dict] | None = None,
+                 on_override: Callable[[str], None] | None = None):
         self.repo = repo
         self.restart_critic = restart_critic
         self.stop = stop
         self.say = say
+        # settings_info: launcher closure -> {model, model_source, prober,
+        # prober_source, env}; on_override(knob): tells the launcher a knob was
+        # set here, so config.json outranks the launch flag/env from now on.
+        self.settings_info = settings_info
+        self.on_override = on_override or (lambda _knob: None)
 
     def handle(self, line: str) -> None:
         parsed = parse_command(line)
@@ -100,12 +107,16 @@ class Console:
         cfg.update_env_key(name, value)
         self.say(f"{name} saved to {cfg.env_path()} (0600). Takes effect on the "
                  "next model call — no restart needed.")
+        self._offer_model_for_key(name)
 
     def _cmd_model(self, arg: str) -> None:
         if not arg:
-            self.say("usage: /model <provider/model>  (e.g. nvidia-nim/nvidia/nemotron-3-super-120b-a12b)")
+            self._model_info()
             return
+        for w in cfg.check_model(arg, self._env()):
+            self.say(f"warning: {w}")
         cfg.save_config({"model": arg})
+        self.on_override("model")
         self.say(f"primary model → {arg} (persisted). Restarting the critic…")
         self.restart_critic()
 
@@ -113,9 +124,65 @@ class Console:
         if not arg:
             self.say("usage: /prober <provider/model> | /prober off")
             return
+        if arg.lower() != "off":
+            for w in cfg.check_model(arg, self._env()):
+                self.say(f"warning: {w}")
         cfg.save_config({"prober": None if arg.lower() == "off" else arg})
+        self.on_override("prober")
         self.say(f"prober → {arg} (persisted). Restarting the critic…")
         self.restart_critic()
+
+    def _env(self) -> dict:
+        """Key material for validation: settings_info's env when injected
+        (the launcher passes agent.local_env(), which includes
+        ~/.codecouncil/env), else read it directly."""
+        if self.settings_info:
+            return self.settings_info().get("env", {})
+        from critic.agent import local_env
+        return local_env()
+
+    def _model_info(self) -> None:
+        """Bare /model: current resolved model, which layer set it, and
+        copy-pasteable examples for the keys actually configured."""
+        info = self.settings_info() if self.settings_info else {}
+        env = self._env()
+        model, src = info.get("model"), info.get("model_source")
+        if model:
+            self.say(f"model: {model}  (source: {src})")
+        else:
+            self.say("model: pi default (nothing configured)")
+        have = [(k, d) for k, d in cfg.KEY_DEFAULT_MODELS if env.get(k)]
+        if have:
+            self.say("examples for your configured keys:")
+            for k, d in have:
+                self.say(f"  /model {d}   ({k} ✓)")
+        else:
+            self.say("no API keys configured — run /keys first")
+        self.say("usage: /model <provider/model-id>")
+
+    def _offer_model_for_key(self, key_name: str) -> None:
+        """After saving a key, close the loop on the model: if the resolved
+        model already runs on this key, say so; otherwise offer this key's
+        default so /keys alone always ends in a working, intentional setup."""
+        default = dict(cfg.KEY_DEFAULT_MODELS).get(key_name)
+        if not default or not self.settings_info:
+            return
+        info = self.settings_info()   # post-save: env file already updated
+        current = info.get("model")
+        if not current:
+            return
+        provider = current.split("/", 1)[0]
+        if cfg.PROVIDER_KEYS.get(provider) == key_name:
+            self.say(f"critic model: {current} (source: {info.get('model_source')})")
+            return
+        ans = input(f"switch primary model to {default}? [y/N]: ").strip().lower()
+        if ans in ("y", "yes"):
+            cfg.save_config({"model": default})
+            self.on_override("model")
+            self.say(f"primary model → {default} (persisted). Restarting the critic…")
+            self.restart_critic()
+        else:
+            self.say(f"keeping {current} — `/model {default}` switches later.")
 
     def _cmd_status(self, _arg: str) -> None:
         cc = self.repo / ".codecouncil"

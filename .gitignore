@@ -8,3 +8,4 @@ node_modules/
 ui/dist/
 demo/out/
 evals/cases-harvested/
+.ua/.trash-*/

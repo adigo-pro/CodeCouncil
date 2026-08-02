@@ -89,7 +89,7 @@ if [ ! -f "$ENV_FILE" ]; then
 #   GEMINI_API_KEY=...
 #   GROQ_API_KEY=gsk_...
 ENV
-  say "created $ENV_FILE — add a model key there (see comments inside)"
+  say "created $ENV_FILE — type /keys in the running council to fill it (guided, hidden input)"
 else
   say "keeping existing $ENV_FILE"
 fi
@@ -97,6 +97,7 @@ fi
 # --- done -------------------------------------------------------------------
 say ""
 say "installed. next steps:"
-say "  1. add a model key to $ENV_FILE (free: NVIDIA_API_KEY from build.nvidia.com)"
-say "  2. codecouncil /path/to/repo-you-code-in"
+say "  1. codecouncil /path/to/repo-you-code-in"
+say "  2. type /keys in the running council — guided key setup, hidden input"
+say "     (free: NVIDIA_API_KEY from build.nvidia.com; a model is picked automatically)"
 say "docs: https://github.com/adigo-pro/CodeCouncil#sixty-second-start"

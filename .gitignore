@@ -9,3 +9,7 @@ ui/dist/
 demo/out/
 evals/cases-harvested/
 .ua/.trash-*/
+# transient scan scratch — regenerated per run. Deliberately NOT ignoring
+# .ua/ wholesale: meta.json, knowledge-graph.json, fingerprints.json and
+# .understandignore are tracked on purpose.
+.ua/tmp/

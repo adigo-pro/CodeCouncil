@@ -257,6 +257,61 @@ class TestExploitBlockedEndToEnd(unittest.TestCase):
         self.assertIn("RAN", res.stdout)
 
 
+class TestRequirePolicyDegradesGracefully(unittest.TestCase):
+    """COUNCIL_SANDBOX=require on a host with no mechanism must REFUSE to
+    execute, not raise into the caller.
+
+    `SandboxUnavailable` is a RuntimeError, and both execution call sites
+    originally caught only TimeoutExpired/OSError — so the documented
+    "refuse instead" escape hatch actually threw an unhandled exception out
+    of verify_finding and into the critic beat, violating daemons-never-die.
+    The operator asked for a refusal; they get a refusal."""
+
+    def setUp(self):
+        self.staging = Path(tempfile.mkdtemp(prefix="codecouncil-reqtest-"))
+        self._real_mechanism = sandbox.mechanism
+        sandbox.mechanism = lambda: None          # simulate a bwrap-less host
+        os.environ["COUNCIL_SANDBOX"] = "require"
+
+    def tearDown(self):
+        import shutil
+        sandbox.mechanism = self._real_mechanism
+        os.environ.pop("COUNCIL_SANDBOX", None)
+        shutil.rmtree(self.staging, ignore_errors=True)
+
+    def test_verify_returns_inconclusive_not_raises(self):
+        from critic import verify
+        (self.staging / "v.py").write_text("x = 1\n", encoding="utf-8")
+        result = verify.verify_finding(
+            self.staging,
+            {"file": "v.py", "line": 1, "severity": "high", "issue": "i", "rationale": "r"})
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertIn("skipped", result["note"])
+
+    def test_verify_does_not_refute_the_finding(self):
+        """A refusal to verify must not look like disproof — a "refuted"
+        status would silently suppress the finding (hooks/logic.py drops
+        refuted rows), turning a safety setting into a muzzle."""
+        from critic import verify
+        (self.staging / "v.py").write_text("x = 1\n", encoding="utf-8")
+        result = verify.verify_finding(
+            self.staging,
+            {"file": "v.py", "line": 1, "severity": "high", "issue": "i", "rationale": "r"})
+        self.assertNotEqual(result["status"], "refuted")
+
+    def test_probe_returns_error_not_raises(self):
+        from critic import probe as probe_mod
+        result = probe_mod._execute_probe(self.staging, "print('DIVERGES: x')")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("skipped", result["note"])
+
+    def test_probe_refusal_never_becomes_a_finding(self):
+        """An 'error' probe result must not be mistaken for a divergence."""
+        from critic import probe as probe_mod
+        result = probe_mod._execute_probe(self.staging, "print('DIVERGES: fake')")
+        self.assertNotEqual(result["status"], "diverges")
+
+
 class TestScreenProbeIsolation(unittest.TestCase):
     """critic/screen.py runs a python probe with cwd=<untrusted repo>; -I must
     keep the repo off sys.path so a planted sitecustomize can never execute."""

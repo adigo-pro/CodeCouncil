@@ -118,6 +118,15 @@ protection it isn't providing. Set `COUNCIL_SANDBOX=require` (or
 `"sandbox": "require"` in `~/.codecouncil/config.json`) to refuse to execute
 instead; `off` disables sandboxing for debugging.
 
+`require` degrades, it does not break: verification and probes are skipped
+with an explicit "verification skipped" note, and the finding is still
+delivered — just without an execution proof attached. It is never recorded as
+*refuted*, because a refusal to test something is not evidence against it.
+The default is `auto` rather than `require` deliberately: bubblewrap is not
+installed by default on most distributions, and defaulting to `require` would
+silently disable the product's core "prove it before speaking" behaviour for
+those users. Operators who prefer fail-closed should set it explicitly.
+
 Even so: run CodeCouncil on repositories you would be willing to execute
 code from. Verification and probe scripts **import the file under review**,
 and importing a Python module runs its top-level statements — so "review

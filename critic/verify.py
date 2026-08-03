@@ -24,6 +24,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from core import sandbox
 from core.redact import sanitize
 
 from . import agent
@@ -196,6 +197,16 @@ def verify_finding(repo: Path, suggestion: dict, system: str | None = None,
         except subprocess.TimeoutExpired:
             return {"status": "inconclusive",
                     "note": f"verification script timed out after {VERIFY_EXEC_TIMEOUT}s"}
+        except sandbox.SandboxUnavailable as e:
+            # COUNCIL_SANDBOX=require on a host with no mechanism: the operator
+            # asked us to refuse rather than run model-authored code
+            # unsandboxed. That is a REFUSAL, not a crash -- an uncaught
+            # RuntimeError here would propagate into the critic beat and
+            # violate the daemons-never-die invariant. Inconclusive (not
+            # refuted) so the finding still reaches the developer, just
+            # without an execution proof attached.
+            return {"status": "inconclusive",
+                    "note": f"verification skipped — {str(e)[:150]}"}
         except OSError as e:
             return {"status": "inconclusive",
                     "note": f"verification script failed to run: {str(e)[:150]}"}

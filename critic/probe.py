@@ -290,6 +290,10 @@ def _execute_probe(staging: Path, probe_src: str) -> dict:
         res = run_script(staging, probe_src, PROBE_TIMEOUT, filename="probe_script.py")
     except subprocess.TimeoutExpired:
         return {"status": "error", "note": "probe timed out"}
+    except sandbox.SandboxUnavailable as e:
+        # same refusal path as verify.py: COUNCIL_SANDBOX=require with no
+        # mechanism means don't execute, not crash the beat
+        return {"status": "error", "note": f"probe skipped — {str(e)[:150]}"}
     except OSError as e:
         return {"status": "error", "note": str(e)[:200]}
     stdout = res.stdout or ""

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import pwd
+import stat
 import subprocess
 import sys
 import tempfile
@@ -271,20 +272,40 @@ class TestRequirePolicyDegradesGracefully(unittest.TestCase):
         self.staging = Path(tempfile.mkdtemp(prefix="codecouncil-reqtest-"))
         self._real_mechanism = sandbox.mechanism
         sandbox.mechanism = lambda: None          # simulate a bwrap-less host
+        self._saved_policy = os.environ.get("COUNCIL_SANDBOX")
         os.environ["COUNCIL_SANDBOX"] = "require"
+        # The model MUST be stubbed (repo rule: no test hits a real model or
+        # the network). Without this the verify path dies at agent.ask with
+        # AgentError long before reaching run_script, so the test would pass
+        # or fail for reasons having nothing to do with the sandbox — which
+        # is exactly what happened on CI, where no model is configured, while
+        # it "passed" on a dev box by making a real API call.
+        self._saved_cmd = os.environ.get("CRITIC_CMD")
+        stub = self.staging / "stub.sh"
+        stub.write_text('#!/bin/sh\nprintf \'print("CONFIRMED: stub")\'\n')
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+        os.environ["CRITIC_CMD"] = str(stub)
 
     def tearDown(self):
         import shutil
         sandbox.mechanism = self._real_mechanism
-        os.environ.pop("COUNCIL_SANDBOX", None)
+        for name, saved in (("COUNCIL_SANDBOX", self._saved_policy),
+                            ("CRITIC_CMD", self._saved_cmd)):
+            if saved is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = saved
         shutil.rmtree(self.staging, ignore_errors=True)
 
-    def test_verify_returns_inconclusive_not_raises(self):
+    def _verify(self) -> dict:
         from critic import verify
         (self.staging / "v.py").write_text("x = 1\n", encoding="utf-8")
-        result = verify.verify_finding(
+        return verify.verify_finding(
             self.staging,
             {"file": "v.py", "line": 1, "severity": "high", "issue": "i", "rationale": "r"})
+
+    def test_verify_returns_inconclusive_not_raises(self):
+        result = self._verify()
         self.assertEqual(result["status"], "inconclusive")
         self.assertIn("skipped", result["note"])
 
@@ -292,12 +313,7 @@ class TestRequirePolicyDegradesGracefully(unittest.TestCase):
         """A refusal to verify must not look like disproof — a "refuted"
         status would silently suppress the finding (hooks/logic.py drops
         refuted rows), turning a safety setting into a muzzle."""
-        from critic import verify
-        (self.staging / "v.py").write_text("x = 1\n", encoding="utf-8")
-        result = verify.verify_finding(
-            self.staging,
-            {"file": "v.py", "line": 1, "severity": "high", "issue": "i", "rationale": "r"})
-        self.assertNotEqual(result["status"], "refuted")
+        self.assertNotEqual(self._verify()["status"], "refuted")
 
     def test_probe_returns_error_not_raises(self):
         from critic import probe as probe_mod

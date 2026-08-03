@@ -148,3 +148,19 @@ class TestSuppressionResistance(unittest.TestCase):
             "Daemons wait for missing inputs rather than exiting.",
         ):
             self.assertEqual(knowledge.parse_fact(fact), fact, f"rejected: {fact!r}")
+
+    def test_facts_mentioning_review_vocabulary_are_not_over_rejected(self):
+        """Regression (found in self-review): this is a repo ABOUT code review,
+        so legitimate facts routinely mention `critic` (a package here),
+        `finding`, `severity`, `suggestion`. An earlier cut of the filter
+        matched those bare nouns and rejected true facts wholesale. Only
+        suppression PHRASES and security-exemptions should be refused."""
+        for fact in (
+            "Rate limiting uses a token bucket in critic/agent.py.",
+            "The critic emits at most one finding per beat.",
+            "Findings carry a severity of low, medium, or high.",
+            "The critic reads heuristics.md on every judgment.",
+            "Suggestions cite the heuristic rule that motivated them.",
+            "The signal filter drops idle-beat chatter unless verbose.",
+        ):
+            self.assertEqual(knowledge.parse_fact(fact), fact, f"over-rejected: {fact!r}")

@@ -135,6 +135,36 @@ class TestCollectFromFixtureDir(unittest.TestCase):
         again = transcript.collect(FIXTURE.parent, offsets, beat=2)
         self.assertEqual(again, [])
 
+    def test_collect_prunes_offset_for_deleted_transcript(self):
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "a.jsonl").write_text(
+                json.dumps({"type": "assistant", "sessionId": "s",
+                            "message": {"content": [{"type": "text", "text": "hi"}]}}) + "\n")
+            offsets: dict[str, int] = {}
+            transcript.collect(d, offsets, beat=1)
+            self.assertIn(str(d / "a.jsonl"), offsets)
+            (d / "a.jsonl").unlink()
+            transcript.collect(d, offsets, beat=2)  # must not raise
+            self.assertEqual(offsets, {})  # stale offset pruned
+
+
+class TestStateLoadRebuildsOnBadShape(unittest.TestCase):
+    def test_non_dict_json_rebuilds_fresh(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "state.json"
+            p.write_text("[1, 2, 3]", encoding="utf-8")  # valid JSON, wrong shape
+            s = State.load(p)  # must not raise AttributeError
+            self.assertEqual((s.offsets, s.beat), ({}, 0))
+
+    def test_non_dict_offsets_field_rebuilds_offsets(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "state.json"
+            p.write_text(json.dumps({"offsets": "oops", "beat": 4}), encoding="utf-8")
+            s = State.load(p)
+            self.assertEqual(s.offsets, {})
+            self.assertEqual(s.beat, 4)
+
 
 class TestDirMatchesCwd(unittest.TestCase):
     def test_mixed_cwd_sessions_do_not_veto(self):

@@ -60,7 +60,14 @@ def load_state(path: Path) -> dict:
             state = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             state = None
-        if state is not None:
+        # valid JSON that isn't a dict (a hand edit, a version-drifted file) is
+        # discarded and rebuilt, not fatal: `state["committed_offset"] = …`
+        # below would TypeError on a list/str and crash the daemon on every
+        # restart. Also backfill the required keys so a dict missing beat/offset
+        # can't KeyError inside heartbeat.
+        if isinstance(state, dict):
+            state.setdefault("offset", 0)
+            state.setdefault("beat", 0)
             # committed_offset: how far batches have DURABLY landed (their
             # record appended to suggestions.ndjsonl). Legacy state files
             # predate this field — default it to offset so upgrading never
@@ -794,11 +801,18 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
     events = []
     for line in lines:
         try:
-            events.append(json.loads(line))
+            parsed = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # "skip unparseable lines rather than crash" also covers a line that
+        # parses to valid JSON but isn't an event dict (a bare scalar `42`, a
+        # list): `e["type"]` below would TypeError/KeyError and — because the
+        # crash precedes the state save while offset already advanced past the
+        # line — re-read and re-crash on every restart (a permanent loop).
+        if isinstance(parsed, dict):
+            events.append(parsed)
 
-    diffs = [e for e in events if e["type"] == "diff"]
+    diffs = [e for e in events if e.get("type") == "diff"]
     if diffs:
         state["latest_diff"] = diffs[-1]
 
@@ -932,14 +946,21 @@ def main(argv: list[str] | None = None) -> int:
     state["interval"] = args.interval
     try:
         while True:
-            heartbeat(obs_file, state, scheduler, ctx)
-            if args.once:
-                # drain first so a clean --once exit persists the
-                # committed_offset the drained batch actually reached,
-                # rather than a stale one that would replay it needlessly.
-                scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),
-                                 "latest_diff": state.get("latest_diff"),
-                                 "offset_now": state["offset"]})
+            try:
+                heartbeat(obs_file, state, scheduler, ctx)
+                if args.once:
+                    # drain first so a clean --once exit persists the
+                    # committed_offset the drained batch actually reached,
+                    # rather than a stale one that would replay it needlessly.
+                    scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),
+                                     "latest_diff": state.get("latest_diff"),
+                                     "offset_now": state["offset"]})
+            except Exception as e:
+                # Daemons never die: an unexpected beat error (disk-full write,
+                # an observations.ndjsonl deletion racing tail_new_lines' stat)
+                # logs and retries next tick. Offset only advances after a
+                # durable append, so a mid-beat failure replays safely.
+                print(f"critic: beat error, retrying — {e}", file=sys.stderr)
             write_json_atomic(
                 state_path,
                 {k: state[k] for k in PERSISTED_STATE_KEYS if k in state},

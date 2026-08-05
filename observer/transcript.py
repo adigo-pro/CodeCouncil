@@ -137,12 +137,29 @@ def parse_line(raw: str, beat: int) -> list[Event]:
 
 
 def collect(project_dir: Path, offsets: dict[str, int], beat: int) -> list[Event]:
-    """Tail every session file in the project dir; mutates `offsets` in place."""
+    """Tail every session file in the project dir; mutates `offsets` in place.
+
+    A transcript can be deleted between the glob and the read (Claude Code
+    prunes old sessions per `cleanupPeriodDays`, often at `claude` startup
+    while the observer runs) — tail_new_lines' `path.stat()` then raises
+    FileNotFoundError. Skip that file rather than let the exception kill the
+    observer daemon (the launcher does not restart dead loops)."""
     events: list[Event] = []
+    seen = set()
     for jsonl in sorted(project_dir.glob("*.jsonl")):
         key = str(jsonl)
-        lines, new_offset = tail_new_lines(jsonl, offsets.get(key, 0))
+        try:
+            lines, new_offset = tail_new_lines(jsonl, offsets.get(key, 0))
+        except OSError:
+            continue
         offsets[key] = new_offset
+        seen.add(key)
         for line in lines:
             events.extend(parse_line(line, beat))
+    # Drop offsets for transcripts that no longer exist so state.json (rewritten
+    # every beat) doesn't grow monotonically across months of sessions. A file
+    # that reappears resets to offset 0, matching tail_new_lines' truncation
+    # semantics.
+    for gone in [k for k in offsets if k not in seen]:
+        del offsets[gone]
     return events

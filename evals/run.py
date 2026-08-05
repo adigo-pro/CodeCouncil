@@ -27,7 +27,20 @@ def load_cases() -> list[dict]:
     paths = sorted(CASES_DIR.glob("*.json"))
     if HARVESTED_CASES_DIR.is_dir():
         paths += sorted(HARVESTED_CASES_DIR.glob("*.json"))
-    return [json.loads(p.read_text(encoding="utf-8")) for p in paths]
+    cases = []
+    for p in paths:
+        # Skip an unreadable/torn case rather than raise. Harvested cases are
+        # written by any reflector on the machine into a shared dir, so a read
+        # can race a concurrent write or a crash-truncated file. An uncaught
+        # JSONDecodeError here propagates through rewrite.gate_candidate into
+        # the reflector's beat loop and kills the daemon on every rewrite
+        # attempt — permanently wedging the self-improvement loop.
+        try:
+            cases.append(json.loads(p.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            print(f"evals: skipping unreadable case {p.name}", file=sys.stderr)
+            continue
+    return cases
 
 
 def heuristics_versions(repo: Path) -> list[tuple[int, str]]:

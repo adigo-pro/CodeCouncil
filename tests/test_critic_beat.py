@@ -57,6 +57,22 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertFalse(self.suggestions.exists())
         self.assertEqual(state["beat"], 1)
 
+    def test_non_dict_and_garbage_observation_lines_are_skipped_not_fatal(self):
+        # "skip unparseable lines rather than crash" also covers a valid-JSON
+        # non-dict line (a bare scalar / list) and a typeless dict — e["type"]
+        # would otherwise TypeError/KeyError and crash-loop the daemon.
+        self._set_stub("PASS")
+        with self.obs.open("a") as f:
+            f.write("42\n")                 # valid JSON, not a dict
+            f.write('["a","b"]\n')          # valid JSON list
+            f.write('{"no":"type"}\n')      # dict without "type"
+            f.write("not json at all\n")    # unparseable
+            f.write(json.dumps({"ts": "t", "beat": 1, "type": "diff", "session": None,
+                                "payload": {"diff": "+x", "stat": "", "untracked": []}}) + "\n")
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler()
+        self.assertEqual(self._beat(state, scheduler), "dispatched")  # did not crash
+
     def test_reasoning_only_is_gated_no_call(self):
         os.environ["CRITIC_CMD"] = "/nonexistent"  # would explode if called
         self._write_obs([
@@ -709,6 +725,22 @@ class TestCommittedOffset(unittest.TestCase):
         loaded = load_state(state_path)
         self.assertEqual(loaded["offset"], 500)
         self.assertEqual(loaded["committed_offset"], 500)
+
+    def test_non_dict_state_rebuilds_instead_of_crashing(self):
+        # Valid JSON that isn't a dict must rebuild, not TypeError on
+        # state["committed_offset"] = … and crash-loop on every restart.
+        state_path = self.cc / "critic-state.json"
+        state_path.write_text("[1, 2, 3]", encoding="utf-8")
+        loaded = load_state(state_path)
+        self.assertEqual(loaded, {"offset": 0, "beat": 0, "committed_offset": 0})
+
+    def test_dict_state_missing_required_keys_is_backfilled(self):
+        state_path = self.cc / "critic-state.json"
+        state_path.write_text(json.dumps({"latest_diff": None}), encoding="utf-8")
+        loaded = load_state(state_path)
+        self.assertEqual(loaded["offset"], 0)
+        self.assertEqual(loaded["beat"], 0)
+        self.assertEqual(loaded["committed_offset"], 0)
 
     def test_tests_run_at_is_in_persisted_state_keys_and_round_trips(self):
         """Task 9: the sticky tests-run fact must survive a daemon restart —

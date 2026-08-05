@@ -624,6 +624,18 @@ class TestMaybeRollback(unittest.TestCase):
         main_mod.maybe_rollback(self.cc, state, self.outcomes)
         self.assertEqual(self.heuristics.read_text(), "version: 2\n- v2 rule\n")
         self.assertFalse((self.cc / "reflections.ndjsonl").exists())
+
+    def test_empty_archive_is_a_noop_not_a_crash(self):
+        # A torn/empty archive (a legacy naked write) must not IndexError on
+        # restored[0] before the revert-once guard is set — that crash-loops
+        # the rollback on every restart.
+        import reflector.main as main_mod
+
+        (self.cc / "heuristics-history" / "v1.md").write_text("", encoding="utf-8")
+        state: dict = {}
+        main_mod.maybe_rollback(self.cc, state, self.outcomes)  # must not raise
+        self.assertEqual(self.heuristics.read_text(), "version: 2\n- v2 rule\n")
+        self.assertFalse((self.cc / "reflections.ndjsonl").exists())
         self.assertEqual(state, {})
 
 

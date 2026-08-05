@@ -19,7 +19,13 @@ def read_rows(path: Path) -> list[dict]:
         return []
     rows = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        # decode with errors="replace" (not read_text, which raises
+        # UnicodeDecodeError): the file is appended mid-write, so the trailing
+        # line can be torn mid-multibyte-character — and this repo's rows are
+        # full of multibyte content (every «REDACTED:…» marker, every
+        # `… [N chars total]`). read_tail_rows already decodes this way; a
+        # torn byte must skip a line, never crash the reflector.
+        lines = path.read_bytes().decode("utf-8", errors="replace").splitlines()
     except OSError:
         return []
     for line in lines:
@@ -78,9 +84,44 @@ def write_json_atomic(path: Path, obj, *, indent: int | None = None) -> None:
     Code settings.json) that wants pretty-printed JSON instead."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=indent)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())  # durability: survive power loss, not just process crash
+        os.replace(tmp, path)
+        tmp = None  # replaced — nothing to clean up
+    finally:
+        # if json.dump raised (unserializable obj) the tmp file was never
+        # replaced; unlink it so failures don't litter `.codecouncil/` with
+        # orphaned tmp*.tmp files next to the state they failed to write.
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    """Write `text` to `path` atomically (tmp in same dir + os.replace + fsync),
+    the text sibling of write_json_atomic. For files a crash mid-write could
+    corrupt that another process reads whole — heuristics-history archives
+    (the rollback restore source), knowledge.md, receipts."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def wait_for(path: Path, message: str, once: bool, poll_s: float = 2.0) -> bool:

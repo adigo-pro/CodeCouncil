@@ -22,13 +22,18 @@ class State:
         if path.exists():
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
-                return cls(
-                    offsets=raw.get("offsets", {}),
-                    last_diff_hash=raw.get("last_diff_hash"),
-                    beat=raw.get("beat", 0),
-                    interval=raw.get("interval", 0.0),
-                    last_head=raw.get("last_head"),
-                )
+                if isinstance(raw, dict):
+                    offsets = raw.get("offsets", {})
+                    return cls(
+                        # valid JSON that isn't the shape we expect (a hand
+                        # edit, a foreign writer) must rebuild, not crash: a
+                        # non-dict `offsets` would raise later in collect().
+                        offsets=offsets if isinstance(offsets, dict) else {},
+                        last_diff_hash=raw.get("last_diff_hash"),
+                        beat=raw.get("beat", 0),
+                        interval=raw.get("interval", 0.0),
+                        last_head=raw.get("last_head"),
+                    )
             except (json.JSONDecodeError, OSError):
                 pass  # corrupt state: start fresh rather than crash the daemon
         return cls()

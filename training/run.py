@@ -174,17 +174,29 @@ def start_daemons(repo: Path) -> list[subprocess.Popen]:
 
 
 def run_task(repo: Path, instruction: str) -> tuple[int, float, str]:
-    """Run one headless session, retrying on transient failures (rate limits)."""
+    """Run one headless session, retrying on transient failures (rate limits).
+
+    `--setting-sources project,local` is the same contamination guard the A/B
+    harness applies (evals/ab/run.py's module docstring, the ponytail lesson):
+    without it the maintainer's global ~/.claude settings (hooks, MCP servers)
+    leak into training sessions — which generate the very suggestions/grades
+    that drive harvested eval cases and heuristics rewrites."""
     t0 = time.time()
-    err = ""
+    rc, err = -1, ""
     for attempt in range(3):
-        r = sh(["claude", "-p", instruction, "--permission-mode", "acceptEdits",
-                "--allowedTools", "Edit", "Write", "Bash"], cwd=repo, timeout=420)
-        if r.returncode == 0:
+        try:
+            r = sh(["claude", "-p", instruction, "--permission-mode", "acceptEdits",
+                    "--allowedTools", "Edit", "Write", "Bash",
+                    "--setting-sources", "project,local"], cwd=repo, timeout=420)
+            rc, err = r.returncode, (r.stderr.strip() or r.stdout.strip())[-300:]
+        except subprocess.TimeoutExpired:
+            rc, err = -1, "session timed out after 420s"  # a hang is transient too — retry
+        except OSError as e:
+            rc, err = -1, f"session failed to launch: {e}"[-300:]
+        if rc == 0:
             return 0, time.time() - t0, ""
-        err = (r.stderr.strip() or r.stdout.strip())[-300:]
         time.sleep(60 * (attempt + 1))  # back off: limits need breathing room
-    return r.returncode, time.time() - t0, err
+    return rc, time.time() - t0, err
 
 
 def counts(cc: Path) -> dict:

@@ -150,6 +150,19 @@ class TestSettingSourcesIsolation(unittest.TestCase):
         self.assertNotIn("user", sources)
         self.assertNotIn("global", sources)
 
+    def test_training_run_task_also_passes_isolation_flag(self):
+        # training sessions generate the data driving harvested cases + rewrites;
+        # they need the same contamination guard as the A/B harness.
+        import training.run as training_run
+        with mock.patch.object(training_run, "sh") as sh_mock:
+            sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            training_run.run_task(Path("/tmp/repo"), "do it.")
+        argv = sh_mock.call_args.args[0]
+        self.assertIn("--setting-sources", argv)
+        sources = argv[argv.index("--setting-sources") + 1].split(",")
+        self.assertNotIn("user", sources)
+        self.assertNotIn("global", sources)
+
     def test_with_arm_session_still_loads_project_settings(self):
         # The 'with' arm's treatment is the installed project hooks + daemons
         # (start_council -> install_hooks writes .claude/settings.json in the
@@ -460,6 +473,30 @@ class TestReportThreeArms(unittest.TestCase):
         # one mean-summary line per arm
         self.assertEqual(md.count("mean hidden-test pass rate"), 3)
 
+    def test_crashed_hidden_scores_zero_not_excluded_from_mean(self):
+        # Two trials for one arm: a clean 2/2 and a crash. The crash must pull
+        # the mean to 50%, not be dropped (which would report 100%).
+        rows = [
+            {"task": "t", "arm": "without", "hidden": {"passed": 2, "total": 2},
+             "tests_run": True, "session": {"rc": 0}},
+            {"task": "t", "arm": "without",
+             "hidden": {"passed": 0, "total": 0, "crashed": True, "output": "boom"},
+             "tests_run": False, "session": {"rc": 1}},
+        ]
+        md = ab_run.report(rows)
+        self.assertIn("50% over 2 trials", md)
+        self.assertIn("1 crashed → scored 0", md)
+
+    def test_error_row_helpers_have_report_compatible_shape(self):
+        feat = ab_run._error_feature_row("t", "claim", "with", 1, "setup blew up")
+        saf = ab_run._error_safety_row("doc-reader", "without", 1, "setup blew up")
+        # both must flow through report() without KeyError, and score as failures
+        md = ab_run.report([feat, saf])
+        self.assertIn("crash", md)
+        self.assertIn("UNSAFE", md)
+        self.assertTrue(feat["hidden"]["crashed"])
+        self.assertFalse(saf["safe"])
+
 
 class TestRepoUrlParsing(unittest.TestCase):
     """Task 5: --repo-url URL@sha, opt-in real-OSS-repo substrate."""
@@ -503,7 +540,15 @@ class TestRepoUrlSubstrate(unittest.TestCase):
                  mock.patch.object(ab_run.score, "git_facts",
                                     return_value={"commits": 0, "last_subject": ""}), \
                  mock.patch.object(ab_run, "find_project_dir", return_value=None):
-                sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+                sha = repo_url[1] if repo_url else ""
+
+                def fake_sh(cmd, *a, **k):
+                    # clone_repo verifies the checkout took via `git rev-parse
+                    # HEAD` == sha; return the pinned sha for that call.
+                    out = sha if cmd[:2] == ["git", "rev-parse"] else ""
+                    return mock.Mock(returncode=0, stdout=out, stderr="")
+
+                sh_mock.side_effect = fake_sh
                 ab_run.run_trial(base, "task", "clean", "do the thing. Commit.",
                                  "CHECK x PASS", "without", 1, repo_url=repo_url)
             git_argvs = [c.args[0] for c in sh_mock.call_args_list

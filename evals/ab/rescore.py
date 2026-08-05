@@ -21,9 +21,11 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from evals.ab import score  # noqa: E402
 from evals.ab.run import report  # noqa: E402
+from evals.ab.safety_tasks import SAFETY_TASKS  # noqa: E402
 from evals.ab.tasks import TASKS  # noqa: E402
 
 HIDDEN = {name: hidden for name, _cat, _instr, hidden in TASKS}
+ADVERSARIAL = {t.name: t.adversarial_test for t in SAFETY_TASKS}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     rows = []
+    kept_unrescored = 0
     for raw in results.read_text(encoding="utf-8").splitlines():
         try:
             row = json.loads(raw)
@@ -50,6 +53,14 @@ def main(argv: list[str] | None = None) -> int:
             if row.get("category") == "claim":
                 claimed = "tested" in row["git"]["last_subject"].lower()
                 row["false_claim"] = claimed and not row.get("tests_run", False)
+        elif repo.is_dir() and row["task"] in ADVERSARIAL:
+            # the safety tier is the thesis measured head-on — re-run its
+            # exploit with the CURRENT scorer too, not just the feature tier.
+            adv = score.run_adversarial_test(repo, ADVERSARIAL[row["task"]])
+            row["safe"] = adv["safe"]
+            row["git"] = score.git_facts(repo)
+        else:
+            kept_unrescored += 1  # repo pruned / unknown task — carried over as-is
         rows.append(row)
 
     out = run_dir / "results-rescored.ndjsonl"
@@ -60,6 +71,9 @@ def main(argv: list[str] | None = None) -> int:
     (run_dir / "report.md").write_text(md + "\n", encoding="utf-8")
     print(md)
     print(f"\nrescored rows: {out}")
+    if kept_unrescored:
+        print(f"note: {kept_unrescored} row(s) carried over unrescored "
+              "(trial repo missing or unknown task)")
     return 0
 
 

@@ -29,6 +29,33 @@ def _git(repo: Path, *args: str) -> str:
         return ""
 
 
+def _read_confined(repo: Path, rel: str, cap: int) -> bytes | None:
+    """Read `rel` under `repo`, refusing to follow a link out of the repo.
+
+    `git ls-files --others` happily lists an untracked SYMLINK, and
+    `Path.read_bytes()` follows it -- so a repo containing `leaked.txt ->
+    /somewhere/private` would have that outside file's contents captured into
+    a diff event and shipped to the model provider in the next prompt.
+    Redaction is no help: it matches credential *shapes*, and the leaked file
+    is usually ordinary confidential text (another checkout's source,
+    ~/.netrc, private notes).
+
+    This is the same containment `critic/pi_extensions/jail.mjs` already
+    enforces for judgment-turn tools; capture had no equivalent guard, which
+    left the two halves of the system inconsistent. Resolve first, then
+    compare against the resolved root, so an intermediate symlinked directory
+    is caught too. Returns None when the path escapes or can't be read."""
+    try:
+        target = (repo / rel).resolve()
+        if not target.is_relative_to(repo.resolve()):
+            return None
+        if not target.is_file():
+            return None
+        return target.read_bytes()[:cap]
+    except (OSError, ValueError):
+        return None
+
+
 def _read_untracked(repo: Path, paths: list[str]) -> dict[str, str]:
     """Contents of new (untracked) text files, capped, so the critic can see them."""
     out: dict[str, str] = {}
@@ -36,9 +63,8 @@ def _read_untracked(repo: Path, paths: list[str]) -> dict[str, str]:
     for p in paths:
         if p.startswith(EXCLUDED_PREFIXES) or total >= NEW_FILES_TOTAL_CHARS:
             continue
-        try:
-            data = (repo / p).read_bytes()[: NEW_FILE_MAX_CHARS * 2]
-        except OSError:
+        data = _read_confined(repo, p, NEW_FILE_MAX_CHARS * 2)
+        if data is None:
             continue
         if b"\0" in data:
             continue  # binary
@@ -84,9 +110,10 @@ def _read_touched(repo: Path, paths: list[str], exclude: set[str]) -> dict[str, 
     for p in paths:
         if p in exclude or p.startswith(EXCLUDED_PREFIXES) or total >= TOUCHED_TOTAL_CHARS:
             continue
-        try:
-            data = (repo / p).read_bytes()[: TOUCHED_FILE_MAX_CHARS * 2]
-        except OSError:
+        # same repo-confinement as _read_untracked: a diff's `+++ b/<path>`
+        # header is attacker-influenced text, so it must never read out of tree
+        data = _read_confined(repo, p, TOUCHED_FILE_MAX_CHARS * 2)
+        if data is None:
             continue
         if b"\0" in data:
             continue  # binary

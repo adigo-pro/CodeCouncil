@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from core import sandbox
+
 from . import deps
 
 MAX_SIGNALS = 8
@@ -205,9 +207,20 @@ def resolve_new_imports(names: dict[str, str], repo: Path) -> list[dict]:
              "for n in sys.argv[1:]:\n"
              "    print(n, bool(importlib.util.find_spec(n)))\n")
     try:
-        r = subprocess.run([sys.executable, "-c", probe, *candidates],
+        # -I (isolated): drops cwd from sys.path and ignores PYTHON* vars.
+        # This process is rooted in the UNTRUSTED repo, so without it a
+        # sitecustomize.py/usercustomize.py/.pth planted at the repo root is
+        # one interpreter-version change away from executing on import of
+        # site. Isolated mode keeps site-packages (so third-party imports
+        # still resolve and the slopsquat signal stays accurate) while
+        # removing the repo itself from the path.
+        # env: scrubbed for the same reason as critic/probe.py's run_script --
+        # a process pointed at attacker-controlled content is never handed the
+        # operator's API keys.
+        r = subprocess.run([sys.executable, "-I", "-c", probe, *candidates],
                            cwd=repo, capture_output=True, text=True,
-                           timeout=_RESOLVE_TIMEOUT)
+                           timeout=_RESOLVE_TIMEOUT,
+                           env=sandbox.minimal_env(home=str(repo)))
     except (OSError, subprocess.SubprocessError):
         return []  # screening must never break judgment
     signals = []

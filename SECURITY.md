@@ -33,6 +33,20 @@ Redaction is pattern-based and deliberately precision-first; it is a strong
 floor, not a guarantee against every exotic secret format. Review
 `core/redact.py` for the exact patterns.
 
+Two related boundaries:
+
+- **Capture never follows a symlink out of the repo.** `git ls-files` lists
+  untracked symlinks and a naive read would follow one to, say,
+  `~/.aws/credentials` or a sibling checkout — capturing a file that is not
+  part of your project and shipping it in the next prompt. `observer/gitwatch.py`
+  resolves each path and refuses anything landing outside the repo root, the
+  same containment the judgment-turn tools already enforce.
+- **Model-authored text is control-character stripped**, not just redacted
+  (`core/redact.py`'s `sanitize`). Findings are printed to your terminal and
+  injected into your coding agent's context, so an ANSI escape sequence in a
+  model-written `issue` string could otherwise repaint the line above it and
+  misrepresent a finding's severity.
+
 ## What never leaves
 
 - Your API keys. They live in `~/.codecouncil/env` — **outside every
@@ -51,10 +65,13 @@ floor, not a guarantee against every exotic secret format. Review
   the repo root (symlink-escape and traversal rejected, `.git`/`.codecouncil`
   excluded). pi's builtin file tools are deliberately NOT used for this,
   because they resolve `~` and absolute paths.
-- **Repro commands** delivered to your coding agent are allowlist-gated
-  (`python3`/`pytest`/… prefixes, shell metacharacters rejected) and framed
-  "review before running" — they are suggestions as text, never executed by
-  CodeCouncil itself.
+- **Repros** delivered to your coding agent are the verification script
+  itself, redacted, control-character-stripped, capped, and framed "review
+  before running". CodeCouncil hands it over as *text* and never executes it
+  in your repo — but it is model-authored code, so treat it as a suggestion
+  to read, not a command to run blind. (Earlier versions of this document
+  described a `python3`/`pytest` prefix allowlist; that gate applied to the
+  single-shell-command repro format which no longer exists.)
 - The Claude Code hook (`hooks/peer_hook.py`) is **fail-open**: any internal
   error exits silently rather than breaking your session.
 
@@ -66,24 +83,54 @@ script, which CodeCouncil then **executes on your machine** — in a
 throwaway staging directory, never in your repo — to prove a finding real
 before it's ever delivered.
 
-That execution is not credential-blind by accident: the child process's
-environment is a minimal allowlist built from scratch (`PATH`, `HOME`,
-`LANG`/`LC_ALL`, plus `PYTHONPATH` pointed at the staging copy), never a
-copy of the parent's real environment. Your API keys — whether real
-environment variables or values loaded from `~/.codecouncil/env` — are not
-in that allowlist, so model-authored code cannot read them. `HOME` is also
-redirected to point inside the staging directory, so `~/.codecouncil/env`
-and `~/.ssh` resolve to a nonexistent path for that script rather than your
-real home.
+That execution gets two independent layers (`core/sandbox.py`):
 
-**This is a credential-exposure mitigation, not a full OS sandbox.** A
-malicious or prompt-injected script running in staging can still read any
-absolute filesystem path it's given, and can still make outbound network
-calls — neither of those is blocked. Run CodeCouncil only on repositories
-(and against coding-agent output) you would already be willing to execute
-code from. A full syscall-level sandbox (e.g. seccomp/landlock, a
-container, or a no-network jail) is on the roadmap but not implemented
-today.
+1. **A scrubbed environment.** The child's environment is a minimal
+   allowlist built from scratch (`PATH`, `HOME`, `LANG`/`LC_ALL`, plus
+   `PYTHONPATH` pointed at the staging copy), never a copy of the parent's.
+   No API key is in it, and `HOME` points inside the staging directory.
+2. **An OS sandbox.** On macOS via `sandbox-exec`, on Linux via `bwrap`:
+   **all network egress is denied**, and **reads under your real home
+   directory are denied** (so `~/.codecouncil/env`, `~/.ssh`, and your shell
+   history are unreachable). The staging directory stays writable, and the
+   Python interpreter's own prefixes stay readable — necessary because
+   pyenv/asdf install the interpreter *inside* your home.
+
+Layer 2 is not redundant, and this is worth being precise about because an
+earlier version of this document got it wrong. It claimed layer 1 alone
+meant "model-authored code cannot read your keys." **That was false.**
+`HOME` only governs `~` expansion; `pwd.getpwuid(os.getuid()).pw_dir`
+returns your real home regardless, and reading `<real home>/.codecouncil/env`
+by absolute path and POSTing it out was demonstrated working. Environment
+scrubbing cannot fix that — `getpwuid` reads the OS user database, not the
+environment — which is why the OS boundary was added.
+
+**Scope of the guarantee.** The two headline risks (credential theft and
+network exfiltration) are closed where a sandbox mechanism exists. It is
+still not a full syscall jail: on macOS the profile denies network and home
+reads over an `(allow default)` base, so a script can read world-readable
+paths elsewhere on disk — with egress denied, its only channel back is
+stdout, which CodeCouncil redacts and caps.
+
+**If no sandbox mechanism exists** (a Linux host without `bwrap`), scripts
+run with layer 1 only and CodeCouncil prints a warning rather than implying
+protection it isn't providing. Set `COUNCIL_SANDBOX=require` (or
+`"sandbox": "require"` in `~/.codecouncil/config.json`) to refuse to execute
+instead; `off` disables sandboxing for debugging.
+
+`require` degrades, it does not break: verification and probes are skipped
+with an explicit "verification skipped" note, and the finding is still
+delivered — just without an execution proof attached. It is never recorded as
+*refuted*, because a refusal to test something is not evidence against it.
+The default is `auto` rather than `require` deliberately: bubblewrap is not
+installed by default on most distributions, and defaulting to `require` would
+silently disable the product's core "prove it before speaking" behaviour for
+those users. Operators who prefer fail-closed should set it explicitly.
+
+Even so: run CodeCouncil on repositories you would be willing to execute
+code from. Verification and probe scripts **import the file under review**,
+and importing a Python module runs its top-level statements — so "review
+this repo" does mean "run some of this repo's code", sandboxed.
 
 ## Reporting a vulnerability
 

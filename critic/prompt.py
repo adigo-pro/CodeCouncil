@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from core.redact import redact
+from core.redact import sanitize
 
 MAX_REASONING_EVENTS = 8
 MAX_TOOL_EVENTS = 15
@@ -412,8 +412,8 @@ def parse_reply(raw: str) -> dict[str, Any]:
                         "file": obj["file"],
                         "line": obj.get("line"),
                         "severity": obj.get("severity", "medium"),
-                        "issue": _cap(redact(obj["issue"]), MAX_ISSUE_CHARS),
-                        "rationale": _cap(redact(obj.get("rationale", "")), MAX_RATIONALE_CHARS),
+                        "issue": _cap(sanitize(obj["issue"]), MAX_ISSUE_CHARS),
+                        "rationale": _cap(sanitize(obj.get("rationale", "")), MAX_RATIONALE_CHARS),
                         # "the heuristic (R1, R2, …) that most motivated this
                         # finding" — kept only when it's a positive int;
                         # anything else (missing, string, 0, negative) is

@@ -213,3 +213,58 @@ class TestTouchedContents(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSymlinkConfinement(unittest.TestCase):
+    """Capture must never follow a link out of the repo.
+
+    `git ls-files --others` lists untracked symlinks, and a plain
+    Path.read_bytes() follows them — so a repo shipping `leaked.txt ->
+    ~/.aws/credentials` would have that file's contents captured into a diff
+    event and sent to the model provider. Redaction does not save this:
+    the leaked file is usually ordinary confidential text, not a credential
+    shape."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.root = Path(self.td.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        self.outside = self.root / "outside"
+        self.outside.mkdir()
+        self.secret = self.outside / "private_notes.txt"
+        self.secret.write_text("BOARD MEETING NOTES not a credential shape\n")
+        subprocess.run(["git", "-C", str(self.repo), "init", "-q", "-b", "main"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.email", "t@t"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.name", "t"], check=True)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_untracked_symlink_out_of_repo_is_not_captured(self):
+        (self.repo / "leaked.txt").symlink_to(self.secret)
+        snap = gitwatch.capture(self.repo)
+        blob = repr(snap)
+        self.assertNotIn("BOARD MEETING NOTES", blob)
+        self.assertNotIn("BOARD MEETING NOTES", snap["untracked_contents"].get("leaked.txt", ""))
+
+    def test_symlink_via_intermediate_directory_is_not_captured(self):
+        """The escape can also hide behind a symlinked *directory*, which is
+        why containment resolves the whole path rather than checking the leaf."""
+        (self.repo / "sub").symlink_to(self.outside, target_is_directory=True)
+        snap = gitwatch.capture(self.repo)
+        self.assertNotIn("BOARD MEETING NOTES", repr(snap))
+
+    def test_ordinary_files_still_captured(self):
+        """Containment must not cost the feature: a real in-repo file still
+        has its contents captured."""
+        (self.repo / "real.py").write_text("def f():\n    return 'in-repo content'\n")
+        snap = gitwatch.capture(self.repo)
+        self.assertIn("in-repo content", snap["untracked_contents"]["real.py"])
+
+    def test_symlink_pointing_inside_repo_still_works(self):
+        """Only ESCAPING links are refused; an internal link is legitimate."""
+        (self.repo / "target.py").write_text("INSIDE_MARKER = 1\n")
+        (self.repo / "alias.py").symlink_to(self.repo / "target.py")
+        snap = gitwatch.capture(self.repo)
+        self.assertIn("INSIDE_MARKER", snap["untracked_contents"]["alias.py"])

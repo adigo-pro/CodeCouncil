@@ -46,23 +46,32 @@ a style nit. Each was earned by a real failure.
    exceptions documented in CLAUDE.md.
 3. **Redact at capture.** Any new text field that a model can influence, or
    that comes from repo content, goes through `core.redact.redact()` before it
-   is written anywhere (prompt, receipt, suggestion, eval case).
-4. **The hook fails open.** `hooks/peer_hook.py` must never break a developer's
+   is written anywhere (prompt, receipt, suggestion, eval case). Text the
+   MODEL wrote uses `core.redact.sanitize()` instead (strips terminal control
+   sequences first). Capture reads stay inside the repo — resolve the path and
+   check containment, never follow a symlink out (`gitwatch._read_confined`).
+4. **Never execute foreign code with ambient authority.** Model-authored
+   scripts and agent-produced code run through `core.sandbox`: `minimal_env`
+   (never `{**os.environ}`) **and** `wrap` (OS sandbox — denies network and
+   real-home reads). Env scrubbing alone is NOT sufficient and was measured
+   insufficient: `pwd.getpwuid()` routes around a redirected `HOME`. If you
+   add a new execution site, route it through both.
+5. **The hook fails open.** `hooks/peer_hook.py` must never break a developer's
    session — any error → silent exit 0. `hooks/logic.py` stays **pure** (no
    I/O; it takes parsed data and returns decisions).
-5. **Daemons never die.** Missing inputs → wait; unparseable state → rebuild,
+6. **Daemons never die.** Missing inputs → wait; unparseable state → rebuild,
    don't crash; fallible calls in loop bodies → guarded.
-6. **NDJSON readers tolerate a partial trailing line** and skip garbage.
+7. **NDJSON readers tolerate a partial trailing line** and skip garbage.
    Hot paths tail-read (`core.store.read_tail_rows`); dedup sets and metric
    consumers read whole files.
-7. **Atomic writes** for state/ledger files — use `core.store.write_json_atomic`,
+8. **Atomic writes** for state/ledger files — use `core.store.write_json_atomic`,
    never a naked `write_text`, on anything a crash mid-write could corrupt.
-8. **Verification executes, it doesn't assert.** A finding is delivered only
+9. **Verification executes, it doesn't assert.** A finding is delivered only
    after a repro runs and confirms it. A broken/crashing repro script is never
    a "verified" or "refuted" verdict. This is the product's whole thesis —
    don't weaken it.
-9. **Precision first.** A false finding costs trust; a missed one is caught by
-   the miss-detection loop. When in doubt, bias quiet.
+10. **Precision first.** A false finding costs trust; a missed one is caught by
+    the miss-detection loop. When in doubt, bias quiet.
 
 ## House rules
 
@@ -89,12 +98,14 @@ a style nit. Each was earned by a real failure.
 - `critic/` — judges new observations. `main.py` is the beat; `prompt.py`
   builds prompts; `screen.py`/`deps.py` do zero-cost mechanical screening;
   `verify.py`/`probe.py` execute model-written repro/probe scripts in a
-  throwaway staging dir; `agent.py` is the only model boundary.
+  throwaway staging dir, sandboxed via `core.sandbox`; `agent.py` is the only
+  model boundary.
 - `hooks/` — deliver findings into the coding agent's context. `logic.py` pure,
   `peer_hook.py` fail-open.
 - `reflector/` — grades outcomes and rewrites `heuristics.md` (eval-gated,
   auto-rolled-back).
-- `core/` — the only shared code (`store`, `redact`, `config`, `knowledge`).
+- `core/` — the only shared code (`store`, `redact`, `config`, `knowledge`,
+  `sandbox`).
 - `evals/` — frozen cases + the A/B benchmark harness.
 - Tests mirror this: one `tests/test_<thing>.py` per concern; synthetic
   transcript fixture in `tests/fixtures/session.jsonl`.

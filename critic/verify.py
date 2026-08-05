@@ -24,7 +24,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from core.redact import redact
+from core import sandbox
+from core.redact import sanitize
 
 from . import agent
 from .probe import run_script, strip_fence
@@ -149,12 +150,12 @@ def _classify(stdout: str, stderr: str, returncode: int = 0) -> dict:
         if returncode != 0:
             return {"status": "inconclusive",
                     "note": f"CONFIRMED printed but script exited {returncode} — untrusted"}
-        return {"status": "verified", "note": redact(confirmed.group(1).strip())[:300]}
+        return {"status": "verified", "note": sanitize(confirmed.group(1).strip())[:300]}
     if refuted:
         if returncode != 0:
             return {"status": "inconclusive",
                     "note": f"REFUTED printed but script exited {returncode} — untrusted"}
-        return {"status": "refuted", "note": redact(refuted.group(1).strip())[:300]}
+        return {"status": "refuted", "note": sanitize(refuted.group(1).strip())[:300]}
     diag = (stderr or stdout).strip()
     note = "verification script printed no CONFIRMED/REFUTED marker"
     if diag:
@@ -196,12 +197,25 @@ def verify_finding(repo: Path, suggestion: dict, system: str | None = None,
         except subprocess.TimeoutExpired:
             return {"status": "inconclusive",
                     "note": f"verification script timed out after {VERIFY_EXEC_TIMEOUT}s"}
+        except sandbox.SandboxUnavailable as e:
+            # COUNCIL_SANDBOX=require on a host with no mechanism: the operator
+            # asked us to refuse rather than run model-authored code
+            # unsandboxed. That is a REFUSAL, not a crash -- an uncaught
+            # RuntimeError here would propagate into the critic beat and
+            # violate the daemons-never-die invariant. Inconclusive (not
+            # refuted) so the finding still reaches the developer, just
+            # without an execution proof attached.
+            return {"status": "inconclusive",
+                    "note": f"verification skipped — {str(e)[:150]}"}
         except OSError as e:
             return {"status": "inconclusive",
                     "note": f"verification script failed to run: {str(e)[:150]}"}
         result = _classify(res.stdout or "", res.stderr or "", res.returncode)
         if result["status"] == "verified":
-            result["repro"] = _cap(redact(localize_repro(script, staging)), REPRO_MAX_CHARS)
+            # the repro is a whole model-authored script that hooks/logic.py
+            # injects into the coding agent's context — sanitize, not just
+            # redact, so no escape sequence rides along into a terminal
+            result["repro"] = _cap(sanitize(localize_repro(script, staging)), REPRO_MAX_CHARS)
         return result
     finally:
         shutil.rmtree(staging, ignore_errors=True)

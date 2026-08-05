@@ -42,6 +42,9 @@ import textwrap
 from pathlib import Path
 from typing import Callable
 
+from core import sandbox
+from core.config import load_config
+
 MAX_PROBES_PER_FUNC = 3
 MAX_PROBE_CALLS_PER_BEAT = 2  # TASK: PROBE model turns allowed per beat
 PROBE_TIMEOUT = 20  # seconds -- a hanging probe must never wedge a beat
@@ -205,8 +208,26 @@ def _parse_probes(raw: str) -> list[str]:
     return [s for s in scripts if s][:MAX_PROBES_PER_FUNC]
 
 
+_warned_unsandboxed = False
+
+
+def _warn_unsandboxed_once() -> None:
+    """One line to stderr the first time a script runs without an OS sandbox.
+    Silence would imply a protection that isn't there -- the failure mode this
+    whole module had before `core.sandbox` existed."""
+    global _warned_unsandboxed
+    if _warned_unsandboxed:
+        return
+    _warned_unsandboxed = True
+    print("codecouncil: WARNING — no OS sandbox available on this host "
+          "(need sandbox-exec on macOS or bwrap on Linux); model-authored "
+          "verify/probe scripts run WITHOUT network/credential isolation. "
+          "Set COUNCIL_SANDBOX=require to refuse instead.", file=sys.stderr)
+
+
 def run_script(staging: Path, script_src: str, timeout: int,
-               filename: str = "script.py") -> subprocess.CompletedProcess:
+               filename: str = "script.py",
+               policy: str | None = None) -> subprocess.CompletedProcess:
     """Write `script_src` to `filename` in `staging` and execute it for
     real: sys.executable, cwd=staging, PYTHONPATH=staging (so `import
     <module>` finds whatever was staged alongside it), capturing
@@ -216,15 +237,26 @@ def run_script(staging: Path, script_src: str, timeout: int,
     it instead of relying on tool calls the pi/NVIDIA backend sometimes
     emits as inert text).
 
-    The script is model-authored -- untrusted -- so its environment is a
-    MINIMAL ALLOWLIST built from scratch, never `{**os.environ, ...}`: no
-    API keys, no cloud creds, nothing sensitive reaches the child. HOME is
-    redirected into `staging`, so `os.path.expanduser("~/.codecouncil/env")`
-    and `~/.ssh` resolve INSIDE staging (nonexistent) rather than the real
-    home -- a large risk reduction with zero dependencies. This is a
-    credential-exposure mitigation, not a full sandbox: a malicious script
-    can still read absolute filesystem paths or make network calls (see
-    SECURITY.md's trust-boundary note); a full OS sandbox is roadmap.
+    The script is model-authored -- untrusted -- so it gets BOTH layers of
+    `core.sandbox`:
+
+      1. A minimal env allowlist built from scratch, never
+         `{**os.environ, ...}`, so no API key or cloud credential is handed
+         to the child. HOME points at `staging`, so `~` expands somewhere
+         harmless.
+      2. An OS sandbox (macOS `sandbox-exec`, Linux `bwrap`) that denies
+         network egress and reads under the real home directory.
+
+    Layer 2 is not redundant: `HOME` only governs `~` expansion, so
+    `pwd.getpwuid(os.getuid()).pw_dir` recovers the real home and reads
+    `~/.codecouncil/env` by absolute path -- demonstrated working before this
+    was added. Only the OS boundary stops that, and only `--unshare-net` /
+    `(deny network*)` closes the channel that makes a read worth doing.
+
+    `policy` overrides the resolved COUNCIL_SANDBOX policy (tests pass it
+    explicitly to stay hermetic). When no mechanism exists, POLICY_AUTO runs
+    unsandboxed after warning once; POLICY_REQUIRE raises
+    core.sandbox.SandboxUnavailable instead.
 
     Uses sys.executable rather than a hardcoded "python3" so a venv/pyenv
     interpreter mismatch can't make staged imports fail spuriously -- with
@@ -236,16 +268,16 @@ def run_script(staging: Path, script_src: str, timeout: int,
     finding."""
     script_path = staging / filename
     script_path.write_text(script_src, encoding="utf-8")
-    env = {
-        "PYTHONPATH": str(staging),
-        "PATH": os.environ.get("PATH", ""),
-        "HOME": str(staging),
-        "LANG": os.environ.get("LANG", "C.UTF-8"),
-        "LC_ALL": os.environ.get("LC_ALL", ""),
-    }
-    env = {k: v for k, v in env.items() if v}
+    env = sandbox.minimal_env(home=str(staging), pythonpath=str(staging))
+    if policy is None:
+        policy = sandbox.resolve_policy(
+            os.environ.get("COUNCIL_SANDBOX"), load_config().get("sandbox"))
+    argv, sandboxed = sandbox.wrap(
+        [sys.executable, str(script_path)], str(staging), policy)
+    if not sandboxed and policy != sandbox.POLICY_OFF:
+        _warn_unsandboxed_once()
     return subprocess.run(
-        [sys.executable, str(script_path)], capture_output=True, text=True,
+        argv, capture_output=True, text=True,
         timeout=timeout, cwd=str(staging), env=env)
 
 
@@ -258,6 +290,10 @@ def _execute_probe(staging: Path, probe_src: str) -> dict:
         res = run_script(staging, probe_src, PROBE_TIMEOUT, filename="probe_script.py")
     except subprocess.TimeoutExpired:
         return {"status": "error", "note": "probe timed out"}
+    except sandbox.SandboxUnavailable as e:
+        # same refusal path as verify.py: COUNCIL_SANDBOX=require with no
+        # mechanism means don't execute, not crash the beat
+        return {"status": "error", "note": f"probe skipped — {str(e)[:150]}"}
     except OSError as e:
         return {"status": "error", "note": str(e)[:200]}
     stdout = res.stdout or ""

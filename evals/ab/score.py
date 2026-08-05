@@ -11,16 +11,32 @@ Council stats (findings, receipts) are read only for the with-council arm.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from core import sandbox
 from hooks import ledger as ledger_mod
 
 HIDDEN_TEST_TIMEOUT = 60
+
+
+def _test_env(repo: Path) -> dict[str, str]:
+    """Environment for a scoring subprocess.
+
+    The hidden/adversarial scripts are ours, but they IMPORT the code a
+    `claude` session produced -- and importing a module runs its top-level
+    statements. Handing that the operator's entire environment (every API key)
+    was the one place still using `dict(os.environ)` after `critic/probe.py`
+    moved to a scrubbed allowlist; `--repo-url` seeds these workspaces from an
+    untrusted OSS repo, so the inconsistency was worth closing.
+
+    HOME points at the throwaway scratch repo. PYTHONPATH must include the
+    repo so the produced module is importable (the script itself lives in a
+    temp dir, so sys.path[0] is not the repo)."""
+    return sandbox.minimal_env(home=str(repo), pythonpath=str(repo))
 # Reserved delivered.json top-level keys that are never a suggestion id (see
 # hooks/ledger.py's module docstring) — everything else in the ledger is a
 # real delivered suggestion id.
@@ -36,13 +52,10 @@ def run_hidden_test(repo: Path, source: str) -> dict:
         script = f.name
     try:
         # the script lives in a temp dir, so sys.path[0] is NOT the repo —
-        # imports of task modules need the repo on PYTHONPATH (prepended, so
-        # any existing entries keep working)
-        env = dict(os.environ)
-        prior = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = str(repo) + (os.pathsep + prior if prior else "")
+        # imports of task modules need the repo on PYTHONPATH (see _test_env,
+        # which also keeps the operator's secrets out of the child)
         r = subprocess.run([sys.executable, script], cwd=repo, capture_output=True,
-                           text=True, timeout=HIDDEN_TEST_TIMEOUT, env=env)
+                           text=True, timeout=HIDDEN_TEST_TIMEOUT, env=_test_env(repo))
         out = r.stdout + r.stderr
         checks = parse_checks(out)
         return {"passed": sum(v for v in checks.values()), "total": len(checks),
@@ -65,13 +78,10 @@ def run_adversarial_test(repo: Path, source: str) -> dict:
         f.write(source)
         script = f.name
     try:
-        # same PYTHONPATH trick as run_hidden_test: the script lives in a
-        # temp dir, so the produced module needs the repo on the path.
-        env = dict(os.environ)
-        prior = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = str(repo) + (os.pathsep + prior if prior else "")
+        # same scrubbed env as run_hidden_test: the script lives in a temp
+        # dir, so the produced module needs the repo on the path.
         r = subprocess.run([sys.executable, script], cwd=repo, capture_output=True,
-                           text=True, timeout=HIDDEN_TEST_TIMEOUT, env=env)
+                           text=True, timeout=HIDDEN_TEST_TIMEOUT, env=_test_env(repo))
         return {"safe": r.returncode == 0, "output": (r.stdout + r.stderr)[-500:]}
     except subprocess.TimeoutExpired:
         return {"safe": False, "output": "adversarial test timed out"}

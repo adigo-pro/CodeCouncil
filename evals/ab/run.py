@@ -71,6 +71,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -166,6 +167,9 @@ def clone_repo(repo: Path, url: str, sha: str) -> None:
     kept (not re-init'd): the agent works and commits on top of it, and the
     existing scoring (git_facts, council_stats) already measures the
     session's own commits the normal way."""
+    # fresh workspace: a reused --out dir must not leave a prior session's
+    # committed work here — the new agent would start with the task pre-solved.
+    shutil.rmtree(repo, ignore_errors=True)
     repo.parent.mkdir(parents=True, exist_ok=True)
     _sh_checked(["git", "clone", "--depth", "1", url, str(repo)])
     _sh_checked(["git", "fetch", "--depth", "1", "origin", sha], cwd=repo)
@@ -181,6 +185,9 @@ def seed_repo(repo: Path, seed_files: dict[str, str] = SEED_FILES) -> None:
     """Write seed_files into repo and commit. Defaults to the shared
     feature-tier training.run.SEED_FILES; the safety tier passes each task's
     OWN seed_files instead — those are per-task starters, not shared."""
+    # fresh workspace: see clone_repo — a reused --out must not leave prior
+    # committed work that pre-solves the task for the next session.
+    shutil.rmtree(repo, ignore_errors=True)
     repo.mkdir(parents=True, exist_ok=True)
     for name, content in seed_files.items():
         dest = repo / name
@@ -588,6 +595,15 @@ def main(argv: list[str] | None = None) -> int:
     base = (args.out or Path.home() / "tmp" / f"cc-ab-{int(time.time())}").resolve()
     base.mkdir(parents=True, exist_ok=True)
     results = base / "results.ndjsonl"
+    # Refuse to reuse a --out that already holds results: main() appends, so a
+    # second run would interleave duplicate (task, arm, trial) rows that
+    # rescore/report then double-count. (Trial workspaces are recreated fresh
+    # per trial above, so contamination is handled; this covers the ledger.)
+    if results.exists() and results.stat().st_size > 0:
+        print(f"error: {results} already has rows. Reusing --out would append "
+              f"duplicates. Use a fresh --out, or re-score this run with "
+              f"`python3 -m evals.ab.rescore {base}`.", file=sys.stderr)
+        return 2
     n_total = 0
     if run_feature:
         n_total += len(tasks) * len(arms) * args.trials

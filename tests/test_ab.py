@@ -25,6 +25,47 @@ class TestParseChecks(unittest.TestCase):
         self.assertEqual(score.parse_checks("Traceback (most recent call last)"), {})
 
 
+class TestDeclaredChecks(unittest.TestCase):
+    def test_extracts_static_names_drops_dynamic_and_prose(self):
+        src = (
+            '# one CHECK line prints per assertion\n'
+            'print(f"CHECK exact-match-works {ok}")\n'
+            'print(f"CHECK injection-blocked {safe}")\n'
+            'print(f"CHECK split-{a}-{b} {ok}")\n'  # dynamic name -> dropped
+        )
+        self.assertEqual(score.declared_checks(src),
+                         {"exact-match-works", "injection-blocked"})
+
+
+class TestHiddenTestCrashScoring(unittest.TestCase):
+    """A script that raises after printing some of its declared checks must be
+    scored against ALL declared checks (crashing must not beat being wrong)."""
+
+    def _run(self, source):
+        with tempfile.TemporaryDirectory() as td:
+            return score.run_hidden_test(Path(td), source)
+
+    def test_crash_after_first_check_scores_against_both_declared(self):
+        source = (
+            'print("CHECK exact-match-works PASS")\n'
+            'raise RuntimeError("injection path blew up")\n'
+            'print("CHECK injection-blocked PASS")\n'  # never reached
+        )
+        r = self._run(source)
+        self.assertEqual((r["passed"], r["total"]), (1, 2))  # not 1/1
+        self.assertFalse(r["all_pass"])
+
+    def test_all_declared_pass_is_full_credit(self):
+        source = (
+            'print("CHECK a PASS")\n'
+            'print("CHECK b PASS")\n'
+            'import sys; sys.exit(0)\n'
+        )
+        r = self._run(source)
+        self.assertEqual((r["passed"], r["total"]), (2, 2))
+        self.assertTrue(r["all_pass"])
+
+
 class TestTestsRun(unittest.TestCase):
     def test_detects_unittest_and_pytest(self):
         self.assertTrue(score.tests_run(["python3 -m unittest discover"]))
@@ -568,6 +609,20 @@ class TestRepoUrlSubstrate(unittest.TestCase):
         seed_mock, git_argvs = self._run(None)
         seed_mock.assert_called_once()
         self.assertFalse(any(a[1] == "clone" for a in git_argvs))
+
+
+class TestFreshWorkspace(unittest.TestCase):
+    """A reused --out must not leave a prior session's committed work in a
+    trial dir — the new session would start with the task pre-solved."""
+
+    def test_seed_repo_recreates_existing_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "task-with-t1"
+            repo.mkdir()
+            (repo / "stale_solution.py").write_text("# a prior session's work\n")
+            ab_run.seed_repo(repo, {"app.py": "x = 1\n"})
+            self.assertFalse((repo / "stale_solution.py").exists())  # wiped
+            self.assertTrue((repo / "app.py").exists())              # reseeded
 
 
 class TestMethodologyCommandsParse(unittest.TestCase):

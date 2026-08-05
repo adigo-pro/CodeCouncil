@@ -23,6 +23,8 @@ import re
 import tempfile
 from pathlib import Path
 
+from core.redact import sanitize
+
 KNOWLEDGE_MAX_FACTS = 30
 MAX_FACT_CHARS = 240
 
@@ -135,7 +137,11 @@ def parse_fact(raw: str) -> str | None:
             or IMPERATIVE_RE.search(text) or NEVER_VALID_RE.search(text)
             or SUPPRESSION_RE.search(text) or SECURITY_EXEMPTION_RE.search(text)):
         return None
-    return text
+    # The fact is model-authored and gets re-injected into every future
+    # judgment prompt (and written to knowledge.md), so it is a redaction sink
+    # like every other stored model text — SECURITY.md states distilled facts
+    # are "redacted and capped again at parse time"; make that true.
+    return sanitize(text)
 
 
 def _normalize(fact: str) -> str:

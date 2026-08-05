@@ -162,7 +162,10 @@ def _classify(stdout: str, stderr: str, returncode: int = 0) -> dict:
         # a traceback's most useful line (the exception itself) is its
         # LAST line, so truncate from the front when it's long rather than
         # the back -- the opposite of this codebase's usual head-cap.
-        note += f": {diag if len(diag) <= 200 else '…' + diag[-200:]}"
+        # diag is executed-script output (it can echo staged repo content,
+        # incl. a credential shape), so sanitize it like the verified/refuted
+        # notes above — sanitize after truncation so the tail cap is exact.
+        note += f": {sanitize(diag if len(diag) <= 200 else '…' + diag[-200:])}"
     return {"status": "inconclusive", "note": note}
 
 

@@ -396,7 +396,11 @@ def parse_reply(raw: str) -> dict[str, Any]:
     m = re.fullmatch(r"pass\.?(?:\s*[:—–-]\s*(?P<reason>\S.{0,200}))?", text,
                      re.IGNORECASE | re.DOTALL)
     if m:
-        reason = (m.group("reason") or "").strip().rstrip(".")
+        # PASS reason is model-authored text from a tool-equipped judgment
+        # turn (repo_read can echo file content, incl. a credential shape) and
+        # is stored in suggestions.ndjsonl / rendered to the terminal + the
+        # dashboard — same boundary as issue/rationale below, so sanitize it.
+        reason = sanitize((m.group("reason") or "").strip().rstrip("."))
         return {"verdict": PASS, **({"reason": reason} if reason else {})}
 
     start, end = text.find("{"), text.rfind("}")
@@ -432,4 +436,7 @@ def parse_reply(raw: str) -> dict[str, Any]:
                 }
         except json.JSONDecodeError:
             pass
-    return {"verdict": PASS, "malformed": raw[:500]}
+    # `malformed` is the raw model reply — stored and surfaced on the terminal
+    # + dashboard. Sanitize before the cap (so a marker can't be bisected) for
+    # the same reason issue/rationale are sanitized.
+    return {"verdict": PASS, "malformed": sanitize(raw)[:500]}

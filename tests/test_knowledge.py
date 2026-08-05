@@ -56,6 +56,20 @@ class TestParseFact(unittest.TestCase):
             knowledge.parse_fact("The retry helper deliberately returns None on timeout."),
             "The retry helper deliberately returns None on timeout.")
 
+    def test_parse_fact_redacts_credential_shape(self):
+        # A distilled fact is model-authored and re-injected into every future
+        # judgment prompt; SECURITY.md states these are redacted at parse time.
+        secret = "sk-B1c2D3e4F5g6H7i8J9k0L1m2"
+        out = knowledge.parse_fact(f"The default OPENAI_API_KEY={secret} is in config.")
+        self.assertIsNotNone(out)
+        self.assertNotIn(secret, out)
+        self.assertIn("«REDACTED:openai-key»", out)
+
+    def test_parse_fact_strips_terminal_control_sequences(self):
+        out = knowledge.parse_fact("The critic reads \x1b[31mheuristics.md\x1b[0m each beat.")
+        self.assertIsNotNone(out)
+        self.assertNotIn("\x1b", out)
+
 
 class TestAddFact(unittest.TestCase):
     def test_add_fact_dedupes_ignoring_trailing_punctuation(self):

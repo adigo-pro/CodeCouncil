@@ -18,13 +18,36 @@ import re
 # like "changeme" or a short test fixture.
 ASSIGNMENT_MIN_VALUE_LEN = 16
 
+# Credential words for the "assignment" pattern. Each must appear as a
+# DELIMITED token in the variable name — bounded by name start/end, `_`/`-`,
+# a digit, or a camelCase case transition — never as a substring of a longer
+# alphabetic word. That is the line that keeps API_KEY / db_password /
+# access_token / apiKey while leaving tokenizer / keywords / monkey / turkey
+# alone (all of which embed a keyword but are ordinary identifiers). Cost of
+# the stricter boundary: a bare all-lowercase run with no delimiter
+# (`apikey`, `mytoken`) is missed — accepted per this module's stated rule
+# that a false redaction of ordinary code is worse than a miss.
+_CRED_WORDS = ("key", "secret", "token", "password", "passwd")
+_CRED_CAMEL = "|".join(w.capitalize() for w in _CRED_WORDS) + "|" + \
+    "|".join(w.upper() for w in _CRED_WORDS)
+_ASSIGN_KEYWORD = (
+    r"(?:"
+    r"(?<![A-Za-z])(?i:" + "|".join(_CRED_WORDS) + r")"   # start-of-name or after _/-/digit
+    r"|(?<=[a-z])(?:" + _CRED_CAMEL + r")"                # camelCase: apiKey, dbSECRET
+    r")(?:s|S)?(?![a-z])"                                 # optional plural, never mid-word
+)
+
 PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "private-key",
         re.compile(
             r"(?P<prefix>-----BEGIN [A-Z ]*PRIVATE KEY-----\r?\n)"
             r".*?"
-            r"(?P<suffix>\r?\n-----END [A-Z ]*PRIVATE KEY-----)",
+            # In a `git diff`, every line carries a +/-/space marker, so the
+            # END line reads `\n+-----END …`; tolerate one marker char after
+            # the newline or a PEM inside diff text slips through unredacted
+            # (the primary capture path).
+            r"(?P<suffix>\r?\n[+\- ]?-----END [A-Z ]*PRIVATE KEY-----)",
             re.DOTALL,
         ),
     ),
@@ -64,11 +87,12 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "assignment",
         re.compile(
-            # The keyword only needs to appear *somewhere* in the name, so
             # SECRET_KEY / DB_PASSWORD / CLIENT_SECRET / JWT_SECRET /
-            # AUTH_TOKEN — the common prefixed/compound env-var shapes — all
-            # trigger redaction, not just a bare `key`/`secret`/... name.
-            r"(?i)(?P<prefix>\b[A-Za-z0-9_-]*(?:key|secret|token|password|passwd)"
+            # AUTH_TOKEN / apiKey — the common prefixed/compound/camelCase
+            # env-var shapes — all trigger redaction via the delimited-token
+            # match in `_ASSIGN_KEYWORD`; tokenizer / keywords / monkey do
+            # not (the keyword there is a substring of a longer word).
+            r"(?P<prefix>\b[A-Za-z0-9_-]*" + _ASSIGN_KEYWORD +
             r"[A-Za-z0-9_-]*\s*[=:]\s*['\"]?)"
             # The 16+ charset run is what qualifies the value as "high
             # entropy enough" to redact; once qualified, also consume any

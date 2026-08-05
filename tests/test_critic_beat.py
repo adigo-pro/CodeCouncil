@@ -57,6 +57,51 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertFalse(self.suggestions.exists())
         self.assertEqual(state["beat"], 1)
 
+    def _write_review_request(self):
+        (self.cc / "review-requests.ndjsonl").write_text(
+            json.dumps({"ts": "t", "event": "done"}) + "\n")
+
+    def test_done_review_request_retained_when_worker_busy(self):
+        # run_special declining (worker busy at Stop) must NOT consume the
+        # request — otherwise a one-shot session's receipt is silently lost.
+        self._set_stub("PASS")
+        self._write_obs([{"ts": "t", "beat": 1, "type": "diff", "session": None,
+                          "payload": {"diff": "+code", "stat": "", "untracked": []}}])
+        self._write_review_request()
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler()
+        with mock.patch.object(scheduler, "run_special", return_value=False):
+            self._beat(state, scheduler)
+        self.assertEqual(state.get("review_offset", 0), 0)  # request retained
+
+    def test_done_review_request_consumed_on_dispatch(self):
+        self._set_stub("PASS")
+        self._write_obs([{"ts": "t", "beat": 1, "type": "diff", "session": None,
+                          "payload": {"diff": "+code", "stat": "", "untracked": []}}])
+        self._write_review_request()
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler()
+        with mock.patch.object(scheduler, "run_special", return_value=True):
+            self._beat(state, scheduler)
+        self.assertGreater(state["review_offset"], 0)  # consumed on dispatch
+
+    def test_transport_failure_requeues_batch_instead_of_committing_error(self):
+        # A model transport failure (CRITIC_CMD missing) must REQUEUE the batch
+        # (retry on a later beat) rather than write an ERROR row and commit the
+        # offset — which permanently skipped judging code from a brief outage.
+        os.environ["CRITIC_CMD"] = "/nonexistent-critic-cmd"
+        self._write_obs([
+            {"ts": "t", "beat": 1, "type": "diff", "session": None,
+             "payload": {"diff": "+code", "stat": "", "untracked": []}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        committed = []
+        scheduler = TurnScheduler(on_committed=lambda off: committed.append(off))
+        self._beat(state, scheduler)
+        self.assertFalse(self.suggestions.exists())   # no ERROR row written
+        self.assertEqual(committed, [])               # offset span not committed
+        self.assertEqual(len(scheduler.pending), 1)   # batch requeued for retry
+
     def test_non_dict_and_garbage_observation_lines_are_skipped_not_fatal(self):
         # "skip unparseable lines rather than crash" also covers a valid-JSON
         # non-dict line (a bare scalar / list) and a typeless dict — e["type"]

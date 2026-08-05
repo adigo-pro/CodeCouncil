@@ -284,6 +284,15 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     }
     save_prompt(suggestions_file.parent / "prompts", record["id"], text)
     primary_parsed = ask_with_retry(text, ctx)
+    if primary_parsed.get("verdict") == "ERROR":
+        # A transport failure (provider outage/gateway error) that survived
+        # ask_with_retry's in-turn retries. Raise so the SCHEDULER requeues the
+        # batch and retries it on a later beat (up to MAX_BATCH_RETRIES) rather
+        # than writing an ERROR record and committing the offset — which
+        # permanently skipped judging code written during even a brief outage,
+        # with no way to replay it. Malformed replies degrade to PASS (not
+        # ERROR) and are unaffected; the prober's own ERROR is handled below.
+        raise agent.AgentError(primary_parsed.get("error", "model turn failed"))
     if ctx.get("prober") and ctx.get("verify", True):
         # Council mode: ask a second, recall-oriented model the SAME prompt.
         # Measured basis (docs/benchmarks/): the primary (precision anchor)
@@ -844,10 +853,16 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
            "probed_keys": state.get("probed_keys", [])}
     status = scheduler.submit(events, ctx)
 
-    # the coding agent declared itself done: consider a task-level claim review
+    # the coding agent declared itself done: consider a task-level claim review.
+    # Read the pending "done" requests WITHOUT consuming them — advance
+    # review_offset only once a review actually dispatches. A request that lands
+    # while the worker is busy (common at Stop: the end-of-task edit flurry
+    # usually still has a judgment turn in flight) is then retried next beat
+    # instead of silently swallowed. For a one-shot session Stop is the
+    # receipt's only channel, so a swallowed request loses the receipt entirely.
     review_file = ctx["suggestions_file"].parent / "review-requests.ndjsonl"
     if review_file.exists():
-        req_lines, state["review_offset"] = tail_new_lines(
+        req_lines, new_review_offset = tail_new_lines(
             review_file, state.get("review_offset", 0))
         if should_task_review(state, len(req_lines), time.time(),
                               cooldown=ctx.get("task_review_cooldown", TASK_REVIEW_COOLDOWN_S)):
@@ -855,6 +870,7 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
             if scheduler.run_special(
                 lambda: task_review(obs_file, ctx, since_epoch=since)
             ):
+                state["review_offset"] = new_review_offset  # consume only on dispatch
                 state["last_task_review"] = time.time()
                 state["material_since_review"] = False
                 render_status(beat, ts, "task review dispatched — agent claimed done")

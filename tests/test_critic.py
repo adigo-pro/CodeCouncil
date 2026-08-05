@@ -91,6 +91,36 @@ class TestParseReply(unittest.TestCase):
         ):
             self.assertIsNone(prompt.parse_reply(raw)["suggestion"]["failure_mode"], raw)
 
+    def test_parse_reply_normalizes_severity(self):
+        # unknown/urgent severities map into {low,medium,high} — hooks gate on
+        # exact membership, so a "critical" stored verbatim would never deliver.
+        cases = {"critical": "high", "CRITICAL": "high", "High": "high",
+                 "blocker": "high", "info": "low", "bogus": "medium", "": "medium"}
+        for given, want in cases.items():
+            raw = json.dumps({"file": "a.py", "issue": "x", "severity": given})
+            self.assertEqual(prompt.parse_reply(raw)["suggestion"]["severity"], want, given)
+
+    def test_parse_reply_severity_non_string_defaults_medium(self):
+        for sev in (7, True, ["high"], None):
+            raw = json.dumps({"file": "a.py", "issue": "x", "severity": sev})
+            self.assertEqual(prompt.parse_reply(raw)["suggestion"]["severity"], "medium", sev)
+
+    def test_parse_reply_non_string_issue_is_pass_not_crash(self):
+        # a non-string issue would TypeError in sanitize(); must degrade to the
+        # malformed-PASS path, not raise out of parse_reply.
+        for obj in ({"file": "a.py", "issue": ["a", "b"]},
+                    {"file": "a.py", "issue": 42},
+                    {"file": 42, "issue": "x"}):
+            v = prompt.parse_reply(json.dumps(obj))
+            self.assertEqual(v["verdict"], "PASS", obj)
+
+    def test_parse_reply_non_int_line_dropped_to_none(self):
+        for line in ("3", 3.5, True, {"a": 1}):
+            raw = json.dumps({"file": "a.py", "issue": "x", "line": line})
+            self.assertIsNone(prompt.parse_reply(raw)["suggestion"]["line"], line)
+        self.assertEqual(
+            prompt.parse_reply('{"file":"a.py","issue":"x","line":9}')["suggestion"]["line"], 9)
+
     def test_suggestion_issue_is_redacted(self):
         """The model's judgment turn has read-only repo tools (repo_read,
         repo_grep, ...) that can echo live file contents back into "issue"/

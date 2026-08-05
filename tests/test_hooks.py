@@ -352,6 +352,17 @@ class TestDecideContext(unittest.TestCase):
         rows = [suggestion(ts=NOW - TTL_SECONDS - 5)]
         self.assertIsNone(decide(post_tool_use(), rows, {}, NOW))
 
+    def test_refuted_finding_never_delivered_context(self):
+        # The product thesis: a finding the critic's own repro REFUTED is
+        # never delivered. This guards the context (PostToolUse) channel.
+        rows = [suggestion(verification={"status": "refuted"})]
+        self.assertIsNone(decide(post_tool_use(), rows, {}, NOW))
+
+    def test_verified_finding_still_delivered_context(self):
+        # sanity: the guard is about "refuted", not "has verification"
+        rows = [suggestion(verification={"status": "verified", "note": "repro'd"})]
+        self.assertIsNotNone(decide(post_tool_use(), rows, {}, NOW))
+
     def test_pass_and_idless_rows_ignored(self):
         rows = [{"verdict": "PASS", "ts": _iso(NOW)},
                 {**suggestion(), "id": None}]
@@ -398,6 +409,11 @@ class TestDecideStop(unittest.TestCase):
 
     def test_medium_never_blocks(self):
         self.assertIsNone(decide(stop_event(), [suggestion(severity="medium")], {}, NOW))
+
+    def test_refuted_high_finding_never_blocks_stop(self):
+        # the refuted guard on the block (Stop) channel too
+        rows = [suggestion(severity="high", verification={"status": "refuted"})]
+        self.assertIsNone(decide(stop_event(), rows, {}, NOW))
 
     def test_stop_hook_active_always_allows(self):
         self.assertIsNone(decide(stop_event(active=True), [suggestion()], {}, NOW))

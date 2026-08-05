@@ -192,6 +192,28 @@ class TestScriptVerification(unittest.TestCase):
         self.assertEqual(result["note"], "no such bug, guarded on line 1")
         self.assertNotIn("repro", result)
 
+    def test_confirmed_note_and_repro_are_sanitized(self):
+        # The verify note comes from executed-script stdout (can echo staged
+        # repo content) and the repro is model-authored script text injected
+        # into the coding agent's context — both must be redacted, like every
+        # other stored model-influenced field.
+        secret = "nvapi-" + "a" * 30
+        self._stub_reply(f"print('CONFIRMED: leaked {secret}')\n")
+        result = verify.verify_finding(self.repo, self._suggestion())
+        self.assertEqual(result["status"], "verified")
+        self.assertNotIn(secret, result["note"])
+        self.assertIn("«REDACTED:nvidia-key»", result["note"])
+        self.assertNotIn(secret, result["repro"])
+
+    def test_inconclusive_diag_note_is_sanitized(self):
+        # a script that prints neither marker: its stderr/stdout diag is stored
+        # in the note and must be sanitized too (the branch Batch 1 fixed).
+        secret = "nvapi-" + "b" * 30
+        self._stub_reply(f"import sys; sys.stderr.write('boom {secret}')\n")
+        result = verify.verify_finding(self.repo, self._suggestion())
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertNotIn(secret, result["note"])
+
     def test_raising_script_is_inconclusive_not_verified_or_refuted(self):
         self._stub_reply("raise RuntimeError('script bug, not a finding')\n")
         result = verify.verify_finding(self.repo, self._suggestion())

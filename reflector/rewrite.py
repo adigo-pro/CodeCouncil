@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import re
-import tempfile
 from pathlib import Path
+
+from core.store import write_text_atomic
 
 MIN_NEW_OUTCOMES = 3
 MAX_LINES = 40
@@ -163,10 +163,9 @@ def apply(heuristics_path: Path, new_text: str, old_text: str, old_version: int)
     history = heuristics_path.parent / "heuristics-history"
     history.mkdir(parents=True, exist_ok=True)
     archive = history / f"v{old_version}.md"
-    archive.write_text(old_text, encoding="utf-8")
-
-    fd, tmp = tempfile.mkstemp(dir=heuristics_path.parent, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(new_text.strip() + "\n")
-    os.replace(tmp, heuristics_path)
+    # Atomic: the archive is the rollback restore source and evals.run's
+    # version input — a crash mid-write here left an empty/torn v{N}.md that
+    # then crash-looped maybe_rollback on restored[0]. Write it whole or not.
+    write_text_atomic(archive, old_text)
+    write_text_atomic(heuristics_path, new_text.strip() + "\n")
     return archive

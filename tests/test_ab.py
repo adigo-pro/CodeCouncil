@@ -25,6 +25,47 @@ class TestParseChecks(unittest.TestCase):
         self.assertEqual(score.parse_checks("Traceback (most recent call last)"), {})
 
 
+class TestDeclaredChecks(unittest.TestCase):
+    def test_extracts_static_names_drops_dynamic_and_prose(self):
+        src = (
+            '# one CHECK line prints per assertion\n'
+            'print(f"CHECK exact-match-works {ok}")\n'
+            'print(f"CHECK injection-blocked {safe}")\n'
+            'print(f"CHECK split-{a}-{b} {ok}")\n'  # dynamic name -> dropped
+        )
+        self.assertEqual(score.declared_checks(src),
+                         {"exact-match-works", "injection-blocked"})
+
+
+class TestHiddenTestCrashScoring(unittest.TestCase):
+    """A script that raises after printing some of its declared checks must be
+    scored against ALL declared checks (crashing must not beat being wrong)."""
+
+    def _run(self, source):
+        with tempfile.TemporaryDirectory() as td:
+            return score.run_hidden_test(Path(td), source)
+
+    def test_crash_after_first_check_scores_against_both_declared(self):
+        source = (
+            'print("CHECK exact-match-works PASS")\n'
+            'raise RuntimeError("injection path blew up")\n'
+            'print("CHECK injection-blocked PASS")\n'  # never reached
+        )
+        r = self._run(source)
+        self.assertEqual((r["passed"], r["total"]), (1, 2))  # not 1/1
+        self.assertFalse(r["all_pass"])
+
+    def test_all_declared_pass_is_full_credit(self):
+        source = (
+            'print("CHECK a PASS")\n'
+            'print("CHECK b PASS")\n'
+            'import sys; sys.exit(0)\n'
+        )
+        r = self._run(source)
+        self.assertEqual((r["passed"], r["total"]), (2, 2))
+        self.assertTrue(r["all_pass"])
+
+
 class TestTestsRun(unittest.TestCase):
     def test_detects_unittest_and_pytest(self):
         self.assertTrue(score.tests_run(["python3 -m unittest discover"]))
@@ -144,6 +185,19 @@ class TestSettingSourcesIsolation(unittest.TestCase):
         with mock.patch.object(ab_run, "sh") as sh_mock:
             sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
             ab_run.run_session(Path("/tmp/repo"), "do it.")
+        argv = sh_mock.call_args.args[0]
+        self.assertIn("--setting-sources", argv)
+        sources = argv[argv.index("--setting-sources") + 1].split(",")
+        self.assertNotIn("user", sources)
+        self.assertNotIn("global", sources)
+
+    def test_training_run_task_also_passes_isolation_flag(self):
+        # training sessions generate the data driving harvested cases + rewrites;
+        # they need the same contamination guard as the A/B harness.
+        import training.run as training_run
+        with mock.patch.object(training_run, "sh") as sh_mock:
+            sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            training_run.run_task(Path("/tmp/repo"), "do it.")
         argv = sh_mock.call_args.args[0]
         self.assertIn("--setting-sources", argv)
         sources = argv[argv.index("--setting-sources") + 1].split(",")
@@ -460,6 +514,30 @@ class TestReportThreeArms(unittest.TestCase):
         # one mean-summary line per arm
         self.assertEqual(md.count("mean hidden-test pass rate"), 3)
 
+    def test_crashed_hidden_scores_zero_not_excluded_from_mean(self):
+        # Two trials for one arm: a clean 2/2 and a crash. The crash must pull
+        # the mean to 50%, not be dropped (which would report 100%).
+        rows = [
+            {"task": "t", "arm": "without", "hidden": {"passed": 2, "total": 2},
+             "tests_run": True, "session": {"rc": 0}},
+            {"task": "t", "arm": "without",
+             "hidden": {"passed": 0, "total": 0, "crashed": True, "output": "boom"},
+             "tests_run": False, "session": {"rc": 1}},
+        ]
+        md = ab_run.report(rows)
+        self.assertIn("50% over 2 trials", md)
+        self.assertIn("1 crashed → scored 0", md)
+
+    def test_error_row_helpers_have_report_compatible_shape(self):
+        feat = ab_run._error_feature_row("t", "claim", "with", 1, "setup blew up")
+        saf = ab_run._error_safety_row("doc-reader", "without", 1, "setup blew up")
+        # both must flow through report() without KeyError, and score as failures
+        md = ab_run.report([feat, saf])
+        self.assertIn("crash", md)
+        self.assertIn("UNSAFE", md)
+        self.assertTrue(feat["hidden"]["crashed"])
+        self.assertFalse(saf["safe"])
+
 
 class TestRepoUrlParsing(unittest.TestCase):
     """Task 5: --repo-url URL@sha, opt-in real-OSS-repo substrate."""
@@ -503,7 +581,15 @@ class TestRepoUrlSubstrate(unittest.TestCase):
                  mock.patch.object(ab_run.score, "git_facts",
                                     return_value={"commits": 0, "last_subject": ""}), \
                  mock.patch.object(ab_run, "find_project_dir", return_value=None):
-                sh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+                sha = repo_url[1] if repo_url else ""
+
+                def fake_sh(cmd, *a, **k):
+                    # clone_repo verifies the checkout took via `git rev-parse
+                    # HEAD` == sha; return the pinned sha for that call.
+                    out = sha if cmd[:2] == ["git", "rev-parse"] else ""
+                    return mock.Mock(returncode=0, stdout=out, stderr="")
+
+                sh_mock.side_effect = fake_sh
                 ab_run.run_trial(base, "task", "clean", "do the thing. Commit.",
                                  "CHECK x PASS", "without", 1, repo_url=repo_url)
             git_argvs = [c.args[0] for c in sh_mock.call_args_list
@@ -523,6 +609,20 @@ class TestRepoUrlSubstrate(unittest.TestCase):
         seed_mock, git_argvs = self._run(None)
         seed_mock.assert_called_once()
         self.assertFalse(any(a[1] == "clone" for a in git_argvs))
+
+
+class TestFreshWorkspace(unittest.TestCase):
+    """A reused --out must not leave a prior session's committed work in a
+    trial dir — the new session would start with the task pre-solved."""
+
+    def test_seed_repo_recreates_existing_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "task-with-t1"
+            repo.mkdir()
+            (repo / "stale_solution.py").write_text("# a prior session's work\n")
+            ab_run.seed_repo(repo, {"app.py": "x = 1\n"})
+            self.assertFalse((repo / "stale_solution.py").exists())  # wiped
+            self.assertTrue((repo / "app.py").exists())              # reseeded
 
 
 class TestMethodologyCommandsParse(unittest.TestCase):

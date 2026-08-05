@@ -106,6 +106,25 @@ def _cap(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + f"… [{len(text)} chars total]"
 
 
+_SEVERITIES = ("low", "medium", "high")
+_SEVERITY_ALIASES = {"critical": "high", "crit": "high", "blocker": "high",
+                     "warning": "medium", "warn": "medium", "info": "low"}
+
+
+def _normalize_severity(value: object) -> str:
+    """Map an untrusted model `severity` to one of low/medium/high. hooks gate
+    delivery on exact membership in {medium, high}, so an unrecognized string
+    stored verbatim would silently never be delivered — a "critical" finding
+    must not vanish. Anything unrecognized defaults to medium."""
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in _SEVERITIES:
+            return v
+        if v in _SEVERITY_ALIASES:
+            return _SEVERITY_ALIASES[v]
+    return "medium"
+
+
 def _render_touched_contents(touched_contents: dict[str, str]) -> list[str]:
     """Render diff-touched files' current contents (Task 11) so the critic
     judges hunks against the whole file, not just the -U8 excerpt — the top
@@ -396,24 +415,44 @@ def parse_reply(raw: str) -> dict[str, Any]:
     m = re.fullmatch(r"pass\.?(?:\s*[:—–-]\s*(?P<reason>\S.{0,200}))?", text,
                      re.IGNORECASE | re.DOTALL)
     if m:
-        reason = (m.group("reason") or "").strip().rstrip(".")
+        # PASS reason is model-authored text from a tool-equipped judgment
+        # turn (repo_read can echo file content, incl. a credential shape) and
+        # is stored in suggestions.ndjsonl / rendered to the terminal + the
+        # dashboard — same boundary as issue/rationale below, so sanitize it.
+        reason = sanitize((m.group("reason") or "").strip().rstrip("."))
         return {"verdict": PASS, **({"reason": reason} if reason else {})}
 
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
         try:
             obj = json.loads(text[start : end + 1])
-            if isinstance(obj, dict) and obj.get("file") and obj.get("issue"):
+            # file/issue must be non-empty STRINGS: obj is untrusted model JSON,
+            # and a non-string issue (a list/number) would raise TypeError in
+            # sanitize() — the only except here is JSONDecodeError, so that
+            # would escape parse_reply, burn the batch's requeue cycles, then
+            # drop it. A bad shape degrades to the malformed-PASS path instead.
+            if (isinstance(obj, dict)
+                    and isinstance(obj.get("file"), str) and obj["file"]
+                    and isinstance(obj.get("issue"), str) and obj["issue"]):
                 rule = obj.get("rule")
                 fm = obj.get("failure_mode")
+                line = obj.get("line")
+                rationale = obj.get("rationale")
                 return {
                     "verdict": "SUGGESTION",
                     "suggestion": {
                         "file": obj["file"],
-                        "line": obj.get("line"),
-                        "severity": obj.get("severity", "medium"),
+                        # accept only an int line; a string/float/dict is dropped
+                        # to None rather than stored raw and rendered downstream.
+                        "line": line if isinstance(line, int) and not isinstance(line, bool) else None,
+                        # normalize to the three severities hooks gate on; an
+                        # unrecognized value ("critical", "High") would otherwise
+                        # be stored verbatim and NEVER delivered (exact-match gate)
+                        # — the model's most urgent findings, silently dropped.
+                        "severity": _normalize_severity(obj.get("severity")),
                         "issue": _cap(sanitize(obj["issue"]), MAX_ISSUE_CHARS),
-                        "rationale": _cap(sanitize(obj.get("rationale", "")), MAX_RATIONALE_CHARS),
+                        "rationale": _cap(sanitize(rationale if isinstance(rationale, str) else ""),
+                                          MAX_RATIONALE_CHARS),
                         # "the heuristic (R1, R2, …) that most motivated this
                         # finding" — kept only when it's a positive int;
                         # anything else (missing, string, 0, negative) is
@@ -432,4 +471,7 @@ def parse_reply(raw: str) -> dict[str, Any]:
                 }
         except json.JSONDecodeError:
             pass
-    return {"verdict": PASS, "malformed": raw[:500]}
+    # `malformed` is the raw model reply — stored and surfaced on the terminal
+    # + dashboard. Sanitize before the cap (so a marker can't be bisected) for
+    # the same reason issue/rationale are sanitized.
+    return {"verdict": PASS, "malformed": sanitize(raw)[:500]}

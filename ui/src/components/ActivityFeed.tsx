@@ -52,7 +52,11 @@ function Row({ e }: { e: ActivityEvent }) {
 export function ActivityFeed({ data }: { data: Council | null }) {
   const activity = data?.activity ?? [];
   const scroller = useRef<HTMLDivElement>(null);
-  const count = activity.length;
+  // Depend on the NEWEST event's stable id, not activity.length — the server
+  // caps the feed at 120, so the length pins at 120 minutes into any session
+  // and the effect would never fire again (auto-scroll dies exactly when a
+  // session gets going). The last seq changes with every new event.
+  const lastSeq = activity.length ? activity[activity.length - 1].seq : null;
 
   // Follow the tail unless the user has scrolled up to read.
   useEffect(() => {
@@ -60,7 +64,7 @@ export function ActivityFeed({ data }: { data: Council | null }) {
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
     if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [count]);
+  }, [lastSeq]);
 
   const rows: ReactNode[] = [];
   let lastBeat: number | null = null;

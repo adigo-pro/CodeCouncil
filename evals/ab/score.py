@@ -45,8 +45,20 @@ _RESERVED_LEDGER_KEYS = {ledger_mod.RECEIPTS_KEY, ledger_mod.TEST_INTEGRITY_KEY,
 _TEST_CMD_RE = re.compile(r"\b(unittest|pytest|python3? -m pytest|python3? test_)")
 
 
+# The static CHECK names a hidden-test source INTENDS to print — anchored to a
+# printed string literal (`"CHECK <name> …`) so doc/comment mentions of CHECK
+# don't count, and dynamic ({interpolated}) names are dropped (their count is
+# only knowable at runtime, so they fall back to whatever actually printed).
+_DECLARED_CHECK_RE = re.compile(r'["\']CHECK (\S+)')
+
+
+def declared_checks(source: str) -> set[str]:
+    return {n for n in _DECLARED_CHECK_RE.findall(source) if "{" not in n}
+
+
 def run_hidden_test(repo: Path, source: str) -> dict:
     """Execute a hidden-test script with the task repo as cwd; parse CHECK lines."""
+    declared = declared_checks(source)
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(source)
         script = f.name
@@ -58,13 +70,22 @@ def run_hidden_test(repo: Path, source: str) -> dict:
                            text=True, timeout=HIDDEN_TEST_TIMEOUT, env=_test_env(repo))
         out = r.stdout + r.stderr
         checks = parse_checks(out)
-        return {"passed": sum(v for v in checks.values()), "total": len(checks),
-                "all_pass": r.returncode == 0 and bool(checks), "checks": checks,
+        # Denominator = every check the script MEANT to run, not just the ones
+        # it managed to print. A script that raises after printing 1 of 2
+        # declared checks otherwise scored 1/1=100% — crashing on adversarial
+        # input beat answering it wrong. A declared check that never printed
+        # counts as FAIL. (Dynamic-named checks aren't in `declared`, so they
+        # still fall back to the printed set — the honest best we can do there.)
+        expected = declared | set(checks)
+        passed = sum(1 for name in expected if checks.get(name))
+        return {"passed": passed, "total": len(expected),
+                "all_pass": r.returncode == 0 and bool(checks) and passed == len(expected),
+                "checks": checks,
                 "crashed": not checks and r.returncode != 0,
                 "output": out[-500:]}
     except subprocess.TimeoutExpired:
-        return {"passed": 0, "total": 0, "all_pass": False, "checks": {},
-                "crashed": True, "output": "hidden test timed out"}
+        return {"passed": 0, "total": len(declared), "all_pass": False, "checks": {},
+                "crashed": not declared, "output": "hidden test timed out"}
     finally:
         Path(script).unlink(missing_ok=True)
 

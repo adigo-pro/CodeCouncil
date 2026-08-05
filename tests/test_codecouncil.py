@@ -234,6 +234,19 @@ class TestConsoleOverrideResolution(unittest.TestCase):
                 self._args(prober="f/p"), console_set={"prober"})
             self.assertIsNone(prober)  # config has no prober -> council off
 
+    def test_resolves_from_local_env_file_layer_like_the_critic(self):
+        # A model/prober set only in ~/.codecouncil/env (not os.environ) must be
+        # picked up here, matching the critic's agent.local_env resolution —
+        # else the launcher displays/launches a different value than it runs.
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("COUNCIL_MODEL", None)
+            os.environ.pop("COUNCIL_PROBER", None)
+            with mock.patch.object(
+                    launcher.agent, "local_env",
+                    return_value={"COUNCIL_MODEL": "file/m", "COUNCIL_PROBER": "file/p"}):
+                model, prober = launcher.resolve_settings(self._args())
+            self.assertEqual((model, prober), ("file/m", "file/p"))
+
 
 class TestModelHelpers(unittest.TestCase):
     """Shared provider/key/default maps + /model validation (console-model-flexibility)."""

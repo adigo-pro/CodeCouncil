@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -72,6 +73,25 @@ class TestCaseSchema(unittest.TestCase):
             self.assertIn(case["expected"], {"flag", "pass"})
             if case["expected"] == "flag":
                 self.assertTrue(case["expect_files"])
+
+
+class TestLoadCasesTolerance(unittest.TestCase):
+    def test_torn_harvested_case_is_skipped_not_fatal(self):
+        # A torn/corrupt harvested case (shared dir, concurrent writers) must
+        # be skipped — an uncaught JSONDecodeError propagates through the
+        # rewrite gate and crash-loops the reflector daemon.
+        import evals.run as run
+        with tempfile.TemporaryDirectory() as td:
+            harvested = Path(td) / "cases-harvested"
+            harvested.mkdir()
+            (harvested / "good.json").write_text(
+                json.dumps({"name": "g", "expected": "pass", "expect_files": [],
+                            "events": [], "latest_diff": None}), encoding="utf-8")
+            (harvested / "torn.json").write_text('{"name": "t", "exp', encoding="utf-8")
+            with mock.patch.object(run, "HARVESTED_CASES_DIR", harvested), \
+                    mock.patch.object(run, "CASES_DIR", Path(td) / "empty"):
+                cases = run.load_cases()  # must not raise
+            self.assertEqual([c["name"] for c in cases], ["g"])
 
 
 if __name__ == "__main__":

@@ -60,7 +60,14 @@ def load_state(path: Path) -> dict:
             state = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             state = None
-        if state is not None:
+        # valid JSON that isn't a dict (a hand edit, a version-drifted file) is
+        # discarded and rebuilt, not fatal: `state["committed_offset"] = …`
+        # below would TypeError on a list/str and crash the daemon on every
+        # restart. Also backfill the required keys so a dict missing beat/offset
+        # can't KeyError inside heartbeat.
+        if isinstance(state, dict):
+            state.setdefault("offset", 0)
+            state.setdefault("beat", 0)
             # committed_offset: how far batches have DURABLY landed (their
             # record appended to suggestions.ndjsonl). Legacy state files
             # predate this field — default it to offset so upgrading never
@@ -277,6 +284,15 @@ def judge_batch(events: list[dict], ctx: dict) -> None:
     }
     save_prompt(suggestions_file.parent / "prompts", record["id"], text)
     primary_parsed = ask_with_retry(text, ctx)
+    if primary_parsed.get("verdict") == "ERROR":
+        # A transport failure (provider outage/gateway error) that survived
+        # ask_with_retry's in-turn retries. Raise so the SCHEDULER requeues the
+        # batch and retries it on a later beat (up to MAX_BATCH_RETRIES) rather
+        # than writing an ERROR record and committing the offset — which
+        # permanently skipped judging code written during even a brief outage,
+        # with no way to replay it. Malformed replies degrade to PASS (not
+        # ERROR) and are unaffected; the prober's own ERROR is handled below.
+        raise agent.AgentError(primary_parsed.get("error", "model turn failed"))
     if ctx.get("prober") and ctx.get("verify", True):
         # Council mode: ask a second, recall-oriented model the SAME prompt.
         # Measured basis (docs/benchmarks/): the primary (precision anchor)
@@ -794,11 +810,18 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
     events = []
     for line in lines:
         try:
-            events.append(json.loads(line))
+            parsed = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # "skip unparseable lines rather than crash" also covers a line that
+        # parses to valid JSON but isn't an event dict (a bare scalar `42`, a
+        # list): `e["type"]` below would TypeError/KeyError and — because the
+        # crash precedes the state save while offset already advanced past the
+        # line — re-read and re-crash on every restart (a permanent loop).
+        if isinstance(parsed, dict):
+            events.append(parsed)
 
-    diffs = [e for e in events if e["type"] == "diff"]
+    diffs = [e for e in events if e.get("type") == "diff"]
     if diffs:
         state["latest_diff"] = diffs[-1]
 
@@ -830,10 +853,16 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
            "probed_keys": state.get("probed_keys", [])}
     status = scheduler.submit(events, ctx)
 
-    # the coding agent declared itself done: consider a task-level claim review
+    # the coding agent declared itself done: consider a task-level claim review.
+    # Read the pending "done" requests WITHOUT consuming them — advance
+    # review_offset only once a review actually dispatches. A request that lands
+    # while the worker is busy (common at Stop: the end-of-task edit flurry
+    # usually still has a judgment turn in flight) is then retried next beat
+    # instead of silently swallowed. For a one-shot session Stop is the
+    # receipt's only channel, so a swallowed request loses the receipt entirely.
     review_file = ctx["suggestions_file"].parent / "review-requests.ndjsonl"
     if review_file.exists():
-        req_lines, state["review_offset"] = tail_new_lines(
+        req_lines, new_review_offset = tail_new_lines(
             review_file, state.get("review_offset", 0))
         if should_task_review(state, len(req_lines), time.time(),
                               cooldown=ctx.get("task_review_cooldown", TASK_REVIEW_COOLDOWN_S)):
@@ -841,6 +870,7 @@ def heartbeat(obs_file: Path, state: dict, scheduler: TurnScheduler, ctx: dict) 
             if scheduler.run_special(
                 lambda: task_review(obs_file, ctx, since_epoch=since)
             ):
+                state["review_offset"] = new_review_offset  # consume only on dispatch
                 state["last_task_review"] = time.time()
                 state["material_since_review"] = False
                 render_status(beat, ts, "task review dispatched — agent claimed done")
@@ -932,14 +962,21 @@ def main(argv: list[str] | None = None) -> int:
     state["interval"] = args.interval
     try:
         while True:
-            heartbeat(obs_file, state, scheduler, ctx)
-            if args.once:
-                # drain first so a clean --once exit persists the
-                # committed_offset the drained batch actually reached,
-                # rather than a stale one that would replay it needlessly.
-                scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),
-                                 "latest_diff": state.get("latest_diff"),
-                                 "offset_now": state["offset"]})
+            try:
+                heartbeat(obs_file, state, scheduler, ctx)
+                if args.once:
+                    # drain first so a clean --once exit persists the
+                    # committed_offset the drained batch actually reached,
+                    # rather than a stale one that would replay it needlessly.
+                    scheduler.drain({**ctx, "beat": state["beat"], "ts": now_iso(),
+                                     "latest_diff": state.get("latest_diff"),
+                                     "offset_now": state["offset"]})
+            except Exception as e:
+                # Daemons never die: an unexpected beat error (disk-full write,
+                # an observations.ndjsonl deletion racing tail_new_lines' stat)
+                # logs and retries next tick. Offset only advances after a
+                # durable append, so a mid-beat failure replays safely.
+                print(f"critic: beat error, retrying — {e}", file=sys.stderr)
             write_json_atomic(
                 state_path,
                 {k: state[k] for k in PERSISTED_STATE_KEYS if k in state},

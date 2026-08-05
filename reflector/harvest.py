@@ -21,6 +21,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from core.store import write_json_atomic
+
 # Sibling of evals/cases, inside the CodeCouncil source tree itself (not the
 # watched repo's .codecouncil/ dir) — a gitignored runtime directory that
 # evals.run.load_cases and the rewrite gate both read alongside the
@@ -93,7 +95,11 @@ def _write_case(sid: str, hash_file: str, file_name: str, issue: str,
         "latest_diff": material.get("latest_diff"),
         "_content_hash": content_hash,
     }
-    (HARVESTED_DIR / f"{name}.json").write_text(json.dumps(case, indent=1), encoding="utf-8")
+    # Atomic write: this dir is shared by every reflector on the machine and
+    # read (unguarded until now) by evals.run.load_cases. A naked write_text
+    # can be observed torn by a concurrent reader; temp-file + os.replace makes
+    # each case appear whole or not at all.
+    write_json_atomic(HARVESTED_DIR / f"{name}.json", case, indent=1)
     # Cap the directory to the newest MAX_HARVESTED cases, oldest evicted
     # first — mirrors critic/main.py's _prune_dir pattern (prompts/,
     # case-material/) rather than refusing to harvest once full. Runs after

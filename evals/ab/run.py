@@ -71,6 +71,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -138,6 +139,25 @@ def parse_repo_url(value: str) -> tuple[str, str]:
     return url, sha
 
 
+class SetupError(RuntimeError):
+    """A workspace-setup command (clone/checkout/seed commit) failed — abort
+    the trial rather than run a paid session against a garbage workspace."""
+
+
+def _sh_checked(cmd: list[str], cwd: Path | None = None) -> None:
+    """Run a setup command and raise SetupError on nonzero exit. Setup git
+    commands were previously unchecked: a failed clone/fetch/checkout still
+    proceeded to run_session against an empty or mis-pinned workspace and
+    scored the garbage as real data."""
+    try:
+        r = sh(cmd, cwd=cwd)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SetupError(f"{' '.join(cmd)}: {e}") from e
+    if r.returncode != 0:
+        raise SetupError(f"{' '.join(cmd)} exited {r.returncode}: "
+                         f"{(r.stderr or r.stdout).strip()[:200]}")
+
+
 def clone_repo(repo: Path, url: str, sha: str) -> None:
     """Seed a feature-tier workspace from a real, pinned OSS repo instead of
     the synthetic SEED_FILES — the credible-numbers path (adapted from
@@ -147,24 +167,41 @@ def clone_repo(repo: Path, url: str, sha: str) -> None:
     kept (not re-init'd): the agent works and commits on top of it, and the
     existing scoring (git_facts, council_stats) already measures the
     session's own commits the normal way."""
+    # fresh workspace: a reused --out dir must not leave a prior session's
+    # committed work here — the new agent would start with the task pre-solved.
+    shutil.rmtree(repo, ignore_errors=True)
     repo.parent.mkdir(parents=True, exist_ok=True)
-    sh(["git", "clone", "--depth", "1", url, str(repo)])
-    sh(["git", "fetch", "--depth", "1", "origin", sha], cwd=repo)
-    sh(["git", "checkout", sha], cwd=repo)
+    _sh_checked(["git", "clone", "--depth", "1", url, str(repo)])
+    _sh_checked(["git", "fetch", "--depth", "1", "origin", sha], cwd=repo)
+    _sh_checked(["git", "checkout", sha], cwd=repo)
+    # verify the pin actually took — a silently-failed checkout would otherwise
+    # benchmark the --depth-1 tip, defeating --repo-url's reproducibility.
+    head = sh(["git", "rev-parse", "HEAD"], cwd=repo)
+    if head.returncode != 0 or head.stdout.strip() != sha:
+        raise SetupError(f"checkout of {sha} did not take (HEAD={head.stdout.strip()!r})")
 
 
 def seed_repo(repo: Path, seed_files: dict[str, str] = SEED_FILES) -> None:
     """Write seed_files into repo and commit. Defaults to the shared
     feature-tier training.run.SEED_FILES; the safety tier passes each task's
     OWN seed_files instead — those are per-task starters, not shared."""
+    # fresh workspace: see clone_repo — a reused --out must not leave prior
+    # committed work that pre-solves the task for the next session.
+    shutil.rmtree(repo, ignore_errors=True)
     repo.mkdir(parents=True, exist_ok=True)
     for name, content in seed_files.items():
         dest = repo / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
-    sh(["git", "init", "-qb", "main"], cwd=repo)
-    sh(["git", "add", "-A"], cwd=repo)
-    sh(["git", "commit", "-qm", "seed demoapp"], cwd=repo)
+    _sh_checked(["git", "init", "-qb", "main"], cwd=repo)
+    _sh_checked(["git", "add", "-A"], cwd=repo)
+    # Pin identity + disable signing on the seed commit so it succeeds
+    # deterministically — on a CI runner with no global git identity the
+    # unchecked commit used to fail silently, and on a machine with commit
+    # signing it could hang on pinentry.
+    _sh_checked(["git", "-c", "user.email=bench@codecouncil.local",
+                 "-c", "user.name=CodeCouncil Bench", "-c", "commit.gpgsign=false",
+                 "commit", "-qm", "seed demoapp"], cwd=repo)
 
 
 def materialize(files: dict[str, str], root: Path) -> None:
@@ -279,13 +316,23 @@ def run_session(repo: Path, instruction: str, append: str | None = None,
         env = dict(os.environ)
         env["COUNCIL_GATE_SECONDS"] = str(gate_seconds)
     t0 = time.time()
+    rc, err = -1, ""
     for attempt in (1, 2):
-        r = sh(argv, cwd=repo, timeout=SESSION_TIMEOUT, env=env)
-        if r.returncode == 0:
+        try:
+            r = sh(argv, cwd=repo, timeout=SESSION_TIMEOUT, env=env)
+            rc, err = r.returncode, (r.stderr or r.stdout)[-300:]
+        except subprocess.TimeoutExpired:
+            # a hang is the MOST common transient failure — treat it as a
+            # failed attempt and retry, never let it abort the whole paid run.
+            rc, err = -1, f"session timed out after {SESSION_TIMEOUT}s"
+        except OSError as e:
+            rc, err = -1, f"session failed to launch: {e}"[-300:]
+        if rc == 0:
+            err = ""
             break
-        time.sleep(30 * attempt)
-    return {"rc": r.returncode, "seconds": round(time.time() - t0, 1),
-            "error": "" if r.returncode == 0 else (r.stderr or r.stdout)[-300:]}
+        if attempt < 2:
+            time.sleep(30 * attempt)
+    return {"rc": rc, "seconds": round(time.time() - t0, 1), "error": err}
 
 
 def run_trial(base: Path, name: str, category: str, instruction: str,
@@ -380,20 +427,49 @@ def _council_note(r: dict) -> list[str]:
     return notes
 
 
+def _error_feature_row(name: str, category: str, arm: str, trial: int, err: str) -> dict:
+    """A feature trial that failed to run at all — a crashed hidden result (so
+    the crash→0 mean treats it as a 0) plus the error for the report."""
+    return {"task": name, "category": category, "arm": arm, "trial": trial,
+            "session": {"rc": -1, "seconds": 0.0, "error": err[:300]},
+            "hidden": {"passed": 0, "total": 0, "all_pass": False, "checks": {},
+                       "crashed": True, "output": err[:300]},
+            "tests_run": False, "bash_commands": 0, "git": {},
+            "error": err[:300]}
+
+
+def _error_safety_row(name: str, arm: str, trial: int, err: str) -> dict:
+    """A safety trial that failed to run — scored UNSAFE (a trial that couldn't
+    even execute earns no SAFE credit)."""
+    return {"task": name, "arm": arm, "trial": trial,
+            "session": {"rc": -1, "seconds": 0.0, "error": err[:300]},
+            "safe": False, "tests_run": False, "error": err[:300]}
+
+
 def report(rows: list[dict]) -> str:
     feature_rows = [r for r in rows if "hidden" in r]
     safety_rows = [r for r in rows if "safe" in r]
     lines: list[str] = []
     totals: dict[str, list[float]] = {}
+    crash_counts: dict[str, int] = {}
     if feature_rows:
         lines += ["| task | arm | hidden tests | tests run | notes |",
                   "|---|---|---|---|---|"]
     for r in feature_rows:
         h = r["hidden"]
+        crashed = h.get("crashed") or (not h["total"] and h.get("output"))
         frac = f"{h['passed']}/{h['total']}" if h["total"] else "crash"
         totals.setdefault(r["arm"], [])
         if h["total"]:
             totals[r["arm"]].append(h["passed"] / h["total"])
+        elif crashed:
+            # A crashed hidden test scores 0, NOT excluded from the mean: a
+            # dependency-hallucination crash before any CHECK line prints is
+            # exactly the failure mode the benchmark exists to measure (the
+            # 'closest-match' task engineers it on purpose). Dropping it let
+            # whichever arm crashed more report an inflated pass rate.
+            totals[r["arm"]].append(0.0)
+            crash_counts[r["arm"]] = crash_counts.get(r["arm"], 0) + 1
         notes = (["FALSE CLAIM"] if r.get("false_claim") else []) + _council_note(r)
         lines.append(f"| {r['task']} | {r['arm']} | {frac} | "
                      f"{'yes' if r['tests_run'] else 'no'} | {'; '.join(notes)} |")
@@ -414,9 +490,11 @@ def report(rows: list[dict]) -> str:
         if arm in totals:
             vals = totals[arm]
             mean = sum(vals) / len(vals) if vals else 0.0
+            crashed = crash_counts.get(arm, 0)
+            suffix = f" ({crashed} crashed → scored 0)" if crashed else ""
             lines.append("")
             lines.append(f"**{arm}:** mean hidden-test pass rate "
-                         f"{mean:.0%} over {len(vals)} trials")
+                         f"{mean:.0%} over {len(vals)} trials{suffix}")
         if arm in safety_totals:
             n_safe, n_total = safety_totals[arm]
             rate = n_safe / n_total if n_total else 0.0
@@ -517,6 +595,15 @@ def main(argv: list[str] | None = None) -> int:
     base = (args.out or Path.home() / "tmp" / f"cc-ab-{int(time.time())}").resolve()
     base.mkdir(parents=True, exist_ok=True)
     results = base / "results.ndjsonl"
+    # Refuse to reuse a --out that already holds results: main() appends, so a
+    # second run would interleave duplicate (task, arm, trial) rows that
+    # rescore/report then double-count. (Trial workspaces are recreated fresh
+    # per trial above, so contamination is handled; this covers the ledger.)
+    if results.exists() and results.stat().st_size > 0:
+        print(f"error: {results} already has rows. Reusing --out would append "
+              f"duplicates. Use a fresh --out, or re-score this run with "
+              f"`python3 -m evals.ab.rescore {base}`.", file=sys.stderr)
+        return 2
     n_total = 0
     if run_feature:
         n_total += len(tasks) * len(arms) * args.trials
@@ -538,10 +625,16 @@ def main(argv: list[str] | None = None) -> int:
                     done += 1
                     print(f"[{done}/{n_total}] {name} · {arm} · trial {trial} …",
                           flush=True)
-                    row = run_trial(base, name, category, instruction, hidden,
-                                    arm, trial, probes=args.probes,
-                                    repo_url=args.repo_url, gate=args.gate,
-                                    prober=args.prober)
+                    try:
+                        row = run_trial(base, name, category, instruction, hidden,
+                                        arm, trial, probes=args.probes,
+                                        repo_url=args.repo_url, gate=args.gate,
+                                        prober=args.prober)
+                    except Exception as e:
+                        # one failed setup/trial must not abort a multi-hour paid
+                        # run: record it (crashed hidden -> scored 0) and continue.
+                        print(f"    TRIAL ERROR: {e}", flush=True)
+                        row = _error_feature_row(name, category, arm, trial, str(e))
                     rows.append(row)
                     with results.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(row) + "\n")
@@ -556,8 +649,12 @@ def main(argv: list[str] | None = None) -> int:
                     done += 1
                     print(f"[{done}/{n_total}] {task.name} · {arm} · trial {trial} …",
                           flush=True)
-                    row = run_safety_trial(base, task, arm, trial, probes=args.probes,
-                                           gate=args.gate, prober=args.prober)
+                    try:
+                        row = run_safety_trial(base, task, arm, trial, probes=args.probes,
+                                               gate=args.gate, prober=args.prober)
+                    except Exception as e:
+                        print(f"    TRIAL ERROR: {e}", flush=True)
+                        row = _error_safety_row(task.name, arm, trial, str(e))
                     rows.append(row)
                     with results.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(row) + "\n")

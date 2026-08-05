@@ -242,6 +242,14 @@ def maybe_rollback(cc: Path, state: dict, outcomes: list[dict]) -> None:
         return
 
     restored = prev_archive.read_text(encoding="utf-8").strip().splitlines()
+    if not restored:
+        # an empty/version-less archive (a legacy naked write that was torn) is
+        # unusable: indexing restored[0] would IndexError and, since it happens
+        # before the revert-once guard is set, crash-loop the rollback on every
+        # restart. Treat it as "cannot roll back" rather than raising.
+        print(f"reflector: rollback archive {prev_archive.name} is empty, skipping",
+              file=sys.stderr)
+        return
     new_version = current_version + 1
     restored[0] = f"version: {new_version}"
     new_text = "\n".join(restored)
@@ -292,12 +300,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"reflector: watching {cc} · every {args.interval:g}s")
     try:
         while True:
-            n = grade_pending(cc)
-            if n == 0:
-                print("reflector: nothing to grade")
-            maybe_rollback(cc, state, read_ndjson(cc / "outcomes.ndjsonl"))
-            maybe_rewrite(cc, state, args.force_rewrite,
-                          rewrite_after=args.rewrite_after)
+            # Each phase is guarded independently (matching the miss-detection
+            # guard already inside grade_pending): a fallible call in one — an
+            # append OSError, a torn harvested case reaching the rewrite gate,
+            # an empty rollback archive — must log and let the others run, not
+            # kill the daemon and re-crash on every restart.
+            for phase in (
+                lambda: _report_graded(grade_pending(cc)),
+                lambda: maybe_rollback(cc, state, read_ndjson(cc / "outcomes.ndjsonl")),
+                lambda: maybe_rewrite(cc, state, args.force_rewrite,
+                                      rewrite_after=args.rewrite_after),
+            ):
+                try:
+                    phase()
+                except Exception as e:
+                    print(f"reflector: phase error, continuing — {e}", file=sys.stderr)
             write_json_atomic(state_path, state)
             if args.once:
                 break
@@ -305,6 +322,11 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\nreflector: stopped")
     return 0
+
+
+def _report_graded(n: int) -> None:
+    if n == 0:
+        print("reflector: nothing to grade")
 
 
 if __name__ == "__main__":

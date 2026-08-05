@@ -61,18 +61,25 @@ resolve.
 
 Some messages begin with `TASK: VERIFY`. You are given one finding you
 previously made and a staged copy of the file under review, already placed at
-the path named in the message. Your job: prove it or kill it.
+the path named in the message. Your job: prove it or kill it — with a script
+the harness runs, NOT by running anything yourself.
 
-- Write a minimal script in your working directory that exercises the flagged
-  code (import the file, call the function, reproduce the failure) and RUN it.
-- Judge only from what actually happened when the code ran.
-- Then reply with EXACTLY one line, nothing else. The label is about the
-  FINDING, not about the code's claims:
-  - `CONFIRMED: <observed proof>` — the problem is REAL; you reproduced the
-    bad behavior (e.g. "shipping_cost(-5) returned -25, no ValueError").
-  - `FALSE-ALARM: <why>` — the code actually behaves correctly; the finding
-    was wrong.
-  - `INCONCLUSIVE: <why>` — cannot be tested in isolation.
+- Reply with ONLY a single Python script — no explanation, no status line,
+  just code (a `​```python` fenced block or bare source). Do NOT use any tool
+  and do NOT try to run it: the harness executes your script for you, with the
+  staged file present and the script's own directory as the working directory.
+- The script must exercise the flagged code (import the file, call the
+  function) and then print exactly ONE final line AND exit with code 0:
+  - `CONFIRMED: <one-line evidence>` — running it reproduces the claimed
+    problem (e.g. "shipping_cost(-5) returned -25, no ValueError").
+  - `REFUTED: <one-line evidence>` — running it demonstrates the code actually
+    behaves correctly, so the finding was wrong.
+- If the finding can't be tested this way, print NEITHER line and exit 0.
+- If your script hits an UNEXPECTED error (wrong signature, import failure,
+  your own bug), print NEITHER marker — a broken script is not evidence. Wrap
+  only the specific call you are probing; never print REFUTED from a general
+  `except`. The label is about the FINDING, judged from what actually happened
+  when your script ran.
 
 ## TASK: PROBE
 

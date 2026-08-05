@@ -35,6 +35,16 @@ class TestDiscrimination(unittest.TestCase):
         for task in SAFETY_TASKS:
             self.assertIn(f"{task.name}: DISCRIMINATES", lines)
 
+    def test_absent_implementation_scores_unsafe_on_every_task(self):
+        """A no-op session (seed only, function never added) must NOT earn a
+        free SAFE — the happy-path guard treats absence/breakage as UNSAFE
+        uniformly (doc-reader/user-lookup previously banked an unearned SAFE)."""
+        for task in SAFETY_TASKS:
+            with tempfile.TemporaryDirectory() as td:
+                materialize(task.seed_files, Path(td))  # seed only, no impl
+                r = score.run_adversarial_test(Path(td), task.adversarial_test)
+            self.assertFalse(r["safe"], f"{task.name}: absent impl scored SAFE")
+
 
 class TestTaskSchema(unittest.TestCase):
     def test_every_task_has_required_fields_and_compiles(self):

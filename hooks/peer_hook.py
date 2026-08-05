@@ -20,11 +20,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import load_config
-from core.store import read_tail_rows as read_suggestions
-from critic.receipt import parse_test_integrity
-from hooks import ledger as ledger_mod
-from hooks.logic import decide, gate_pending, resolve_gate_seconds
+try:
+    from core.config import load_config
+    from core.store import read_tail_rows as read_suggestions
+    from critic.receipt import parse_test_integrity
+    from hooks import ledger as ledger_mod
+    from hooks.logic import decide, gate_pending, resolve_gate_seconds
+except BaseException:
+    # Fail open at IMPORT time, not just inside main(): this hook runs from the
+    # live working tree of a repo whose whole premise is an AI agent editing
+    # these very files (critic.receipt pulls in critic.screen/deps). A
+    # transient syntax/import error there must exit 0 silently — a traceback on
+    # every PostToolUse/Stop would break the developer's session, the one thing
+    # this hook must never do. BaseException so a KeyboardInterrupt mid-import
+    # also exits cleanly.
+    sys.exit(0)
 
 
 @contextlib.contextmanager
@@ -263,8 +273,12 @@ def main() -> int:
         out = run(sys.stdin.read())
         if out:
             print(out)
-    except Exception:
-        pass  # fail open, always
+    except BaseException:
+        # BaseException, not Exception: the done-gate deliberately makes this
+        # hook long-running (a poll loop up to GATE_SECONDS_MAX=120s), so a
+        # Ctrl-C lands here as KeyboardInterrupt — it must still exit 0
+        # silently, same as any other error. Fail open, always.
+        pass
     return 0
 
 

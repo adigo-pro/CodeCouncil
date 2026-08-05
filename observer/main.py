@@ -108,10 +108,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         while True:
             t0 = time.monotonic()
-            events = heartbeat(repo, project_dir, state, log)
-            state.save(state_path)
-            if events:
-                render_beat(state.beat, now_iso(), events)
+            try:
+                events = heartbeat(repo, project_dir, state, log)
+                state.save(state_path)
+                if events:
+                    render_beat(state.beat, now_iso(), events)
+            except Exception as e:
+                # "Daemons never die on missing inputs — they wait." A fallible
+                # beat (a disk-full write, a git/transcript race that slips the
+                # per-file guards) must log and retry next tick, not exit the
+                # process — the launcher does not restart a dead loop.
+                print(f"observer: beat error, retrying — {e}", file=sys.stderr)
             if args.once:
                 break
             elapsed = time.monotonic() - t0

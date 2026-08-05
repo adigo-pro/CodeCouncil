@@ -87,20 +87,45 @@ class TestRedact(unittest.TestCase):
                 self.assertIn(name, out)
                 self.assertIn("«REDACTED:assignment»", out)
 
-    def test_assignment_incidental_substring_name_is_a_known_tradeoff(self):
-        # "monkey" merely CONTAINS "key" -- broadening the keyword match to
-        # catch compound names like SECRET_KEY means a name like this also
-        # triggers, since there is no cheap way to tell "key as a real
-        # credential-name component" from "key as a substring of an English
-        # word" without name-boundary heuristics that would themselves risk
-        # missing real compound names. This is accepted as a tolerable false
-        # positive, guarded by the 16+ char value-length requirement: a
-        # `monkey = <16+ char opaque-looking value>` assignment is itself an
-        # unusual enough shape that flagging it costs little.
+    def test_assignment_incidental_substring_name_not_redacted(self):
+        # The keyword must be a DELIMITED token in the name, not a substring
+        # of a longer word: "tokenizer" (token+izer), "keywords" (key+words),
+        # "monkey"/"turkey" (…+key) merely embed a keyword and are ordinary
+        # identifiers. Redacting them (the old substring behavior) manufactured
+        # false secret-in-code findings, since the critic is taught the marker
+        # IS a confirmed secret. The 16+ char value guard is not enough on its
+        # own -- ordinary long values (model names, slugs) trip it.
+        value = "abcdefghijklmnopqrstuvwxyz012345"
+        for name in ("tokenizer", "keywords", "monkey", "turkey_city", "keyword_count"):
+            with self.subTest(name=name):
+                text = f'{name} = "{value}"'
+                self.assertEqual(redact.redact(text), text)
+
+    def test_assignment_camelcase_name_redacted(self):
+        # camelCase credential names (apiKey, myToken) are real and common;
+        # the keyword there follows a lowercase letter, so it's matched by the
+        # camelCase arm of the boundary rule rather than the delimiter arm.
         secret = "abcdefghijklmnopqrstuvwxyz012345"
-        out = redact.redact(f'monkey = "{secret}"')
-        self.assertNotIn(secret, out)
-        self.assertIn("«REDACTED:assignment»", out)
+        for name in ("apiKey", "myToken", "dbPassword"):
+            with self.subTest(name=name):
+                out = redact.redact(f'{name} = "{secret}"')
+                self.assertNotIn(secret, out)
+                self.assertIn("«REDACTED:assignment»", out)
+
+    def test_pem_private_key_inside_diff_is_redacted(self):
+        # In a `git diff` every line carries a +/-/space marker (the primary
+        # capture path). The END line then reads `\n+-----END …`; the body
+        # must still be redacted, or a committed key leaks unredacted into
+        # observations/prompts/receipts.
+        body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" * 3
+        diff = (
+            "+-----BEGIN PRIVATE KEY-----\n"
+            f"+{body}\n"
+            "+-----END PRIVATE KEY-----"
+        )
+        out = redact.redact(diff)
+        self.assertNotIn(body, out)
+        self.assertIn("«REDACTED:private-key»", out)
 
     def test_assignment_special_char_tail_fully_redacted(self):
         # A special character right after the qualifying 16+ char charset

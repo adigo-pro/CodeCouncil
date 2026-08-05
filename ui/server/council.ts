@@ -43,17 +43,39 @@ function readNdjsonTail(file: string, maxBytes = 1_000_000): Record<string, any>
     const length = size - start;
     const buf = Buffer.allocUnsafe(length);
     fd = fs.openSync(file, "r");
-    fs.readSync(fd, buf, 0, length, start);
-    let text = buf.toString("utf-8");
-    if (start > 0) text = text.slice(text.indexOf("\n") + 1); // drop partial line
+    // honor the actual bytes read: if the file shrank between stat and read
+    // (a state reset / truncation), the tail of an allocUnsafe buffer would
+    // otherwise be uninitialized process memory fed to JSON.parse.
+    const got = fs.readSync(fd, buf, 0, length, start);
+    const raw = buf.subarray(0, got).toString("utf-8");
+    // byte offset of the first RETAINED line in the file — the anchor for each
+    // event's globally-stable identity (see _seq below).
+    let base = start;
+    let text = raw;
+    if (start > 0) {
+      const nl = raw.indexOf("\n");
+      const dropped = raw.slice(0, nl + 1); // the partial line the offset landed in
+      text = raw.slice(nl + 1);
+      base = start + Buffer.byteLength(dropped, "utf-8");
+    }
     const rows: Record<string, any>[] = [];
+    let cursor = base;
     for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        rows.push(JSON.parse(line));
-      } catch {
-        /* mid-write partial line — skip */
+      const lineBytes = Buffer.byteLength(line, "utf-8");
+      if (line.trim()) {
+        try {
+          const row = JSON.parse(line);
+          // _seq = the line's absolute byte offset in the append-only file. It
+          // never changes as the file grows, so it is a STABLE per-event id
+          // (unlike a window-relative index, which shifts once the file
+          // exceeds the tail window). The client keys React rows off it.
+          row._seq = cursor;
+          rows.push(row);
+        } catch {
+          /* mid-write partial line — skip */
+        }
       }
+      cursor += lineBytes + 1; // +1 for the "\n" removed by split
     }
     return rows;
   } catch {
@@ -284,11 +306,12 @@ export function aggregate(repo: string) {
   }));
   const malformedRecent = recentSuggestions.filter((s) => !!s.malformed).length;
 
-  // seq is the event's index in the append-only file — a stable identity the
-  // client uses to reveal newly-arrived events one at a time.
-  const actBase = Math.max(0, observations.length - 120);
-  const activity = observations.slice(-120).map((e, k) => ({
-    seq: actBase + k,
+  // seq is the event's absolute BYTE OFFSET in the append-only file (attached
+  // by readNdjsonTail) — a stable identity that does not shift as the file
+  // grows past the tail window. The client keys React rows off it, so it must
+  // be the same value for the same event across polls.
+  const activity = observations.slice(-120).map((e) => ({
+    seq: e._seq,
     ts: e.ts,
     beat: e.beat,
     ...summarizeEvent(e),

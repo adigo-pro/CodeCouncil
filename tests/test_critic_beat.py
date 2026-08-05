@@ -57,6 +57,67 @@ class TestHeartbeatWithStub(unittest.TestCase):
         self.assertFalse(self.suggestions.exists())
         self.assertEqual(state["beat"], 1)
 
+    def _write_review_request(self):
+        (self.cc / "review-requests.ndjsonl").write_text(
+            json.dumps({"ts": "t", "event": "done"}) + "\n")
+
+    def test_done_review_request_retained_when_worker_busy(self):
+        # run_special declining (worker busy at Stop) must NOT consume the
+        # request — otherwise a one-shot session's receipt is silently lost.
+        self._set_stub("PASS")
+        self._write_obs([{"ts": "t", "beat": 1, "type": "diff", "session": None,
+                          "payload": {"diff": "+code", "stat": "", "untracked": []}}])
+        self._write_review_request()
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler()
+        with mock.patch.object(scheduler, "run_special", return_value=False):
+            self._beat(state, scheduler)
+        self.assertEqual(state.get("review_offset", 0), 0)  # request retained
+
+    def test_done_review_request_consumed_on_dispatch(self):
+        self._set_stub("PASS")
+        self._write_obs([{"ts": "t", "beat": 1, "type": "diff", "session": None,
+                          "payload": {"diff": "+code", "stat": "", "untracked": []}}])
+        self._write_review_request()
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler()
+        with mock.patch.object(scheduler, "run_special", return_value=True):
+            self._beat(state, scheduler)
+        self.assertGreater(state["review_offset"], 0)  # consumed on dispatch
+
+    def test_transport_failure_requeues_batch_instead_of_committing_error(self):
+        # A model transport failure (CRITIC_CMD missing) must REQUEUE the batch
+        # (retry on a later beat) rather than write an ERROR row and commit the
+        # offset — which permanently skipped judging code from a brief outage.
+        os.environ["CRITIC_CMD"] = "/nonexistent-critic-cmd"
+        self._write_obs([
+            {"ts": "t", "beat": 1, "type": "diff", "session": None,
+             "payload": {"diff": "+code", "stat": "", "untracked": []}},
+        ])
+        state = load_state(self.cc / "nope.json")
+        committed = []
+        scheduler = TurnScheduler(on_committed=lambda off: committed.append(off))
+        self._beat(state, scheduler)
+        self.assertFalse(self.suggestions.exists())   # no ERROR row written
+        self.assertEqual(committed, [])               # offset span not committed
+        self.assertEqual(len(scheduler.pending), 1)   # batch requeued for retry
+
+    def test_non_dict_and_garbage_observation_lines_are_skipped_not_fatal(self):
+        # "skip unparseable lines rather than crash" also covers a valid-JSON
+        # non-dict line (a bare scalar / list) and a typeless dict — e["type"]
+        # would otherwise TypeError/KeyError and crash-loop the daemon.
+        self._set_stub("PASS")
+        with self.obs.open("a") as f:
+            f.write("42\n")                 # valid JSON, not a dict
+            f.write('["a","b"]\n')          # valid JSON list
+            f.write('{"no":"type"}\n')      # dict without "type"
+            f.write("not json at all\n")    # unparseable
+            f.write(json.dumps({"ts": "t", "beat": 1, "type": "diff", "session": None,
+                                "payload": {"diff": "+x", "stat": "", "untracked": []}}) + "\n")
+        state = load_state(self.cc / "nope.json")
+        scheduler = TurnScheduler()
+        self.assertEqual(self._beat(state, scheduler), "dispatched")  # did not crash
+
     def test_reasoning_only_is_gated_no_call(self):
         os.environ["CRITIC_CMD"] = "/nonexistent"  # would explode if called
         self._write_obs([
@@ -709,6 +770,22 @@ class TestCommittedOffset(unittest.TestCase):
         loaded = load_state(state_path)
         self.assertEqual(loaded["offset"], 500)
         self.assertEqual(loaded["committed_offset"], 500)
+
+    def test_non_dict_state_rebuilds_instead_of_crashing(self):
+        # Valid JSON that isn't a dict must rebuild, not TypeError on
+        # state["committed_offset"] = … and crash-loop on every restart.
+        state_path = self.cc / "critic-state.json"
+        state_path.write_text("[1, 2, 3]", encoding="utf-8")
+        loaded = load_state(state_path)
+        self.assertEqual(loaded, {"offset": 0, "beat": 0, "committed_offset": 0})
+
+    def test_dict_state_missing_required_keys_is_backfilled(self):
+        state_path = self.cc / "critic-state.json"
+        state_path.write_text(json.dumps({"latest_diff": None}), encoding="utf-8")
+        loaded = load_state(state_path)
+        self.assertEqual(loaded["offset"], 0)
+        self.assertEqual(loaded["beat"], 0)
+        self.assertEqual(loaded["committed_offset"], 0)
 
     def test_tests_run_at_is_in_persisted_state_keys_and_round_trips(self):
         """Task 9: the sticky tests-run fact must survive a daemon restart —

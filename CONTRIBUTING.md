@@ -75,9 +75,9 @@ They exist because each one was earned by a real failure — see
 No venv, no pip install — the loops are stdlib-only Python 3.10+.
 
 ```sh
-python3 -m unittest discover -s tests     # everything (~10s)
+python3 -m unittest discover -s tests     # everything
 python3 -m unittest tests.test_critic     # one slice
-pipx run ruff check .                     # same lint CI runs
+pipx run --spec 'ruff==0.15.22' ruff check .   # the exact lint CI runs (pinned)
 ```
 
 Model calls are stubbed in tests via `CRITIC_CMD` — an executable invoked
@@ -105,7 +105,7 @@ Where things live: `observer/` tails transcripts + git into
 `critic/verify.py` runs repros in a staging dir); `hooks/` delivers
 (`logic.py` is pure — test it without I/O); `reflector/` grades and
 rewrites `heuristics.md`; `core/` is the only shared code. Tests mirror
-this: one `tests/test_<thing>.py` per concern, real session transcript in
+this: one `tests/test_<thing>.py` per concern, a synthetic session transcript in
 `tests/fixtures/session.jsonl`.
 
 ## Architecture map

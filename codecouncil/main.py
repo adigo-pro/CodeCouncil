@@ -96,7 +96,12 @@ def resolve_settings(args, console_set: frozenset | set = frozenset()
     persisted it to config.json, so the launch-time flag and any exported env
     var must stop outranking it — that knob resolves from the config file only."""
     from core import config as cfg
-    env = dict(os.environ)
+    from critic import agent
+    # local_env(), not os.environ: the critic resolves from ~/.codecouncil/env
+    # too (agent.local_env), so the launcher must consult the same layers or a
+    # model/prober set only in that file resolves differently here than in the
+    # critic it launches.
+    env = agent.local_env()
 
     def one(knob: str, flag: str | None, env_name: str, key: str) -> str | None:
         if knob in console_set:
@@ -141,6 +146,13 @@ def main(argv: list[str] | None = None) -> int:
         env = os.environ.copy()
         if m:
             env["COUNCIL_MODEL"] = m
+        if not p:
+            # /prober off must win over an exported COUNCIL_PROBER or one in
+            # ~/.codecouncil/env: set it empty so the critic's
+            # local_env().setdefault can't re-add the file value (resolve_prober
+            # treats "" as off). When p is set it goes on the --prober flag
+            # below, which outranks env anyway.
+            env["COUNCIL_PROBER"] = ""
         extra = {"observer": ["--wait"],
                  "critic": ["--prober", p] if p else [],
                  "reflector": []}[name]
@@ -190,12 +202,14 @@ def main(argv: list[str] | None = None) -> int:
         _resolve_model), and the console should show that truthfully."""
         from core import config as cfg
         env_file = agent.local_env()   # includes ~/.codecouncil/env keys
-        env = dict(os.environ)
 
         def one(knob, flag, env_name, key):
             if knob in console_set:
                 return cfg.resolve_with_source(None, env_name, key, {})
-            return cfg.resolve_with_source(flag, env_name, key, env)
+            # resolve against local_env (incl. ~/.codecouncil/env), matching the
+            # critic — else a COUNCIL_MODEL in that file is missed here and the
+            # display wrongly falls through to the auto:<KEY> default.
+            return cfg.resolve_with_source(flag, env_name, key, env_file)
 
         m, msrc = one("model", args.model, "COUNCIL_MODEL", "model")
         if m is None:

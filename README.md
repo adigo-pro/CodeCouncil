@@ -250,7 +250,7 @@ here, and the critic reviews its builders):
 | Catch-to-delivery into the agent's context | **~2 minutes** |
 | Caught in its own redaction code | A real secret-leak bug **two independent reviewers had approved** |
 | Model bake-off | 12 candidates × 7 frozen cases, latency + format discipline measured — [docs/benchmarks/](docs/benchmarks/) |
-| Tests | **647** (`python3 -m unittest discover -s tests`) · CI on 3.10/3.12 + UI build + lint + installer smoke test + bench-selftest |
+| Tests | **750+** (`python3 -m unittest discover -s tests`) · CI on 3.10/3.12 + UI build + lint + installer smoke test + bench-selftest |
 
 The bench-selftest means the A/B harness's safety scorers prove they
 discriminate good from bad — zero API spend — before anyone trusts a live

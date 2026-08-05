@@ -135,8 +135,16 @@ def _pending(suggestions: list[dict], ledger: dict, channel: str,
 
 def _describe(row: dict) -> str:
     s = row["suggestion"]
-    loc = f"{s['file']}:{s['line']}" if s.get("line") else s["file"]
-    text = f"[{s['severity'].upper()}] {loc} — {s['issue']}"
+    # .get() with fallbacks, not hard indexing: a malformed row that slipped
+    # past _pending (missing file/issue — a hand-edited or foreign-writer row)
+    # must not KeyError here. peer_hook's outer fail-open would swallow it, but
+    # that silently suppresses EVERY co-pending finding in the same event for
+    # the row's whole TTL window — _pending already tolerates bad data, so this
+    # sink must too.
+    file = s.get("file", "?")
+    sev = str(s.get("severity", "medium")).upper()
+    loc = f"{file}:{s['line']}" if s.get("line") else file
+    text = f"[{sev}] {loc} — {s.get('issue', '')}"
     if s.get("rationale"):
         text += f" (why: {s['rationale']})"
     v = row.get("verification") or {}

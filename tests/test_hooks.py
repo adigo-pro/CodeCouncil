@@ -256,33 +256,59 @@ class TestPeerHookLocking(unittest.TestCase):
 
 
 class TestLedgerPruning(unittest.TestCase):
-    """delivered.json grows one key per suggestion/receipt/gated-session and
-    is never otherwise pruned -- save() must drop stale leaf entries so the
-    file stays bounded over a long session, without disturbing fresh
-    entries or the reserved-key nested shape."""
+    """delivered.json grows one key per suggestion/receipt/gated-session.
+    save() bounds it: suggestion ids by TTL, reserved keys by count (never by
+    age — their marks are "once ever" facts)."""
 
-    def test_old_entry_pruned_fresh_entry_kept_reserved_structure_intact(self):
+    def test_old_suggestion_pruned_fresh_kept(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "delivered.json"
             old_ts = NOW - ledger_mod.LEDGER_TTL_SECONDS - 100
             ledger = {
                 "old-suggestion": {"context": old_ts},
                 "fresh-suggestion": {"context": NOW, "block": NOW},
-                ledger_mod.RECEIPTS_KEY: {"old.md": old_ts, "new.md": NOW},
-                ledger_mod.GATE_KEY: {"sess-old": old_ts},
             }
             ledger_mod.save(path, ledger)
             reloaded = ledger_mod.load(path)
-
             self.assertNotIn("old-suggestion", reloaded)
-            self.assertIn("fresh-suggestion", reloaded)
             self.assertEqual(reloaded["fresh-suggestion"], {"context": NOW, "block": NOW})
-            # reserved-key structure survives: still a nested dict, stale
-            # leaf dropped, fresh leaf kept
-            self.assertEqual(reloaded[ledger_mod.RECEIPTS_KEY], {"new.md": NOW})
-            # the gate entry's only leaf was stale -> the whole key is gone,
-            # not left behind as an empty shell
-            self.assertNotIn(ledger_mod.GATE_KEY, reloaded)
+
+    def test_reserved_key_marks_never_expire_by_age(self):
+        # An announced receipt / weakened-test block / spent gate must survive
+        # far past the suggestion TTL, or receipts re-announce and weakened
+        # receipts re-block Stop every window.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "delivered.json"
+            ancient = NOW - ledger_mod.LEDGER_TTL_SECONDS - 10_000
+            ledger = {
+                ledger_mod.RECEIPTS_KEY: {"old.md": ancient},
+                ledger_mod.TEST_INTEGRITY_KEY: {"weak.md": ancient},
+                ledger_mod.GATE_KEY: {"sess-old": ancient},
+            }
+            ledger_mod.save(path, ledger)
+            reloaded = ledger_mod.load(path)
+            self.assertEqual(reloaded[ledger_mod.RECEIPTS_KEY], {"old.md": ancient})
+            self.assertEqual(reloaded[ledger_mod.TEST_INTEGRITY_KEY], {"weak.md": ancient})
+            self.assertEqual(reloaded[ledger_mod.GATE_KEY], {"sess-old": ancient})
+
+    def test_reserved_key_bounded_by_count_newest_kept(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "delivered.json"
+            # 5 more than the cap, timestamps increasing with index
+            leaves = {f"r{i}.md": NOW - (300 - i) for i in range(ledger_mod.RESERVED_KEEP + 5)}
+            ledger_mod.save(path, {ledger_mod.RECEIPTS_KEY: leaves})
+            reloaded = ledger_mod.load(path)
+            kept = reloaded[ledger_mod.RECEIPTS_KEY]
+            self.assertEqual(len(kept), ledger_mod.RESERVED_KEEP)
+            # the 5 oldest (lowest index) were dropped, newest kept
+            self.assertNotIn("r0.md", kept)
+            self.assertIn(f"r{ledger_mod.RESERVED_KEEP + 4}.md", kept)
+
+    def test_suggestion_retention_outlives_reflector_grading_horizon(self):
+        # A delivered mark must persist past the reflector's undelivered
+        # horizon + poll slack, or a delivered finding grades "undelivered".
+        from reflector.judge import UNDELIVERED_AFTER_S
+        self.assertGreater(ledger_mod.LEDGER_TTL_SECONDS, UNDELIVERED_AFTER_S + 600)
 
     def test_malformed_non_dict_entry_dropped_not_raised(self):
         with tempfile.TemporaryDirectory() as td:
@@ -309,6 +335,18 @@ class TestDecideContext(unittest.TestCase):
         ledger = {}
         self.assertIsNotNone(decide(post_tool_use(), rows, ledger, NOW))
         self.assertIsNone(decide(post_tool_use(), rows, ledger, NOW))
+
+    def test_row_missing_file_issue_does_not_suppress_co_pending_delivery(self):
+        # A malformed row (passes _pending — has verdict/id/severity — but
+        # lacks file/issue) must not KeyError in _describe: fail-open would
+        # then swallow the whole event and suppress the good finding too.
+        bad = {"id": "bad1", "ts": _iso(NOW), "beat": 1, "verdict": "SUGGESTION",
+               "session": None, "suggestion": {"severity": "high"}}
+        good = suggestion("good1", "high")
+        out = decide(post_tool_use(), [bad, good], {}, NOW)
+        self.assertIsNotNone(out)
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("bug here", ctx)  # the good finding still got delivered
 
     def test_ttl_expired_never_delivered(self):
         rows = [suggestion(ts=NOW - TTL_SECONDS - 5)]

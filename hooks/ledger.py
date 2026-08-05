@@ -26,13 +26,26 @@ RECEIPTS_KEY = "receipts"
 TEST_INTEGRITY_KEY = "test_integrity"
 GATE_KEY = "gate"
 
-# delivered.json gets one key per suggestion/receipt/gated-session and is
-# never otherwise pruned, so a long session's ledger grows unbounded. This
-# mirrors hooks.logic.TTL_SECONDS (the delivery freshness window a stale
-# suggestion is judged against) but is a separate local constant rather than
-# an import: hooks.logic already imports hooks.ledger ("from . import ledger
-# as ledger_mod"), so importing logic.TTL_SECONDS back here would cycle.
-LEDGER_TTL_SECONDS = 600
+# Suggestion-id delivery marks are TTL-pruned so the file stays bounded. This
+# TTL is delivery-RECORD retention, NOT delivery freshness: freshness (don't
+# deliver a stale finding) is governed by hooks.logic._age_ok on the row's own
+# ts. The record must outlive the reflector's grading horizon
+# (reflector.judge.UNDELIVERED_AFTER_S = 900s) plus its poll interval, or a
+# genuinely-delivered finding whose mark was pruned first grades "undelivered"
+# and drops out of the acceptance metric. 3600s clears that with margin.
+# (A separate local constant, not an import: hooks.logic imports hooks.ledger,
+# so importing back here would cycle.)
+LEDGER_TTL_SECONDS = 3600
+
+# The three reserved keys encode "once ever" facts (this receipt was announced;
+# this weakened-test receipt already blocked Stop; this session spent its one
+# done-gate wait). TTL-pruning them was a real bug: a mark dropped after
+# LEDGER_TTL_SECONDS let receipts re-announce, weakened receipts re-block Stop,
+# and the gate re-wait every window. So they are NEVER TTL-pruned — bounded by
+# COUNT instead (newest kept), which keeps the file bounded without expiring a
+# once-ever fact. Generous vs the on-disk receipt cap (RECEIPTS_KEEP=50).
+RESERVED_KEYS = (RECEIPTS_KEY, TEST_INTEGRITY_KEY, GATE_KEY)
+RESERVED_KEEP = 200
 
 
 def load(path: Path) -> dict:
@@ -44,23 +57,25 @@ def load(path: Path) -> dict:
 
 
 def _pruned(ledger: dict, now: float, ttl: float = LEDGER_TTL_SECONDS) -> dict:
-    """Drop stale leaf entries before a save. Every top-level key in this
-    ledger -- a suggestion id (`{"context": ts, "block": ts}`) or one of the
-    three reserved keys RECEIPTS_KEY/TEST_INTEGRITY_KEY/GATE_KEY (each
-    `{name-or-session: ts}`) -- shares the same {leaf: epoch} nested shape,
-    so one pass prunes both without special-casing which keys are reserved.
-    A top-level key left with no leaves after pruning is dropped entirely,
-    which is what actually keeps the file bounded rather than accumulating
-    empty shells forever. Malformed (non-dict) entries are dropped rather
-    than raising."""
+    """Bound delivered.json before a save. Suggestion-id keys
+    (`{"context": ts, "block": ts}`) are pruned by TTL; the three reserved keys
+    (each `{name-or-session: ts}`) are pruned by COUNT — newest RESERVED_KEEP
+    leaves kept — because their marks must not expire (see RESERVED_KEYS). A
+    top-level key left with no leaves is dropped so the file doesn't accumulate
+    empty shells. Malformed (non-dict) entries are dropped rather than raising."""
     pruned: dict = {}
     for key, leaves in ledger.items():
         if not isinstance(leaves, dict):
             continue
-        kept = {
-            leaf: ts for leaf, ts in leaves.items()
-            if isinstance(ts, (int, float)) and now - ts <= ttl
-        }
+        valid = {leaf: ts for leaf, ts in leaves.items()
+                 if isinstance(ts, (int, float))}
+        if key in RESERVED_KEYS:
+            if len(valid) > RESERVED_KEEP:
+                newest = sorted(valid.items(), key=lambda kv: kv[1], reverse=True)
+                valid = dict(newest[:RESERVED_KEEP])
+            kept = valid
+        else:
+            kept = {leaf: ts for leaf, ts in valid.items() if now - ts <= ttl}
         if kept:
             pruned[key] = kept
     return pruned

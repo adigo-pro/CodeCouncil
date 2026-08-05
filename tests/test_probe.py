@@ -533,6 +533,33 @@ class TestRunScriptEnvScrub(unittest.TestCase):
         self.assertIn(f"EXE: {sys.executable}", res.stdout)
 
 
+class TestExecuteProbeClassification(unittest.TestCase):
+    """_execute_probe mirrors verify._classify: no verdict from a crashed or
+    self-contradictory probe — this is the finding-CREATING path."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.staging = Path(self.td.name)
+        self.addCleanup(self.td.cleanup)
+
+    def test_diverges_then_crash_is_error_not_diverges(self):
+        # prints DIVERGES then raises -> nonzero exit -> proves nothing.
+        src = "print('DIVERGES: looks bad')\nraise SystemExit(3)\n"
+        self.assertEqual(probe._execute_probe(self.staging, src)["status"], "error")
+
+    def test_both_markers_is_error(self):
+        src = "print('DIVERGES: a')\nprint('CONSISTENT: b')\n"
+        self.assertEqual(probe._execute_probe(self.staging, src)["status"], "error")
+
+    def test_clean_diverges_is_diverges(self):
+        src = "print('DIVERGES: shipping_cost(-5) returned -25')\n"
+        self.assertEqual(probe._execute_probe(self.staging, src)["status"], "diverges")
+
+    def test_clean_consistent_is_consistent(self):
+        src = "print('CONSISTENT: behaves as documented')\n"
+        self.assertEqual(probe._execute_probe(self.staging, src)["status"], "consistent")
+
+
 class TestResolveProbes(unittest.TestCase):
     def test_flag_true_enables(self):
         from critic.main import resolve_probes

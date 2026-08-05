@@ -14,6 +14,14 @@ def diff(path: str, added: list[str], removed: list[str] | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def deletion_diff(path: str, removed: list[str]) -> str:
+    """A whole-file deletion: `+++ /dev/null`, removed lines only."""
+    lines = [f"diff --git a/{path} b/{path}", "deleted file mode 100644",
+             f"--- a/{path}", "+++ /dev/null", f"@@ -1,{len(removed)} +0,0 @@"]
+    lines += [f"-{ln}" for ln in removed]
+    return "\n".join(lines) + "\n"
+
+
 class TestSecurityPatterns(unittest.TestCase):
     def test_fstring_sql_flagged(self):
         d = diff("app.py", ['cursor.execute(f"SELECT * FROM users WHERE id={uid}")'])
@@ -41,6 +49,19 @@ class TestSecurityPatterns(unittest.TestCase):
                              "safe = ast.literal_eval('[1]')"])
         kinds = [s["kind"] for s in screen.scan_patterns(d)]
         self.assertEqual(kinds, ["eval-injection"])
+
+    def test_safe_loader_with_nested_call_arg_not_flagged(self):
+        # yaml.load(f.read(), Loader=yaml.SafeLoader): the SafeLoader exemption
+        # must see past the nested `f.read()` call's `)`.
+        d = diff("cfg.py", ["data = yaml.load(f.read(), Loader=yaml.SafeLoader)"])
+        self.assertEqual(screen.scan_patterns(d), [])
+
+    def test_parameterized_query_with_f_before_quote_not_flagged(self):
+        # A literal `f` right before a closing quote inside a PARAMETERIZED
+        # query ("... s='off' ...") must not read as an f-string prefix.
+        d = diff("app.py",
+                 ['cur.execute("UPDATE t SET status=\'off\' WHERE id=?", (i,))'])
+        self.assertEqual(screen.scan_patterns(d), [])
 
     def test_one_line_can_carry_two_classes(self):
         # council catch: a break after the first match hid the second class
@@ -70,6 +91,34 @@ class TestTestWeakening(unittest.TestCase):
                  ["assert result == expected", "assert other == 7"],
                  removed=["assert x == 42", "assert y == 7"])
         self.assertEqual(screen.scan_test_weakening(d), [])
+
+    def test_removed_async_test_function_flagged(self):
+        # async def test_… (pytest-asyncio / IsolatedAsyncioTestCase) must
+        # count as a removed test, same as a sync def.
+        d = diff("tests/test_app.py", ["pass"],
+                 removed=["async def test_edge_case(self):"])
+        kinds = [s["kind"] for s in screen.scan_test_weakening(d)]
+        self.assertIn("test-removed", kinds)
+
+    def test_whole_test_file_deletion_flagged(self):
+        # `+++ /dev/null` deletion: the removed test lines must attribute to the
+        # deleted path (from `--- a/`), not vanish or hit the previous file.
+        d = deletion_diff("tests/test_app.py",
+                          ["def test_edge_case(self):", "    assert foo() == 1"])
+        signals = screen.scan_test_weakening(d)
+        kinds = [s["kind"] for s in signals]
+        self.assertIn("test-removed", kinds)
+        self.assertTrue(all(s["file"] == "tests/test_app.py" for s in signals))
+
+    def test_deleted_test_file_does_not_contaminate_previous_file(self):
+        # Two files in one diff: a non-test edit, then a deleted test file. The
+        # deleted file's removed lines must not land under the first file.
+        first = ("diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n"
+                 "@@ -1,2 +1,2 @@\n-old = 1\n+new = 1\n")
+        second = deletion_diff("tests/test_app.py", ["def test_x(self):"])
+        removed = screen.removed_lines_by_file(first + second)
+        self.assertNotIn("def test_x(self):", removed.get("app.py", []))
+        self.assertIn("def test_x(self):", removed.get("tests/test_app.py", []))
 
     def test_non_test_files_ignored(self):
         d = diff("app.py", [], removed=["assert invariant, 'must hold'"])

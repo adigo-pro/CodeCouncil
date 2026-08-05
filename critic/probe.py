@@ -298,9 +298,20 @@ def _execute_probe(staging: Path, probe_src: str) -> dict:
         return {"status": "error", "note": str(e)[:200]}
     stdout = res.stdout or ""
     diverges = _DIVERGES_RE.findall(stdout)
+    consistent = _CONSISTENT_RE.findall(stdout)
+    # Mirror verify._classify's discipline — this is the finding-CREATING path,
+    # so it must be at least as strict as the finding-verifying one:
+    #  - a nonzero exit means the probe crashed; a crash proves nothing, so no
+    #    verdict (a probe that prints DIVERGES then tracebacks must not mint a
+    #    finding).
+    #  - both markers present is self-contradictory -> error, not diverges.
+    if res.returncode != 0:
+        return {"status": "error",
+                "note": f"probe exited {res.returncode}: {(res.stderr or stdout).strip()[:150]}"}
+    if diverges and consistent:
+        return {"status": "error", "note": "probe printed both DIVERGES and CONSISTENT"}
     if diverges:
         return {"status": "diverges", "note": diverges[-1].strip()}
-    consistent = _CONSISTENT_RE.findall(stdout)
     if consistent:
         return {"status": "consistent", "note": consistent[-1].strip()}
     return {"status": "error", "note": (res.stderr or stdout).strip()[:200]}
